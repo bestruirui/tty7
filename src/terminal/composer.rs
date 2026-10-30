@@ -2967,6 +2967,7 @@ impl TerminalView {
     /// running: an agent that quit inside the wait has handed the pty back to
     /// the shell, and the rest of the message — its Enter above all — would
     /// run there as a command.
+    /// 独立的 ESC 步骤在发送时使用目标终端当前的键盘编码。
     fn pump_composer(&mut self, agent: CLIAgent, cx: &mut Context<Self>) {
         let Some(c) = self.composer.as_mut() else {
             return;
@@ -3000,7 +3001,11 @@ impl TerminalView {
                         }
                         return;
                     }
-                    view.send_to_pty(&step.bytes, cx);
+                    if step.bytes == b"\x1b" {
+                        view.send_to_pty(view.key_flags().escape_bytes(), cx);
+                    } else {
+                        view.send_to_pty(&step.bytes, cx);
+                    }
                 });
                 if sent.is_err() {
                     return;

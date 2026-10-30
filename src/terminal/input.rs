@@ -40,6 +40,18 @@ impl KeyFlags {
         self.disambiguate || self.report_all_keys
     }
 
+    /// 根据终端来源和键盘协议编码无修饰键的 ESC。
+    pub(super) fn escape_bytes(self) -> &'static [u8] {
+        if self.local_conpty {
+            // 显式发送 VK_ESCAPE 的按下和松开事件，避免 ConPTY 将 CSI-u 当作文本。
+            b"\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"
+        } else if self.kitty_active() {
+            b"\x1b[27u"
+        } else {
+            b"\x1b"
+        }
+    }
+
     pub(super) fn legacy_newline_bytes(self) -> &'static [u8] {
         if self.local_conpty {
             // ConPTY decodes bare LF as Ctrl+Enter. Explicit Ctrl+J events
@@ -112,7 +124,11 @@ pub(super) fn meta_chord_bypasses_ime(ks: &gpui::Keystroke, option_as_alt: bool)
     option_as_alt && m.alt && !m.platform && !m.control
 }
 
+/// 将按键编码为目标终端的输入字节，优先保留本地 ConPTY 的 ESC 虚拟键。
 pub(super) fn keystroke_to_bytes(ks: &gpui::Keystroke, flags: KeyFlags) -> Option<Vec<u8>> {
+    if ks.key == "escape" && ks.modifiers == gpui::Modifiers::default() {
+        return Some(flags.escape_bytes().to_vec());
+    }
     if flags.kitty_active() && !ks.modifiers.platform {
         if let Some(bytes) = encode_kitty(ks, flags) {
             return Some(bytes);

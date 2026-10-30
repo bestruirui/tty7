@@ -881,9 +881,12 @@ fn interrupts(agent: Option<crate::core::cli_agent::CLIAgent>, bytes: &[u8]) -> 
     }
 }
 
+/// 识别完整输入中的中断按键，包括 ConPTY 的 ESC 按下与松开事件。
 fn interrupt_key(bytes: &[u8]) -> Option<InterruptKey> {
     match bytes {
-        b"\x1b" => return Some(InterruptKey::Escape),
+        b"\x1b" | b"\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_" => {
+            return Some(InterruptKey::Escape);
+        }
         b"\x03" | b"\x1b[27;5;99~" => return Some(InterruptKey::CtrlC),
         _ => {}
     }
