@@ -78,7 +78,7 @@ fn normalized(s: &str) -> String {
 /// handing it native separators is what makes "open folder" actually open.
 ///
 /// The rule itself lives in [`tty7_core::core::path_spelling`], next to the
-/// prefix rule the SCM caches need, because a path spelled two ways is one
+/// prefix rule the repository caches need, because a path spelled two ways is one
 /// problem and it must not have two answers in two crates. This is the
 /// separators half on its own: a `\\?\` path is already something
 /// `ParseDisplayName` will not take, and re-spelling one here would be a

@@ -33,14 +33,14 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+use gpui::component::ActiveTheme as _;
+use gpui::component::tooltip::Tooltip;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Animation, AnimationExt as _, App, AppContext, Bounds, Context, EntityId, InteractiveElement,
     IntoElement, ParentElement, Pixels, Point, Render, StatefulInteractiveElement, Styled, Window,
     div, point, px, size,
 };
-use gpui_component::ActiveTheme as _;
-use gpui_component::tooltip::Tooltip;
 
 use crate::ui::i18n::{L10nKey, t};
 use crate::ui::pane::{Dir, Pane};

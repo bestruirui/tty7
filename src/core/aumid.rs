@@ -699,7 +699,7 @@ mod tests {
         };
         println!("decision: {decision}");
         println!("toast_app_id: {:?}", super::toast_app_id());
-        crate::terminal::notify_desktop(Some("tty7"), "AUMID toast test");
+        crate::terminal::notify_desktop_for_pane(Some("tty7"), "AUMID toast test", None);
         std::thread::sleep(std::time::Duration::from_secs(3));
     }
 }

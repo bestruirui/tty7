@@ -173,7 +173,11 @@ pub(crate) fn merge_environment(
             .iter_mut()
             .find(|(name, _)| name.eq_ignore_ascii_case(appended))
         {
-            *merged_value = append_missing_entries(merged_value, inherited);
+            *merged_value = if appended.eq_ignore_ascii_case("PSModulePath") {
+                append_missing_entries(inherited, merged_value)
+            } else {
+                append_missing_entries(merged_value, inherited)
+            };
         }
     }
 

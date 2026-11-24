@@ -5,7 +5,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::Duration;
 
 use crate::daemon::control::{
-    ControlEvent, ControlHello, ControlHelloOk, ControlRequest, ControlResponse, EventSink, ReplyOk,
+    ControlEvent, ControlHello, ControlHelloOk, ControlRequest, EventSink, ReplyOk,
 };
 use crate::daemon::router::{RouteAction, RouteChannel, RouteHeader, RouteTarget, negotiate};
 use crate::daemon::transport;
@@ -73,19 +73,6 @@ impl ControlClient {
         self.link.call(req)
     }
 
-    pub fn request_full(&self, req: ControlRequest, blob: &[u8]) -> io::Result<ControlResponse> {
-        self.link.call_full(req, blob)
-    }
-
-    pub fn request_with_deadline(
-        &self,
-        req: ControlRequest,
-        blob: &[u8],
-        deadline: Duration,
-    ) -> io::Result<ControlResponse> {
-        self.link.call_with_deadline(req, blob, deadline)
-    }
-
     pub fn next_event(&self, wait: Duration) -> Option<ControlEvent> {
         let events = self.events.lock().ok()?;
         events.recv_timeout(wait).ok()
@@ -140,7 +127,6 @@ mod tests {
     };
     use crate::daemon::protocol::{read_frame, write_frame};
     use crate::daemon::router::{ROUTE_KIND, RouteAck};
-    use crate::host::{MTime, Meta};
     use std::io::{Read, Write};
 
     const EVENT_WAIT: Duration = Duration::from_secs(10);
@@ -161,19 +147,6 @@ mod tests {
         }
     }
 
-    fn meta() -> Meta {
-        Meta {
-            is_dir: false,
-            is_symlink: false,
-            len: 8,
-            mtime: Some(MTime {
-                secs: 1_769_000_000,
-                nanos: 0,
-            }),
-            readonly: false,
-        }
-    }
-
     fn answer_hello(r: &mut impl Read, w: &mut impl Write) {
         match ControlClientMsg::read(r).expect("read the client hello") {
             ControlClientMsg::Hello(_) => {}
@@ -185,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn requests_events_and_blobs_flow_through_the_wrapper() {
+    fn requests_and_events_flow_through_the_wrapper() {
         let (client_end, server_end) = stream_pair();
         let server = std::thread::spawn(move || {
             let mut r = server_end.try_clone().expect("clone server end");
@@ -209,39 +182,6 @@ mod tests {
                 }
                 other => panic!("expected Ping, got {other:?}"),
             }
-
-            match ControlClientMsg::read(&mut r).expect("read WriteFile") {
-                ControlClientMsg::RequestBlob {
-                    req_id,
-                    req: ControlRequest::WriteFile { .. },
-                    blob,
-                } => {
-                    assert_eq!(blob, b"payload", "the request blob rides the frame");
-                    ControlServerMsg::Response {
-                        req_id,
-                        reply: ControlReply::Ok(ReplyOk::Unit),
-                    }
-                    .encode(&mut w)
-                    .expect("answer WriteFile");
-                }
-                other => panic!("expected a WriteFile blob, got {other:?}"),
-            }
-
-            match ControlClientMsg::read(&mut r).expect("read ReadFile") {
-                ControlClientMsg::Request {
-                    req_id,
-                    req: ControlRequest::ReadFile { .. },
-                } => {
-                    ControlServerMsg::ResponseBlob {
-                        req_id,
-                        reply: ControlReply::Ok(ReplyOk::FileMeta { meta: meta() }),
-                        blob: b"contents".to_vec(),
-                    }
-                    .encode(&mut w)
-                    .expect("answer ReadFile");
-                }
-                other => panic!("expected ReadFile, got {other:?}"),
-            }
         });
 
         let client = ControlClient::over_stream(client_end, &hello()).expect("handshake");
@@ -255,28 +195,6 @@ mod tests {
             client.next_event(EVENT_WAIT),
             Some(ControlEvent::LayoutResync)
         ));
-
-        let wrote = client
-            .request_full(
-                ControlRequest::WriteFile {
-                    path: "/tmp/x".into(),
-                },
-                b"payload",
-            )
-            .expect("write");
-        assert!(matches!(wrote.reply, ReplyOk::Unit));
-
-        let read = client
-            .request_full(
-                ControlRequest::ReadFile {
-                    path: "/tmp/x".into(),
-                    max_bytes: 1024,
-                },
-                &[],
-            )
-            .expect("read");
-        assert!(matches!(read.reply, ReplyOk::FileMeta { .. }));
-        assert_eq!(read.blob, b"contents", "the reply blob comes back intact");
 
         client.close();
         server.join().expect("server thread");

@@ -4,8 +4,7 @@
 #   dist/tty7-<version>-linux-<arch>.tar.gz
 #
 # Fonts and the app icon are embedded via include_bytes!, so the archive is the
-# stripped executable plus a sibling completions/ dir (loaded at runtime — see
-# terminal::signature) and the license/readme. gpui's x11/wayland backends still
+# stripped executable and the license/readme. gpui's x11/wayland backends still
 # dynamic-link the usual system libs at runtime — see the README's Linux
 # build-dependency list — so this is an unsigned build, not a
 # portable AppImage.
@@ -37,8 +36,6 @@ chmod +x "$STAGE/tty7"
 # the archive isn't ~100 MB of debug info.
 strip "$STAGE/tty7-app" || echo "⚠️  strip unavailable — shipping unstripped binary"
 strip "$STAGE/tty7" || echo "⚠️  strip unavailable — shipping unstripped CLI"
-mkdir -p "$STAGE/completions"
-cp assets/completions/*.json "$STAGE/completions/"
 cp LICENSE "$STAGE/LICENSE"
 cp README.md "$STAGE/README.md"
 

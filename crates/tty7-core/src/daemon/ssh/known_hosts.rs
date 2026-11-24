@@ -226,52 +226,7 @@ pub fn fingerprint_sha256(key: &PublicKey) -> String {
     key.fingerprint(HashAlg::Sha256).to_string()
 }
 
-pub use crate::daemon::protocol::{KnownHostEntry, KnownHostId};
-
-pub fn list() -> Vec<KnownHostEntry> {
-    match default_path() {
-        Some(path) => match std::fs::read_to_string(&path) {
-            Ok(contents) => list_in_str(&contents),
-            Err(_) => Vec::new(),
-        },
-        None => Vec::new(),
-    }
-}
-
-pub fn list_in_str(contents: &str) -> Vec<KnownHostEntry> {
-    let mut out = Vec::new();
-    for line in contents.lines() {
-        let Some(entry) = KnownHostsLine::parse(line) else {
-            continue;
-        };
-        let fingerprint_sha256 = entry
-            .key()
-            .map(|k| fingerprint_sha256(&k))
-            .unwrap_or_else(|| "?".to_string());
-        out.push(KnownHostEntry {
-            host: entry.hosts.to_string(),
-            marker: entry.marker.map(|m| match m {
-                Marker::CertAuthority => "@cert-authority".to_string(),
-                Marker::Revoked => "@revoked".to_string(),
-            }),
-            key_type: entry.keytype.to_string(),
-            fingerprint_sha256,
-            id: KnownHostId {
-                host: entry.hosts.to_string(),
-                key_type: entry.keytype.to_string(),
-                keyblob: entry.keyblob.to_string(),
-            },
-        });
-    }
-    out
-}
-
-pub fn delete(id: &KnownHostId) -> std::io::Result<()> {
-    let Some(path) = default_path() else {
-        return Ok(());
-    };
-    delete_in_file(&path, id)
-}
+use crate::daemon::protocol::KnownHostId;
 
 pub fn delete_in_file(path: &Path, id: &KnownHostId) -> std::io::Result<()> {
     let contents = match std::fs::read_to_string(path) {
@@ -929,28 +884,14 @@ mod tests {
     }
 
     #[test]
-    fn list_reports_host_type_and_fingerprint() {
-        let file = format!("example.com {KEY_A}\n@revoked bad.example.com {KEY_B}\n# comment\n");
-        let entries = list_in_str(&file);
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].host, "example.com");
-        assert_eq!(entries[0].marker, None);
-        assert_eq!(entries[0].key_type, "ssh-ed25519");
-        assert!(entries[0].fingerprint_sha256.starts_with("SHA256:"));
-        assert_eq!(entries[1].marker.as_deref(), Some("@revoked"));
-    }
-
-    #[test]
     fn delete_removes_only_the_matching_entry_byte_for_byte() {
         let contents =
             format!("# my hosts\r\nkeep.example.com {KEY_B}\n\ndrop.example.com {KEY_A}");
-        let entries = list_in_str(&contents);
-        let target = entries
-            .iter()
-            .find(|e| e.host == "drop.example.com")
-            .unwrap()
-            .id
-            .clone();
+        let target = KnownHostId {
+            host: "drop.example.com".into(),
+            key_type: "ssh-ed25519".into(),
+            keyblob: KEY_A.split_whitespace().nth(1).unwrap().into(),
+        };
         let (after, removed) = delete_in_str(&contents, &target);
         assert!(removed);
         let expected = format!("# my hosts\r\nkeep.example.com {KEY_B}\n\n");

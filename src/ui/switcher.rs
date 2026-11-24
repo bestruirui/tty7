@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
+use gpui::component::button::{Button, ButtonVariants as _};
+use gpui::component::input::{Input, InputEvent, InputState};
+use gpui::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
+use gpui::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, MouseButton, MouseDownEvent, Subscription,
     Window, div, prelude::*, px,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
-use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 
 use tty7_core::core::machine::TabId;
 use tty7_core::core::session::{RemoteTarget, RouteSnapshot, WorkspaceId};
@@ -173,8 +173,7 @@ struct Row {
 
 /// One tab in the right-hand column. Built once per frame for every workspace
 /// on the left, so the search can match tab names and the column can render
-/// without a second pass over the machine tree. Search Everywhere's Terminals
-/// tab is built from the same rows.
+/// without a second pass over the machine tree.
 #[derive(Clone)]
 pub(crate) struct TabRow {
     pub(crate) id: TabId,
@@ -194,9 +193,6 @@ pub(crate) struct TabRow {
     pub(crate) waited: Option<String>,
     pub(crate) ssh: Option<u32>,
     pub(crate) active: bool,
-    /// Branch and diff counts, the same line the tab sidebar shows. Only this
-    /// window's own tabs have it — the machine tree carries no git state.
-    pub(crate) git: Option<tty7_core::core::git::GitStatus>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -442,7 +438,7 @@ enum HostItem {
 fn host_items(hosts: Vec<HostChoice>, query: &str, local_label: &str) -> Vec<HostItem> {
     let query = query.trim();
     let mut items: Vec<HostItem> = Vec::new();
-    if query.is_empty() || crate::ui::search::fuzzy_score(query, local_label).is_some() {
+    if query.is_empty() || crate::ui::fuzzy_score(query, local_label).is_some() {
         items.push(HostItem::Local);
     }
     items.extend(
@@ -1044,7 +1040,6 @@ impl Tty7App {
                         waited: tab.agent_waited(now_ms, cx),
                         ssh: self.tab_ssh_dot(tab, cx),
                         active: i == self.active,
-                        git: tab.git_status(None, cx),
                     }
                 })
                 .collect();
@@ -1053,18 +1048,7 @@ impl Tty7App {
         let Some((views, active)) = crate::ui::machine_mirror::tab_views_for(cx, id) else {
             return Vec::new();
         };
-        // Git state is cached globally per (host, cwd) and outlives the panes
-        // that filled it, so a workspace this window recently left still has
-        // its branches on hand. Read-only on purpose: probing every cwd of
-        // every workspace to populate a panel that closes in a second would
-        // cost a git invocation each, and a round trip each when the host is
-        // remote.
         let host = WorkspaceStore::all(cx).get(id).map(|w| w.host_id());
-        let git = |cwd: Option<&str>| -> Option<tty7_core::core::git::GitStatus> {
-            let (host, cwd) = (host?, cwd?);
-            cx.try_global::<crate::terminal::git_status::GitStatusCache>()?
-                .status_for(host, std::path::Path::new(cwd))
-        };
         // These rows describe a workspace on `host`, and the cwds they carry
         // are that machine's. Only its home may shorten them (#580).
         let home = host.and_then(|host| crate::ui::path_display::home_for_host(cx, host));
@@ -1090,7 +1074,6 @@ impl Tty7App {
                 waited: None,
                 ssh: None,
                 active: Some(v.id) == active,
-                git: git(v.cwd.as_deref()),
                 index: i,
                 id: v.id,
             })
@@ -1524,7 +1507,7 @@ impl Tty7App {
             (form.open, form.sel, self.form_items(form, cx).len())
         };
         let (key, mods) = (ev.keystroke.key.as_str(), ev.keystroke.modifiers);
-        let bare = !mods.alt && !mods.function && !mods.control && !mods.secondary();
+        let bare = !mods.alt && !mods.function && !mods.control && !mods.secondary(cx);
         match key {
             // The dropdown is the smaller thing to back out of; the form only
             // folds back into the list on a second press.
@@ -2677,7 +2660,7 @@ impl Tty7App {
                 if let Some(at) = nav_at {
                     this.switcher_point_at(at, cx);
                 }
-                let modified = ev.modifiers().secondary();
+                let modified = ev.modifiers().secondary(cx);
                 if ev.click_count() >= 2 || modified {
                     this.switcher_open(click_ref.clone(), modified, window, cx);
                 }
@@ -3082,27 +3065,7 @@ impl Tty7App {
             let tab = &row.tabs[*i];
             let picked = nth == right_sel && column == Column::Right;
             let (id, index) = (tab.id, tab.index);
-            // The second line is what tells two tabs on the same repo apart —
-            // the branch, then the diff counts, the same words the tab sidebar
-            // uses, all secondary. A named tab off any repo shows its path.
-            let meta = match tab.git.as_ref() {
-                Some(g) => {
-                    let mut parts = vec![g.branch.clone()];
-                    let counts = [
-                        (g.added > 0).then(|| format!("+{}", g.added)),
-                        (g.removed > 0).then(|| format!("−{}", g.removed)),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect::<Vec<_>>();
-                    if !counts.is_empty() {
-                        parts.push(counts.join(" "));
-                    }
-                    Some(parts.join("  ·  "))
-                }
-                None if tab.named && !tab.path.is_empty() => Some(tab.path.clone()),
-                None => None,
-            };
+            let meta = (tab.named && !tab.path.is_empty()).then(|| tab.path.clone());
             let running = tab.status == Some(crate::core::cli_agent::AgentStatus::Working);
             let dot_on = self.working_dot_on;
 
@@ -3179,7 +3142,7 @@ impl Tty7App {
                         )
                     })
                     .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
-                        this.switcher_open_tab(ws, id, ev.modifiers().secondary(), window, cx)
+                        this.switcher_open_tab(ws, id, ev.modifiers().secondary(cx), window, cx)
                     }))
                     // Mid-gesture a click arrives as a right press on macOS. It
                     // aims the cursor; releasing Ctrl is what commits.
@@ -3358,11 +3321,11 @@ pub(crate) fn host_form_label(target: &RemoteTarget) -> Option<&'static str> {
 }
 
 fn row_menu(
-    menu: gpui_component::menu::PopupMenu,
+    menu: gpui::component::menu::PopupMenu,
     row: &RowRef,
     host: &GroupRef,
     app: gpui::WeakEntity<Tty7App>,
-) -> gpui_component::menu::PopupMenu {
+) -> gpui::component::menu::PopupMenu {
     let (a1, a2, a3, a4) = (app.clone(), app.clone(), app.clone(), app.clone());
     let (id, adopt) = (row.id, row.adopt.is_some());
     let stoppable = row.live;
@@ -3417,10 +3380,10 @@ fn row_menu(
 /// under the machine's own name to every one of its rows. Local rows carry
 /// none — the footer's New Workspace covers this computer.
 fn host_menu(
-    menu: gpui_component::menu::PopupMenu,
+    menu: gpui::component::menu::PopupMenu,
     host: &GroupRef,
     app: gpui::WeakEntity<Tty7App>,
-) -> gpui_component::menu::PopupMenu {
+) -> gpui::component::menu::PopupMenu {
     let Some(target) = host.target.clone() else {
         return menu;
     };
@@ -3528,7 +3491,12 @@ fn key_intent(key: &str, mods: gpui::Modifiers) -> Key {
     // Careful: `control` cannot be lumped in with "some modifier is down", as
     // it *is* the secondary modifier off macOS — Ctrl+Enter has to reach the
     // new-window branch there, not fall through as a stray chord.
-    let bare = !mods.control && !mods.secondary();
+    let secondary = if cfg!(target_os = "macos") {
+        mods.platform
+    } else {
+        mods.control
+    };
+    let bare = !mods.control && !secondary;
     match key {
         "up" | "down" if bare => Key::Step(key == "down"),
         "left" if bare => Key::ToColumn(Column::Left),
@@ -3536,8 +3504,8 @@ fn key_intent(key: &str, mods: gpui::Modifiers) -> Key {
         // Tab keeps working with Ctrl held — that is the Ctrl+Tab gesture still
         // in progress. Off macOS that chord arrives as the NextTab action
         // instead, which lands in the same place.
-        "tab" if !mods.secondary() => Key::Tab(!mods.shift),
-        "enter" if bare || mods.secondary() => Key::Confirm(mods.secondary()),
+        "tab" if !secondary => Key::Tab(!mods.shift),
+        "enter" if bare || secondary => Key::Confirm(secondary),
         _ => Key::Pass,
     }
 }
@@ -3805,7 +3773,6 @@ mod tests {
             waited: None,
             ssh: None,
             active: false,
-            git: None,
         }
     }
 
@@ -4617,7 +4584,14 @@ mod key_tests {
         // ⌘ on macOS, Ctrl everywhere else. Off macOS this is the case that a
         // blanket "control means not ours" check would have swallowed.
         assert_eq!(
-            key_intent("enter", Modifiers::secondary_key()),
+            key_intent(
+                "enter",
+                if cfg!(target_os = "macos") {
+                    Modifiers::command()
+                } else {
+                    Modifiers::control()
+                }
+            ),
             Key::Confirm(true)
         );
     }
@@ -4651,7 +4625,17 @@ mod key_tests {
     #[test]
     fn escape_closes_even_mid_chord() {
         assert_eq!(key_intent("escape", Modifiers::alt()), Key::Close);
-        assert_eq!(key_intent("escape", Modifiers::secondary_key()), Key::Close);
+        assert_eq!(
+            key_intent(
+                "escape",
+                if cfg!(target_os = "macos") {
+                    Modifiers::command()
+                } else {
+                    Modifiers::control()
+                }
+            ),
+            Key::Close
+        );
     }
 
     #[test]

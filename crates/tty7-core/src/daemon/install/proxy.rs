@@ -2,7 +2,7 @@
 //!
 //! Scope: the update check and the release / remote-server asset downloads,
 //! and the mobile gateway's connection to its relay (which takes the URLs from
-//! [`system_url`] and [`env_url`] rather than a `ureq::Proxy`).
+//! [`system_url`] and [`env_url`] rather than a `reqwest::Proxy`).
 //! Programs running inside a pane are deliberately untouched — they inherit
 //! whatever their environment says, exactly like in any other terminal.
 //!
@@ -11,33 +11,35 @@
 //! 2. Platform system proxy (Windows registry / macOS SCDynamicStore).
 //! 3. Environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`).
 //!
-//! We read the platform settings by hand because `ureq` has no equivalent of
-//! `NSURLSession`'s automatic system-proxy pickup: it ships a Windows-only
-//! `win-system-proxy` feature (which mis-reads SOCKS entries, see
-//! [`parse_windows_proxy_server`]) and nothing at all for macOS. A GUI launched
-//! from Finder or the Dock inherits launchd's environment, not the shell's, so
-//! step 3 on its own would leave `HTTP_PROXY` unset for most users.
 
-use ureq::{Proxy, ProxyProtocol};
+use reqwest::{NoProxy, Proxy, Url};
 
 /// Resolve the proxy that should be used for `target_url`.
 pub fn resolve(target_url: &str, manual: Option<&str>) -> Option<Proxy> {
     if let Some(proxy) = manual.and_then(parse_manual) {
-        return Some(proxy);
+        return proxy_from_url(proxy, &[]);
     }
     if let Some(proxy) = system_proxy(target_url) {
         return Some(proxy);
     }
     // Honours `NO_PROXY` as well; the two branches above do not, since neither
     // Windows' `ProxyOverride` nor macOS' `ExceptionsList` is that variable.
-    Proxy::try_from_env()
+    [
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ]
+    .into_iter()
+    .filter_map(|name| std::env::var(name).ok())
+    .find_map(|value| {
+        proxy_from_url(parse_manual(&value)?, &[]).map(|proxy| proxy.no_proxy(NoProxy::from_env()))
+    })
 }
 
 /// Turn a manual proxy value into a full URL, or `None` if it is unusable.
-///
-/// The update check builds a `reqwest` client instead of a `ureq` agent and so
-/// parses the value with a different URL parser. Both go through here first, so
-/// a bare `host:port` reaches them as the same `http://host:port`.
 pub fn normalize_manual(value: &str) -> Option<String> {
     let value = value.trim();
     if value.is_empty() {
@@ -50,8 +52,16 @@ pub fn normalize_manual(value: &str) -> Option<String> {
     } else {
         format!("http://{value}")
     };
-    // Only hand back something that actually resolves to a proxy.
-    proxy_from_url(&url, &[]).ok().map(|_| url)
+    let parsed = Url::parse(&url).ok()?;
+    if parsed.host_str().is_none()
+        || !matches!(
+            parsed.scheme(),
+            "http" | "https" | "socks" | "socks4" | "socks4a" | "socks5" | "socks5h"
+        )
+    {
+        return None;
+    }
+    Some(url)
 }
 
 /// Whether `value` would be accepted as a manual proxy, for input validation.
@@ -59,17 +69,26 @@ pub fn is_valid_manual(value: &str) -> bool {
     normalize_manual(value).is_some()
 }
 
-fn parse_manual(value: &str) -> Option<Proxy> {
-    proxy_from_url(&normalize_manual(value)?, &[]).ok()
+fn parse_manual(value: &str) -> Option<Url> {
+    let mut url = Url::parse(&normalize_manual(value)?).ok()?;
+    if url.port().is_none()
+        && matches!(
+            url.scheme(),
+            "socks" | "socks4" | "socks4a" | "socks5" | "socks5h"
+        )
+    {
+        url.set_port(Some(1080)).ok()?;
+    }
+    Some(url)
 }
 
 fn system_proxy(target_url: &str) -> Option<Proxy> {
     let (url, no_proxy) = system_proxy_url(target_url)?;
-    proxy_from_url(&url, &no_proxy).ok()
+    proxy_from_url(parse_manual(&url)?, &no_proxy)
 }
 
 /// The platform's system proxy for `target_url`, as a URL: what [`resolve`]
-/// uses, for a client that is not `ureq`. The platform's bypass list is not
+/// uses, for a client that needs the URL directly. The platform's bypass list is not
 /// applied — the caller knows where it is going.
 pub fn system_url(target_url: &str) -> Option<String> {
     system_proxy_url(target_url).map(|(url, _)| url)
@@ -104,50 +123,15 @@ fn system_proxy_url(_target_url: &str) -> Option<(String, Vec<String>)> {
     None
 }
 
-/// Build a `ureq::Proxy` from a URL string and a no-proxy list.
-///
-/// `Proxy::new` would handle the URL on its own, but it offers no way to attach
-/// a no-proxy list, so we take the authority apart and go through the builder.
-/// Note that ureq silently drops no-proxy entries it cannot parse — CIDR blocks
-/// such as macOS' default `169.254/16` never match anything.
-fn proxy_from_url(url: &str, no_proxy: &[String]) -> Result<Proxy, ureq::Error> {
-    let uri: ureq::http::Uri = url.parse().map_err(|_| ureq::Error::InvalidProxyUrl)?;
-    let authority = uri.authority().ok_or(ureq::Error::InvalidProxyUrl)?;
-
-    // ureq's own scheme table, so `socks`/`socks4a`/`socks5h` stay in sync.
-    let protocol = ProxyProtocol::try_from(uri.scheme_str().unwrap_or("http"))?;
-
-    let mut builder = Proxy::builder(protocol).host(authority.host());
-    // Leaving the port unset lets ureq fill in the protocol's own default.
-    if let Some(port) = authority.port_u16() {
-        builder = builder.port(port);
+fn proxy_from_url(mut url: Url, no_proxy: &[String]) -> Option<Proxy> {
+    if matches!(url.scheme(), "socks" | "socks5") {
+        url.set_scheme("socks5h").ok()?;
     }
-
-    // Matches ureq's own handling: the userinfo is passed through as written,
-    // without percent-decoding.
-    let (username, password) = parse_userinfo(authority.as_str());
-    if !username.is_empty() {
-        builder = builder.username(username);
-        if let Some(password) = password {
-            builder = builder.password(password);
-        }
-    }
-
-    for entry in no_proxy {
-        builder = builder.no_proxy(entry.as_str());
-    }
-
-    builder.build()
-}
-
-fn parse_userinfo(authority: &str) -> (&str, Option<&str>) {
-    let Some((userinfo, _)) = authority.split_once('@') else {
-        return ("", None);
-    };
-    let mut parts = userinfo.splitn(2, ':');
-    let username = parts.next().unwrap_or("");
-    let password = parts.next();
-    (username, password)
+    Some(
+        Proxy::all(url)
+            .ok()?
+            .no_proxy(NoProxy::from_string(&no_proxy.join(","))),
+    )
 }
 
 fn target_scheme(target_url: &str) -> &str {
@@ -172,10 +156,6 @@ fn normalize_proxy_addr(addr: &str) -> String {
 /// - `127.0.0.1:7890` -> `http://127.0.0.1:7890`
 /// - `http=127.0.0.1:7890;https=127.0.0.1:7891`
 /// - `socks=127.0.0.1:1080` -> `socks5://127.0.0.1:1080`
-///
-/// The `socks=` mapping is the whole reason we do not use ureq's
-/// `win-system-proxy` feature: it unconditionally builds `http://{ProxyServer}`
-/// and so talks HTTP to a SOCKS port.
 ///
 /// Deliberately outside the `windows` module so the parsing is compiled and
 /// tested on every host, not just the Windows CI runner.
@@ -230,7 +210,7 @@ mod windows {
         }
         let server: String = key.get_value("ProxyServer").ok()?;
         let overrides: String = key.get_value("ProxyOverride").unwrap_or_default();
-        // `<local>` means "any hostname without a dot", which ureq's no-proxy
+        // `<local>` means "any hostname without a dot", which reqwest's no-proxy
         // matcher cannot express, so localhost is not bypassed.
         let no_proxy: Vec<String> = overrides
             .split(';')
@@ -347,7 +327,7 @@ mod macos {
 
     /// macOS' "HTTPS proxy" is the *plain HTTP* proxy used for https traffic,
     /// not a TLS-wrapped one. Emitting `https://` here would land on
-    /// `ProxyProtocol::Https` — "CONNECT proxy over HTTPS" — and make ureq
+    /// an HTTPS-wrapped CONNECT proxy, making the client
     /// TLS-handshake with the proxy itself, which an ordinary local proxy
     /// listening on 7890 rejects. The Windows path normalises the same way.
     fn proxy_url(kind: Kind, host: &str, port: i64) -> String {
@@ -376,7 +356,7 @@ mod macos {
 
         #[test]
         fn https_entries_use_a_plain_http_proxy_url() {
-            // Mapping this to `https://` would make ureq TLS-handshake with the
+            // Mapping this to `https://` would make the client TLS-handshake with the
             // proxy and break every download — see `proxy_url`.
             assert_eq!(
                 proxy_url(Kind::Https, "127.0.0.1", 7890),
@@ -460,35 +440,39 @@ mod tests {
     #[test]
     fn manual_bare_address_is_http() {
         let proxy = parse_manual("127.0.0.1:7890").expect("parses");
-        assert_eq!(proxy.protocol(), ProxyProtocol::Http);
-        assert_eq!(proxy.host(), "127.0.0.1");
-        assert_eq!(proxy.port(), 7890);
+        assert_eq!(proxy.scheme(), "http");
+        assert_eq!(proxy.host_str(), Some("127.0.0.1"));
+        assert_eq!(proxy.port_or_known_default(), Some(7890));
     }
 
     #[test]
     fn manual_socks5_keeps_its_scheme() {
         let proxy = parse_manual("socks5://127.0.0.1:1080").expect("parses");
-        assert_eq!(proxy.protocol(), ProxyProtocol::Socks5);
-        assert_eq!(proxy.port(), 1080);
+        assert_eq!(proxy.scheme(), "socks5");
+        assert_eq!(proxy.port_or_known_default(), Some(1080));
     }
 
     #[test]
     fn manual_proxy_falls_back_to_the_protocol_default_port() {
         assert_eq!(
-            parse_manual("http://proxy.local").expect("parses").port(),
-            80
+            parse_manual("http://proxy.local")
+                .expect("parses")
+                .port_or_known_default(),
+            Some(80)
         );
         assert_eq!(
-            parse_manual("socks5://proxy.local").expect("parses").port(),
-            1080
+            parse_manual("socks5://proxy.local")
+                .expect("parses")
+                .port_or_known_default(),
+            Some(1080)
         );
     }
 
     #[test]
     fn manual_credentials_are_carried_through() {
         let proxy = parse_manual("http://user:secret@127.0.0.1:7890").expect("parses");
-        assert_eq!(proxy.host(), "127.0.0.1");
-        assert_eq!(proxy.username(), Some("user"));
+        assert_eq!(proxy.host_str(), Some("127.0.0.1"));
+        assert_eq!(proxy.username(), "user");
         assert_eq!(proxy.password(), Some("secret"));
     }
 
@@ -503,10 +487,50 @@ mod tests {
 
     #[test]
     fn a_manual_proxy_wins_over_everything_else() {
-        let proxy = resolve("https://github.com", Some("socks5://127.0.0.1:1080"))
-            .expect("manual proxy resolves");
-        assert_eq!(proxy.protocol(), ProxyProtocol::Socks5);
-        assert_eq!(proxy.port(), 1080);
+        use std::io::{BufRead as _, BufReader, Write as _};
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("proxy listens");
+        let proxy = resolve(
+            "http://example.invalid/",
+            Some(&format!("http://{}", listener.local_addr().unwrap())),
+        )
+        .expect("manual proxy resolves");
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("proxy receives request");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut reader = BufReader::new(stream);
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            reader
+                .get_mut()
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .unwrap();
+        });
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .proxy(proxy)
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap();
+        assert_eq!(
+            client
+                .get("http://example.invalid/")
+                .send()
+                .unwrap()
+                .text()
+                .unwrap(),
+            "ok"
+        );
+        server.join().unwrap();
     }
 
     #[test]

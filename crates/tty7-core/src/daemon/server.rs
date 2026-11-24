@@ -276,7 +276,6 @@ fn spawn_snapshot_keeper(registry: Arc<Registry>) {
                 }
                 let restorable = restorable_pane_ids(&registry);
                 crate::daemon::scrollback::sweep(&restorable);
-                crate::daemon::history::sweep(&restorable);
                 marks.retain(|id, _| registry.get(*id).is_some());
             }
         });
@@ -742,25 +741,6 @@ fn run_with(registry: Arc<Registry>, alone: bool) -> anyhow::Result<()> {
 
     spawn_orphan_sweep(registry.clone());
     spawn_agent_stale_sweep(registry.clone());
-    // No sweeping here, deliberately — of either kind. Startup is the one
-    // moment this process knows least: it owns no panes yet, and the windows
-    // that know which of a dead daemon's files are still wanted cannot say so
-    // until the endpoint below is listening. Answering "is anyone going to ask
-    // for this?" here answers it when nobody can — and the answer deletes. A
-    // tree that failed to parse makes it worse, because `read_machine`
-    // quarantines it and hands back an empty `Machine`, so one bad file would
-    // take every pane's screen and every pane's history with it.
-    //
-    // History was swept here until it was noticed that a restore carries the
-    // dead pane's commands to its successor (`history::carry`, at the top of
-    // the `Spawn` handler): sweeping before the window can ask deletes the very
-    // file the request is about. Same shape as the scrollback bug, one file
-    // over.
-    //
-    // Both sweeps run on the writer's tick instead, with the registry filled in
-    // and the tree caught up. That is soon enough: nothing here is serving a
-    // request in the meantime, and a daemon killed outright left its files for
-    // exactly this pass to collect.
     spawn_snapshot_keeper(registry.clone());
 
     for stream in listener.incoming() {
@@ -880,12 +860,6 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
             allow_remote_clipboard_write,
         } => {
             let id = registry.alloc_id();
-            if let Some(dead) = restore.as_ref().map(|r| r.pane_id) {
-                // Before the spawn, because the spawn is what hands the shell
-                // the name of its history file — and this is what puts the
-                // predecessor's commands behind that name.
-                crate::daemon::history::carry(dead, id);
-            }
             let predecessor = restore.as_ref().map(|r| r.pane_id);
             let restore = restore.and_then(restored_screen);
             log::info!(
@@ -1108,28 +1082,6 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
             Ok(())
         }
 
-        ClientMsg::ListKnownHosts => {
-            let mut w = write_stream;
-            let list = crate::daemon::ssh::known_hosts::list();
-            DaemonMsg::KnownHostsList(list).encode(&mut w)?;
-            Ok(())
-        }
-
-        ClientMsg::TestSsh { spec } => {
-            let mut w = write_stream;
-            let report = crate::daemon::ssh::SshManager::global().test_connection(&spec);
-            DaemonMsg::SshTestResult(report).encode(&mut w)?;
-            Ok(())
-        }
-
-        ClientMsg::DeleteKnownHost(id) => {
-            let mut w = write_stream;
-            let _ = crate::daemon::ssh::known_hosts::delete(&id);
-            let list = crate::daemon::ssh::known_hosts::list();
-            DaemonMsg::KnownHostsList(list).encode(&mut w)?;
-            Ok(())
-        }
-
         ClientMsg::SftpList { pane_id, path } => {
             let mut w = write_stream;
             match ssh_connection_for(&registry, pane_id) {
@@ -1182,13 +1134,6 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
                 }
                 Err(e) => DaemonMsg::Error(e).encode(&mut w)?,
             }
-            Ok(())
-        }
-
-        ClientMsg::SftpTransferCancel { job_id } => {
-            let mut w = write_stream;
-            let jobs = crate::daemon::ssh::sftp::SftpManager::global().cancel(job_id);
-            DaemonMsg::SftpTransferProgress(jobs).encode(&mut w)?;
             Ok(())
         }
 

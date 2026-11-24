@@ -1,35 +1,19 @@
 pub mod agent_launch;
 pub mod app;
 pub mod assets;
-pub mod code_editor;
 pub mod dialog;
-pub mod diff_list;
-pub mod diff_overlay;
-pub mod diff_rows;
-pub mod document_column;
-pub mod editor_session;
-pub mod editor_text;
-pub mod file_copy;
-pub mod file_tree;
 pub mod forwards;
-pub mod github;
 pub mod hints;
 pub mod home;
-#[allow(dead_code)]
 pub mod host_ops;
-#[allow(dead_code)]
 pub mod host_registry;
 pub mod i18n;
 pub mod keymap;
 pub mod local_link;
-pub mod lsp;
 pub mod machine_mirror;
 pub mod notice;
-pub(crate) mod palette;
 pub mod pane;
 pub mod pane_drag;
-pub mod panel_github;
-pub mod panel_search;
 pub mod path_display;
 pub mod pending_pane;
 pub mod perf;
@@ -42,13 +26,9 @@ pub mod remote_workspace;
 pub mod reorder;
 pub mod right_panel;
 pub mod rounding;
-pub mod scm;
 pub mod scrollbar;
-pub mod search;
 pub mod settings;
 pub mod settings_window;
-pub mod sftp;
-pub mod sftp_host;
 pub mod ssh_connect;
 pub mod ssh_prompt;
 pub mod switcher;
@@ -58,7 +38,76 @@ pub mod theme;
 pub mod tray;
 pub mod tree_sync;
 pub mod windows;
-pub mod worktree_prompt;
+
+pub(crate) fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
+    let needle: Vec<char> = query
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let hay: Vec<char> = text.chars().flat_map(char::to_lowercase).collect();
+    if needle.len() > hay.len() {
+        return None;
+    }
+
+    // Every place the first letter occurs is a place the match could begin,
+    // and the best of them is the score. Matching greedily from the left
+    // alone let an early stray letter decide the alignment: `worktree`
+    // against `New Worktree Tab…` spent its `w` on "New" and scattered the
+    // rest, scoring the title as a poor match of the very word it contains.
+    let best = (0..hay.len())
+        .filter(|&i| hay[i] == needle[0])
+        .filter_map(|start| align(&needle, &hay, start))
+        .max()?;
+
+    let mut score = best;
+    if hay == needle {
+        score += 120;
+    } else if hay.starts_with(&needle) {
+        score += 50;
+    }
+    score -= (hay.len() as i32) / 6;
+    Some(score)
+}
+
+/// `needle` as a subsequence of `hay` beginning at `start`, taken greedily
+/// from there; `None` when the rest of it does not fit.
+fn align(needle: &[char], hay: &[char], start: usize) -> Option<i32> {
+    let mut qi = 0usize;
+    let mut score = 0i32;
+    let mut run = 0i32;
+    let mut prev_hit = false;
+    for (i, ch) in hay.iter().enumerate().skip(start) {
+        if qi >= needle.len() {
+            break;
+        }
+        if *ch != needle[qi] {
+            prev_hit = false;
+            run = 0;
+            continue;
+        }
+        score += 1;
+        let word_start = i == 0 || !hay[i - 1].is_alphanumeric();
+        if word_start {
+            score += 12;
+        }
+        if i == 0 {
+            score += 10;
+        }
+        if prev_hit {
+            run += 1;
+            score += 6 + run.min(8);
+        } else {
+            run = 0;
+        }
+        prev_hit = true;
+        qi += 1;
+    }
+    (qi == needle.len()).then_some(score)
+}
 
 /// The two answers a confirmation dialog gets, arranged the way macOS arranges
 /// them: the action on the right, where Return lands and where every other app

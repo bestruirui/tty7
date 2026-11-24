@@ -24,7 +24,6 @@ use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::EventListener;
@@ -33,20 +32,19 @@ use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, Rgb};
+use gpui::component::input::{self, InputEvent, RopeExt as _, Textarea, TextareaState};
+use gpui::component::tooltip::Tooltip;
+use gpui::component::{ActiveTheme as _, Icon, IconName, Sizable as _, Size, h_flex};
 use gpui::{
     Context, Entity, ExternalPaths, Focusable as _, MouseButton, MouseDownEvent, Pixels,
     SharedString, Subscription, Window, div, prelude::*, px,
 };
-use gpui_component::input::{self, Input, InputEvent, InputState, RopeExt as _};
-use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, Size, h_flex};
 
 use super::view::{GRID_PAD_X, GRID_PAD_Y, TerminalView, pasted_paths_text, types_cleanly};
 use crate::core::cli_agent::{AgentStatus, CLIAgent};
 use crate::core::shell_quote::{Quoting, quoting_for};
-use crate::ui::host_ops::{Host, HostId, HostOps};
+use crate::ui::host_ops::{Host, HostId};
 use crate::ui::i18n::{L10nKey, t, t_fmt};
-use crate::ui::search::files::{FileIndex, FileList, IndexedFile, rank, walk};
 
 /// How tall the text may grow, in lines, before it scrolls instead.
 const MAX_ROWS: usize = 8;
@@ -1611,14 +1609,12 @@ pub(super) fn trigger_at(text: &str, cursor: usize) -> Option<Trigger> {
     })
 }
 
-/// One row of the `/` or `@` menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct MenuItem {
     pub label: String,
     pub detail: String,
     /// What replaces the trigger word when the row is picked.
     pub insert: String,
-    pub is_file: bool,
 }
 
 /// The agent's own commands, the ones it ships with. Descriptions stay in the
@@ -1864,7 +1860,7 @@ fn custom_commands(
             if !host.canonicalize(&dir).is_ok_and(|real| seen.insert(real)) {
                 continue;
             }
-            let Ok(entries) = host.read_dir(&dir, None) else {
+            let Ok(entries) = host.read_dir(&dir) else {
                 continue;
             };
             for entry in entries {
@@ -1902,7 +1898,6 @@ pub(super) fn command_items(commands: &[(String, String)], query: &str) -> Vec<M
             label: name.clone(),
             detail: detail.clone(),
             insert: name.clone(),
-            is_file: false,
         })
         .collect()
 }
@@ -1961,37 +1956,6 @@ pub(super) fn mention(agent: Option<CLIAgent>, path: &str, shell: Option<&str>) 
         _ => path.to_string(),
     };
     format!("@{spelled}")
-}
-
-/// The `@` menu for `query`. The mention is spelled relative to `cwd` — which
-/// is what the agent resolves it against — and in full for a file outside it.
-fn file_items(
-    index: &FileIndex,
-    query: &str,
-    cwd: Option<&Path>,
-    agent: Option<CLIAgent>,
-    shell: Option<&str>,
-) -> Vec<MenuItem> {
-    let spell = |path: &Path| -> String {
-        cwd.and_then(|c| path.strip_prefix(c).ok())
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned()
-    };
-    let item = |f: &IndexedFile| MenuItem {
-        label: f.name().to_string(),
-        detail: f.dir().to_string(),
-        insert: mention(agent, &spell(&f.path), shell),
-        is_file: true,
-    };
-    match query.is_empty() {
-        // The walk is breadth-first, so its head is the top of the project.
-        true => index.files.iter().take(MENU_ROWS).map(item).collect(),
-        false => rank(index, query, MENU_ROWS)
-            .into_iter()
-            .map(|(_, f)| item(f))
-            .collect(),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2057,13 +2021,6 @@ struct Remembered {
     open: bool,
 }
 
-enum Files {
-    Unwalked,
-    Walking,
-    Ready(Arc<FileIndex>, Instant),
-    Failed(Instant),
-}
-
 /// How the box is on screen this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Presence {
@@ -2080,7 +2037,7 @@ pub(super) enum Presence {
 }
 
 pub(super) struct Composer {
-    pub(super) input: Entity<InputState>,
+    pub(super) input: Entity<TextareaState>,
     /// Whether the user wants the box on this pane.
     open: bool,
     presence: Presence,
@@ -2114,7 +2071,6 @@ pub(super) struct Composer {
     /// The text as it stood when Esc closed the menu. The menu stays shut
     /// until the text moves on from there.
     dismissed: Option<String>,
-    files: Files,
     commands: Option<(Vec<(String, String)>, Instant)>,
     /// The effort level last picked from the toolbar, with how many turns the
     /// agent had finished then. The next finished turn reports the level it
@@ -2231,8 +2187,7 @@ impl TerminalView {
             .cloned()
             .unwrap_or_default();
         let input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
+            TextareaState::new(window, cx)
                 .auto_grow(1, MAX_ROWS)
                 .submit_on_enter(true)
                 .default_value(remembered.draft)
@@ -2254,7 +2209,6 @@ impl TerminalView {
             named: None,
             highlighted: 0,
             dismissed: None,
-            files: Files::Unwalked,
             commands: None,
             effort: None,
             model: None,
@@ -2400,10 +2354,10 @@ impl TerminalView {
     /// Typing at the grid while the box covers the agent's input: the input
     /// the keys were meant for is under the box, so they go into the box.
     ///
-    /// So does text handed to the terminal while the box has the keyboard —
-    /// a file tree's "attach to agent", say. The box's own typing never comes
-    /// this way, and written to the pty it would land in the agent's input
-    /// under the box, unseen, and run into the next message.
+    /// So does text handed to the terminal while the box has the keyboard.
+    /// The box's own typing never comes this way, and written to the pty it
+    /// would land in the agent's input under the box, unseen, and run into
+    /// the next message.
     pub(super) fn composer_takes_typing(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
         if !matches!(self.presence(), Presence::Covering(_)) {
             return false;
@@ -2676,7 +2630,7 @@ impl TerminalView {
 
     fn on_composer_event(
         &mut self,
-        _input: &Entity<InputState>,
+        _input: &Entity<TextareaState>,
         event: &InputEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2709,12 +2663,9 @@ impl TerminalView {
         if c.dismissed.as_deref() == Some(text.as_ref()) {
             return None;
         }
-        trigger_at(&text, state.cursor())
+        trigger_at(&text, state.cursor()).filter(|trigger| trigger.sigil == '/')
     }
 
-    /// Start what the menu about to open needs: the file walk for `@`, the
-    /// custom command list for `/`. Both are kept a while, so typing through
-    /// a query does not walk the project once per keystroke.
     fn warm_menu_sources(&mut self, cx: &mut Context<Self>) {
         let Some(trigger) = self.composer_trigger(cx) else {
             return;
@@ -2746,45 +2697,10 @@ impl TerminalView {
                 };
                 c.commands = Some((custom, Instant::now()));
             }
-            '@' => {
-                let stale = match &c.files {
-                    Files::Unwalked => true,
-                    Files::Walking => false,
-                    Files::Ready(_, at) | Files::Failed(at) => at.elapsed() > SOURCES_FRESH_FOR,
-                };
-                let Some(cwd) = cwd.filter(|_| stale) else {
-                    return;
-                };
-                let Some(host) = crate::ui::host_registry::HostRegistry::lookup(cx, host_id) else {
-                    return;
-                };
-                if !matches!(c.files, Files::Ready(..)) {
-                    c.files = Files::Walking;
-                }
-                let home = local
-                    .then(|| std::env::var_os("HOME").map(PathBuf::from))
-                    .flatten();
-                HostOps::run(
-                    host,
-                    cx,
-                    move |h| walk(h, &[cwd], home.as_deref()),
-                    |view: &mut TerminalView, list, cx| {
-                        let Some(c) = view.composer.as_mut() else {
-                            return;
-                        };
-                        c.files = match list {
-                            FileList::Ready(index) => Files::Ready(index, Instant::now()),
-                            _ => Files::Failed(Instant::now()),
-                        };
-                        cx.notify();
-                    },
-                );
-            }
             _ => {}
         }
     }
 
-    /// The `/` or `@` menu as it stands at the caret, if one is open.
     fn composer_menu(&self, cx: &gpui::App) -> Option<(Trigger, Vec<MenuItem>)> {
         let trigger = self.composer_trigger(cx)?;
         let c = self.composer.as_ref()?;
@@ -2804,16 +2720,7 @@ impl TerminalView {
                 }
                 command_items(&all, &trigger.query)
             }
-            _ => match &c.files {
-                Files::Ready(index, _) => file_items(
-                    index,
-                    &trigger.query,
-                    self.files_cwd().as_deref(),
-                    self.agent(),
-                    self.shell_program().as_deref(),
-                ),
-                _ => Vec::new(),
-            },
+            _ => Vec::new(),
         };
         (!items.is_empty()).then_some((trigger, items))
     }
@@ -2967,7 +2874,6 @@ impl TerminalView {
     /// running: an agent that quit inside the wait has handed the pty back to
     /// the shell, and the rest of the message — its Enter above all — would
     /// run there as a command.
-    /// 独立的 ESC 步骤在发送时使用目标终端当前的键盘编码。
     fn pump_composer(&mut self, agent: CLIAgent, cx: &mut Context<Self>) {
         let Some(c) = self.composer.as_mut() else {
             return;
@@ -3487,12 +3393,9 @@ impl TerminalView {
                 ))
         });
 
-        let popup = menu.as_ref().map(|(trigger, items)| {
+        let popup = menu.as_ref().map(|(_, items)| {
             let highlighted = c.highlighted.min(items.len() - 1);
-            let title = match trigger.sigil {
-                '/' => t(L10nKey::ComposerMenuCommands),
-                _ => t(L10nKey::ComposerMenuFiles),
-            };
+            let title = t(L10nKey::ComposerMenuCommands);
             crate::ui::theme::floating_surface(div(), cx)
                 .rounded(px(10.))
                 .absolute()
@@ -3532,14 +3435,6 @@ impl TerminalView {
                                 this.pick_menu_item(i, window, cx);
                             }),
                         )
-                        .when(item.is_file, |s| {
-                            s.child(
-                                gpui::svg()
-                                    .path("icons/file.svg")
-                                    .size(px(12.))
-                                    .text_color(ink.opacity(0.4)),
-                            )
-                        })
                         .child(
                             div()
                                 .flex_none()
@@ -3590,7 +3485,7 @@ impl TerminalView {
                         cx.stop_propagation();
                     }),
                 )
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                .on_scroll(|_, _, cx| cx.stop_propagation())
                 // Files dropped on the box are attachments, not words for the
                 // terminal's line; the surface's own drop handler would focus
                 // the grid first.
@@ -3599,13 +3494,6 @@ impl TerminalView {
                     this.focus_composer(window, cx);
                     this.drop_files(paths, cx);
                 }))
-                .on_drop(cx.listener(
-                    |this, drag: &crate::ui::file_tree::RemotePathDrag, window, cx| {
-                        cx.stop_propagation();
-                        this.focus_composer(window, cx);
-                        this.drop_remote_path(drag, cx);
-                    },
-                ))
                 .capture_action(cx.listener(|this, _: &input::Paste, _w, cx| {
                     // Text pastes are the box's own. A copied file or a
                     // screenshot has no text to paste, and the terminal
@@ -3703,7 +3591,7 @@ impl TerminalView {
                                 .pt(px(12. - INPUT_PAD_Y))
                                 .pb(px(4. - INPUT_PAD_Y))
                                 .child(
-                                    Input::new(&c.input)
+                                    Textarea::new(&c.input)
                                         .appearance(false)
                                         .with_size(Size::Size(px(TEXT_PX / 0.875))),
                                 ),
@@ -5807,25 +5695,6 @@ mod tests {
         assert_eq!(labels("c"), ["/compact", "/clear"]);
         assert_eq!(labels("m"), ["/memory", "/compact"]);
         assert_eq!(labels(""), ["/compact", "/clear", "/memory"]);
-    }
-
-    #[test]
-    fn a_file_mention_is_spelled_from_the_panes_directory() {
-        let index = crate::ui::search::files::build_index(
-            &[PathBuf::from("/repo")],
-            vec![
-                PathBuf::from("/repo/app/src/main.rs"),
-                PathBuf::from("/repo/README.md"),
-            ],
-            false,
-        );
-        let items = file_items(&index, "main", Some(Path::new("/repo/app")), None, None);
-        assert_eq!(items[0].insert, "@src/main.rs");
-        let items = file_items(&index, "readme", Some(Path::new("/repo/app")), None, None);
-        assert_eq!(
-            items[0].insert, "@/repo/README.md",
-            "outside the cwd: in full"
-        );
     }
 
     #[test]

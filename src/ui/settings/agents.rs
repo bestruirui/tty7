@@ -260,8 +260,7 @@ impl Tty7App {
                 let mut col = v_flex().id("agent-hook-list-rows").when(bounded, |c| {
                     // Match the viewport's negative margin so controls keep
                     // their alignment, with room for the raised button shadow.
-                    c.px(px(4.))
-                        .on_scroll_wheel(nested_list_wheel(scroll.clone()))
+                    c.px(px(4.)).on_scroll(nested_list_wheel(scroll.clone()))
                 });
                 for (i, row) in list.into_iter().enumerate() {
                     let row_note = note
@@ -403,7 +402,9 @@ impl Tty7App {
                     false,
                     move |_this, _w, cx| {
                         let path = crate::core::ssh_profile::expand_tilde(&target);
-                        cx.reveal_path(std::path::Path::new(&path));
+                        cx.reveal_path(&crate::ui::path_display::native_separators(
+                            std::path::Path::new(&path),
+                        ));
                     },
                 ));
             }

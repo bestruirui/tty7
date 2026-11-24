@@ -294,7 +294,7 @@ mod tests {
         sshd.wait_for_closed(12).await;
         assert_eq!(sshd.refused(), 0);
         assert_eq!(sshd.opened(), 12);
-        assert_eq!(sshd.closed(), 12, "the server's own close is answered once");
+        assert_eq!(sshd.closed(), 12, "each finished channel is retired once");
     }
 
     #[tokio::test]

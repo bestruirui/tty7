@@ -12,12 +12,12 @@
 
 use std::rc::Rc;
 
+use gpui::component::input::{Input, InputState};
+use gpui::component::{ActiveTheme as _, Icon, h_flex, v_flex};
 use gpui::{
     AnyElement, App, BoxShadow, ClickEvent, Div, ElementId, FontWeight, Hsla, IntoElement,
     MouseButton, Rems, SharedString, Stateful, Window, div, point, prelude::*, px, rems,
 };
-use gpui_component::input::{Input, InputState};
-use gpui_component::{ActiveTheme as _, Icon, h_flex, v_flex};
 
 /// A size from the design, in pixels at the default 16px interface font.
 pub(crate) fn fs(px_at_16: f32) -> Rems {

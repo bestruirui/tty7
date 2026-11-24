@@ -1,10 +1,10 @@
+use gpui::component::checkbox::Checkbox;
+use gpui::component::input::{Input, InputEvent, InputState};
+use gpui::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, IntoElement, ParentElement as _, Styled as _,
     Subscription, Window, div, prelude::*, px, rems,
 };
-use gpui_component::checkbox::Checkbox;
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 
 use crate::core::keychain::{CredentialStore as _, OsCredentialStore};
 use crate::daemon::protocol::{AuthPromptKind, AuthResponse, SshPhase};
@@ -570,11 +570,6 @@ impl Tty7App {
         cx.notify();
     }
 
-    pub(crate) fn push_ssh_connect_error(&mut self, reason: String, cx: &mut Context<Self>) {
-        self.ssh_prompt.banners.push(reason);
-        cx.notify();
-    }
-
     pub(crate) fn dismiss_ssh_banner(&mut self, ix: usize, cx: &mut Context<Self>) {
         if ix < self.ssh_prompt.banners.len() {
             self.ssh_prompt.banners.remove(ix);
@@ -721,8 +716,7 @@ impl Tty7App {
                 .justify_start()
                 // Window-level now, so the old 48px — measured from the top of
                 // the terminal area — would ride up under the title bar. The
-                // same drop the switcher, the palette and the worktree prompt
-                // take.
+                // same drop the switcher takes.
                 .pt(px(crate::ui::switcher::CARD_TOP))
                 .child(stack)
                 .into_any_element(),
@@ -1400,7 +1394,7 @@ mod focus_tests {
     fn harness(cx: &mut TestAppContext) -> (WindowHandle<Tty7App>, VisualTestContext) {
         cx.executor().allow_parking();
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui::component::init(cx);
             cx.set_global(Config::default());
         });
         let window = cx.add_window(|window, cx| {

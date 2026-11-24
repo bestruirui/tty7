@@ -3,7 +3,7 @@ name = "tty7-core"
 version.workspace = true
 edition.workspace = true
 description = "tty7's framework-free core: wire protocol, session daemon, PTY, SSH engine, and the domain model both the GUI and the headless server build on"
-repository = "https://github.com/l0ng-ai/tty7"
+repository = "https://github.com/bestruirui/tty7"
 license = "Apache-2.0"
 publish = false
 
@@ -45,24 +45,9 @@ sha2 = "0.11"
 # Finding the repository a pane's cwd is in (`core::git::head`) without a
 # `git` process: the sidebar asks it of every pane, and a spawn that fails —
 # `/usr/bin/git` on macOS is a shim that dies whenever the selected Xcode is
-# mid-switch — used to read as "not a repository" and ungroup the tab. Only the
-# discovery crate: counts, diffs and every write still go through the `git`
-# CLI, so what the sidebar says stays the same answer the diff views give.
+# mid-switch — used to read as "not a repository" and ungroup the tab. The
+# discovery crate alone answers it: the repository a cwd sits in, nothing more.
 gix-discover = { version = "0.56", features = ["sha1"] }
-
-# The gitignore matcher chain (`core::gitignore`) the file tree dims entries
-# with — the same crate ripgrep uses. Lives here rather than in the GUI because
-# the remote server has to answer "is this path ignored?" with the identical
-# implementation.
-ignore = "0.4"
-
-# The matcher behind `Host::search_content` (the right panel's Search tab):
-# a literal, whole-word or regular-expression query compiled once and run over
-# each file the `ignore` walk above hands it. Lives here for the same reason
-# `ignore` does — a remote `tty7-server` answers the search with the identical
-# implementation. Already in the tree via the GUI and `ignore`, so this pins no
-# new code.
-regex = "1"
 
 # Format-preserving TOML editing for `core::agent_hooks`: Kimi Code takes its
 # hooks as `[[hooks]]` entries in the same `config.toml` that holds the user's
@@ -72,43 +57,26 @@ regex = "1"
 # pins no new code.
 toml_edit = "0.25"
 
-# Lane assignment for the commit graph (`core::git::log`) keeps a couple of
-# parents and a handful of edges per row; a SmallVec keeps those off the heap
-# for the shapes that make up almost all of a real history. Already in the tree
-# via the GUI, so this pins no new code.
-smallvec.workspace = true
-
 # Cross-platform PTY for the daemon: a Unix pty on Unix, ConPTY on Windows,
 # behind one blocking `Read`/`Write`/`resize` API. This is what lets
 # `daemon::pane` share a single code path across platforms instead of
 # hand-rolling fd/ioctl/signal code.
 portable-pty = "0.8"
 
-# Native (pure-Rust) SSH client for the daemon's russh session engine
-# (`daemon::ssh`) — see the root manifest's note for why we own this stack
-# instead of shelling out to `ssh`.
 # HTTPS client for the remote-server installer (`daemon::install::download`).
-# The GUI's own update check rides `reqwest_client`, which wraps Zed's reqwest
-# fork behind `gpui::http_client` — unavailable here, since this crate must not
-# depend on gpui. `ureq` is blocking (matching the installer, which runs on a
-# daemon std thread), rustls-based (no OpenSSL to find at build time), and
-# reuses the `rustls`/`http` versions already in the tree. `gzip` is off: the
-# assets are already-compressed binaries.
+# The same workspace version the GUI's update check uses, so both fetch over one
+# rustls stack; blocking, because the installer runs off the GUI executor.
 #
 # Optional, and off by default, so the static musl `tty7-server` never links a
 # TLS stack for a code path it cannot take — it *is* the binary being
 # downloaded. The GUI package turns the feature on (see the root `Cargo.toml`).
-ureq = { version = "3", default-features = false, features = [
-    "rustls",
-    "win-system-proxy",
-    "socks-proxy",
-], optional = true }
+reqwest = { workspace = true, optional = true }
 
-russh = "0.62"
+russh = "0.65.4"
 russh-sftp = "2"
 
-# tokio powers only the russh session engine — a single runtime `daemon::ssh`
-# owns. The daemon's PTY/reader/writer threads remain std threads and never
+# The russh session engine owns a single tokio runtime in `daemon::ssh`.
+# The daemon's PTY/reader/writer threads remain std threads and never
 # touch it; they cross into async through bounded/unbounded channels.
 tokio = { version = "1", features = [
     "rt-multi-thread",
@@ -121,16 +89,10 @@ tokio = { version = "1", features = [
     "fs",
 ] }
 
-# Filesystem watching for `host::local` (`Host::watch`): one non-recursive
-# watcher per expanded directory, coalesced into 100ms batches. Same crate and
-# version the GUI already used for the file tree, so the server watches a remote
-# tree exactly the way the client watched a local one.
+# Event classification for the GUI's config watcher (`host::is_content_change`).
 notify = "8"
 
-# `smol::channel` carries watch batches out of the coalescing thread. Only the
-# channel is used — the executor stays in the GUI — but taking it from `smol`
-# rather than `async-channel` directly keeps the `Receiver` type identical to the
-# one gpui code already awaits.
+# `smol::channel` carries workspace layout deltas to control connections.
 smol.workspace = true
 
 # SIMD byte search for the OSC tokenizer's Ground/Ignore fast paths — the
@@ -149,15 +111,6 @@ base64 = "0.22"
 # in the tree transitively — the same crate `terminal-browser` uses for the
 # deflate side, so the two ends agree on the wire format.
 miniz_oxide = "0.8"
-# Reading coding agents' past sessions (`core::agent_history`), on this
-# machine or a remote one's server: Copilot names a session in YAML, Cursor
-# keys a chat by the md5 of its directory and hex-encodes its metadata, and
-# OpenCode and Cursor keep history in SQLite — bundled, so no system library
-# is needed on any host the server lands on.
-serde_yaml = "0.9"
-md5 = "0.8"
-hex = "0.4"
-rusqlite = { version = "0.40", features = ["bundled"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -243,15 +196,11 @@ gssapi = ["dep:libgssapi"]
 # The platform proxy readers ride along: they exist only to configure the
 # downloader, and each is a no-op on the targets it is not written for.
 remote-install = [
-    "dep:ureq",
+    "dep:reqwest",
     "dep:winreg",
     "dep:system-configuration",
     "dep:system-configuration-sys",
 ]
-# The GitHub tab's REST client (`core::github::http`). It rides the same HTTPS
-# stack and system-proxy resolution as the installer, so it is that feature
-# plus a name of its own: the server, which never reads GitHub, builds neither.
-github = ["remote-install"]
 
 [lints]
 workspace = true

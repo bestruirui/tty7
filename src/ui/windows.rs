@@ -1,9 +1,8 @@
+use gpui::component::TitleBar;
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, BorrowAppContext as _, Bounds, Global, Styled as _,
-    TitlebarOptions, WeakEntity, Window, WindowBounds, WindowDecorations, WindowOptions, point, px,
-    size,
+    AnyWindowHandle, App, AppContext as _, BorrowAppContext as _, Bounds, Global, TitlebarOptions,
+    WeakEntity, Window, WindowBounds, WindowDecorations, WindowOptions, point, px, size,
 };
-use gpui_component::{Root, TitleBar};
 
 use crate::core::config::{Config, StartupMode};
 use crate::core::session::{WorkspaceId, WorkspaceStore};
@@ -18,8 +17,8 @@ const DEFAULT_SIZE: (f32, f32) = (1440.0, 900.0);
 /// The smallest window tty7 still holds its shape in.
 ///
 /// Below this the chrome stops being chrome: the sidebar is at its 180px floor
-/// with barely forty columns beside it, and the overlays the app drops on top —
-/// the palette at 560 wide, the switcher wider still — have nowhere to land.
+/// with barely forty columns beside it, and the workspace switcher has
+/// nowhere to land.
 /// Every one of those could be made to shrink further, but a terminal this
 /// small is not a window anyone is working in, and a floor is the honest fix.
 const MIN_SIZE: (f32, f32) = (720.0, 520.0);
@@ -255,28 +254,20 @@ pub fn open_at(
     }
 
     let options = window_options(cx, workspace);
-    let mut created: Option<gpui::Entity<Tty7App>> = None;
-    let opened = cx.open_window(options, |window, cx| {
-        let app = cx.new(|cx| match initial_cwd.clone() {
+    let opened = gpui::open_window(options, cx, |window, cx| {
+        cx.new(|cx| match initial_cwd.clone() {
             Some(cwd) => Tty7App::for_workspace_at(workspace, Some(cwd), window, cx),
             None => Tty7App::for_workspace(workspace, window, cx),
-        });
-        created = Some(app.clone());
-        cx.new(|cx| Root::new(app, window, cx).bg(gpui::transparent_black()))
+        })
     });
 
-    let handle = match opened {
-        Ok(handle) => handle,
+    let (handle, app) = match opened {
+        Ok(opened) => opened,
         Err(e) => {
             log::error!("failed to open window: {e}");
             return;
         }
     };
-    let Some(app) = created else {
-        log::error!("opened a window but its Tty7App was never built; not registering");
-        return;
-    };
-
     let id = app.read(cx).workspace;
     WindowRegistry::register(cx, id, handle.into(), app.downgrade());
     refresh_menu(cx);
@@ -474,7 +465,7 @@ pub fn announce_detached_at_launch(cx: &mut App, restored: Option<RestoreTarget>
         return;
     };
     let _ = handle.update(cx, |_, window, cx| {
-        gpui_component::WindowExt::push_notification(
+        gpui::component::WindowExt::push_notification(
             window,
             t_plural(L10nKey::LaunchWorkspacesLeftRunning, detached, &[]),
             cx,

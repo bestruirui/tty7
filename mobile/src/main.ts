@@ -1865,7 +1865,7 @@ function openSheet(title: string, ...content: Child[]) {
     "touchstart",
     (e) => {
       const target = e.target as Element;
-      const scroller = target.closest?.(".sheet-body, .diff-code, input, textarea");
+      const scroller = target.closest?.(".sheet-body, input, textarea");
       if (e.touches.length !== 1 || (scroller && scroller.scrollTop > 0) || target.closest?.("input, textarea")) return;
       pull = { y: e.touches[0].clientY, t: e.timeStamp, dy: 0, claimed: false };
     },
@@ -1901,98 +1901,6 @@ function openSheet(title: string, ...content: Child[]) {
   });
   document.body.append(scrim);
   return { close, remove: () => scrim.remove() };
-}
-
-/** What has changed in the repository a pane is in: a block per file, its
- * lines coloured, then the files git does not track yet. */
-function changesSheet(host: Host, place: Place, cwd: string) {
-  const body = h("div", { class: "sheet-body diff-body" }, skeleton());
-  openSheet("Changes", body);
-  api.diff(host.id, place?.key ?? null, cwd).then(
-    (d) => body.replaceChildren(...renderDiff(d)),
-    (e) => {
-      const text = errorText(e);
-      // The usual case is no failure at all: a folder outside any repository.
-      const said = /not in a git repository/.test(text)
-        ? `${baseName(cwd)} is not in a Git repository, so there are no changes to show.`
-        : sentence(text);
-      body.replaceChildren(h("p", { class: "group-empty" }, said));
-    },
-  );
-}
-
-function renderDiff(d: api.Diff): Node[] {
-  const files = d.patch.split(/^(?=diff --git )/m).filter((f) => f.startsWith("diff --git "));
-  const root = h("p", { class: "diff-root" }, shortPath(d.root), files.length || d.untracked.length ? "" : " · no changes");
-  const out: Node[] = [root];
-  let added = 0;
-  let removed = 0;
-  for (const f of files) {
-    const lines = f.split("\n");
-    const name =
-      /^\+\+\+ b\/(.*)$/m.exec(f)?.[1] ?? /^--- a\/(.*)$/m.exec(f)?.[1] ?? /^diff --git a\/(.*) b\//.exec(f)?.[1] ?? "?";
-    let add = 0;
-    let del = 0;
-    const code = h("div", { class: "diff-code" });
-    let inHunk = false;
-    for (const line of lines) {
-      if (line.startsWith("@@")) inHunk = true;
-      if (!inHunk) continue;
-      const kind = line.startsWith("@@") ? "hunk" : line[0] === "+" ? "add" : line[0] === "-" ? "del" : "ctx";
-      if (kind === "add") add++;
-      if (kind === "del") del++;
-      code.append(h("div", { class: `diff-line ${kind}` }, line || " "));
-    }
-    added += add;
-    removed += del;
-    const binary = !inHunk && /^Binary files/m.test(f);
-    // What a tool wrote rather than a person starts folded: a lock file's
-    // hundreds of lines would bury the change that matters.
-    const generated = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|Gemfile\.lock|poetry\.lock|composer\.lock|go\.sum)$/.test(name);
-    const block = h(
-      "details",
-      { class: "diff-file", open: files.length <= 6 && !generated },
-      h(
-        "summary",
-        {},
-        h("span", { class: "diff-name" }, name),
-        h("span", { class: "diff-add" }, `+${add}`),
-        h("span", { class: "diff-del" }, `−${del}`),
-      ),
-      binary ? h("p", { class: "group-empty" }, "A binary file.") : code,
-    );
-    out.push(block);
-  }
-  if (files.length)
-    root.append(
-      ` · ${files.length} ${files.length === 1 ? "file" : "files"} `,
-      h("span", { class: "diff-add" }, `+${added}`),
-      " ",
-      h("span", { class: "diff-del" }, `−${removed}`),
-    );
-  if (d.truncated) out.push(h("p", { class: "group-empty" }, "Cut short: the rest is too long to show here."));
-  if (d.untracked.length) {
-    out.push(
-      section(
-        `Not tracked yet · ${d.untracked.length}`,
-        ...d.untracked.slice(0, 200).map((p) => {
-          // A name to read and where it is, as the folder lists say it; a
-          // new directory keeps its slash.
-          const dir = p.endsWith("/");
-          const parts = p.replace(/\/$/, "").split("/");
-          const leaf = parts.pop() + (dir ? "/" : "");
-          return h(
-            "div",
-            { class: "row choice static" },
-            h("span", { class: "row-title" }, leaf),
-            // The end of the folder is the part that tells them apart.
-            parts.length > 0 && h("span", { class: "row-meta" }, parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : parts.join("/")),
-          );
-        }),
-      ),
-    );
-  }
-  return out;
 }
 
 /** Asks before something that cannot be undone. `window.confirm` is no use:
@@ -2250,7 +2158,6 @@ function paneRow(host: Host, place: Place, ws: WorkspaceView, tab: TabView, pane
     const cwd = pane.cwd;
     if (cwd) {
       actions.push(
-        { label: "Changes", icon: "compose", run: () => changesSheet(host, place, cwd) },
         {
           label: "New tab here",
           icon: "plus",
@@ -2681,7 +2588,6 @@ function terminalScreen(host: Host, place: Place, pane: PaneView, title: string,
       () => [
         { label: "Select text", icon: "copy", run: () => selecting(copyView.hidden) },
         { label: "Find", icon: "search", run: () => finding(true) },
-        ...(paneCwd ? [{ label: "Changes", icon: "compose" as const, run: () => changesSheet(host, place, paneCwd!) }] : []),
         ...(cramped && !leased
           ? [
               {

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::borrow::Cow;
 use std::io::Read as _;
 use std::path::PathBuf;
@@ -22,17 +20,78 @@ use crate::core::cli_agent::{AgentSessionState, AgentStatus, CLIAgent};
 use crate::core::config::CursorStyle as ConfigCursorStyle;
 use crate::core::osc::{Note, NoteBudget, OscTokenizer, TitleEffect, TitleLifetime};
 use crate::daemon::protocol::{
-    AuthPromptKind, AuthResponse, ClientMsg, DaemonMsg, KnownHostEntry, KnownHostId,
-    LoopbackForward, LoopbackForwardRequest, ManagedForward, NativeSshSpec, PaneProcs,
-    RemoteContext, RemoteKind, RestoreFrom, SftpEntry, SftpJobProgress, SftpOp, SftpOpResult,
-    SftpTransferSpec, ShellSpec, SshForwardRule, SshPhase, SshTestReport, WinSize, WorkspaceOp,
-    WorkspaceRequest,
+    AuthPromptKind, AuthResponse, ClientMsg, DaemonMsg, LoopbackForward, LoopbackForwardRequest,
+    ManagedForward, NativeSshSpec, PaneProcs, RemoteContext, RemoteKind, RestoreFrom, SftpEntry,
+    SftpJobProgress, SftpOp, SftpOpResult, SftpTransferSpec, ShellSpec, SshForwardRule, SshPhase,
+    WinSize, WorkspaceOp, WorkspaceRequest,
 };
 use crate::daemon::transport::{self, Stream};
 use gpui::EntityId;
 use tty7_core::core::term_modes::{COLOR_SCHEME_UPDATES, Query, TerminalModes};
 
 use super::size::TermSize;
+
+#[derive(Clone)]
+pub(crate) struct SftpRoute {
+    pane_id: u64,
+    workspace: Option<PaneWorkspace>,
+}
+
+impl SftpRoute {
+    pub(crate) fn new(pane_id: u64, workspace: Option<PaneWorkspace>) -> Self {
+        Self { pane_id, workspace }
+    }
+
+    fn workspace_op(&self, op: WorkspaceOp) -> Option<WorkspaceRequest> {
+        RemoteTerminal::workspace_request(self.workspace.as_ref()?, self.pane_id, op)
+    }
+
+    pub(crate) fn list(&self, path: &str) -> Result<Vec<SftpEntry>, String> {
+        let Some(req) = self.workspace_op(WorkspaceOp::SftpList { path: path.into() }) else {
+            return RemoteTerminal::sftp_list(self.pane_id, path);
+        };
+        match RemoteTerminal::on_workspace(req).map_err(|e| e.to_string())? {
+            DaemonMsg::SftpEntries(entries) => Ok(entries),
+            DaemonMsg::Error(error) => Err(error),
+            other => Err(format!("unexpected SFTP list reply: {other:?}")),
+        }
+    }
+
+    pub(crate) fn op(&self, op: SftpOp) -> SftpOpResult {
+        let Some(req) = self.workspace_op(WorkspaceOp::SftpOp { op: op.clone() }) else {
+            return RemoteTerminal::sftp_op(self.pane_id, op);
+        };
+        match RemoteTerminal::on_workspace(req) {
+            Ok(DaemonMsg::SftpOpResult(result)) => result,
+            Ok(DaemonMsg::Error(error)) => SftpOpResult::Error(error),
+            Ok(other) => SftpOpResult::Error(format!("unexpected SFTP operation reply: {other:?}")),
+            Err(error) => SftpOpResult::Error(error.to_string()),
+        }
+    }
+
+    pub(crate) fn transfer_start(&self, spec: SftpTransferSpec) -> Result<u64, String> {
+        let Some(req) = self.workspace_op(WorkspaceOp::SftpTransferStart { spec: spec.clone() })
+        else {
+            return RemoteTerminal::sftp_transfer_start(spec);
+        };
+        match RemoteTerminal::on_workspace(req).map_err(|e| e.to_string())? {
+            DaemonMsg::SftpTransferStarted { job_id } => Ok(job_id),
+            DaemonMsg::Error(error) => Err(error),
+            other => Err(format!("unexpected SFTP upload reply: {other:?}")),
+        }
+    }
+
+    pub(crate) fn transfer_list(&self) -> Result<Vec<SftpJobProgress>, String> {
+        let Some(req) = self.workspace_op(WorkspaceOp::SftpTransferList) else {
+            return RemoteTerminal::sftp_transfer_list(self.pane_id);
+        };
+        match RemoteTerminal::on_workspace(req).map_err(|e| e.to_string())? {
+            DaemonMsg::SftpTransferProgress(jobs) => Ok(jobs),
+            DaemonMsg::Error(error) => Err(error),
+            other => Err(format!("unexpected SFTP upload progress reply: {other:?}")),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct EventProxy {
@@ -63,7 +122,6 @@ impl EventListener for EventProxy {
 struct ShellState {
     active: bool,
     at_prompt: bool,
-    last_exit: Option<i32>,
     seq: u64,
     cycle: u64,
 }
@@ -99,7 +157,6 @@ struct ReaderSignals {
     awaiting_replay: bool,
     exited: Arc<AtomicBool>,
     child_exited: Arc<AtomicBool>,
-    zle_reading: Arc<AtomicBool>,
     shell_vi_mode: Arc<AtomicBool>,
     running_command: Arc<Mutex<String>>,
     auth: Arc<Mutex<VecDeque<(u64, AuthPromptKind)>>>,
@@ -603,7 +660,6 @@ pub struct RemoteTerminal {
     remote_context: Arc<Mutex<Option<RemoteContext>>>,
     exited_flag: Arc<AtomicBool>,
     child_exited: Arc<AtomicBool>,
-    zle_reading: Arc<AtomicBool>,
     shell_vi_mode: Arc<AtomicBool>,
     /// The line the shell said it is running, from the OSC 133;C mark, still
     /// percent-escaped as the integration sent it. Empty while at a prompt.
@@ -669,25 +725,6 @@ fn spawn_workspace(owner: Option<&str>, route: &PaneRoute) -> Option<String> {
 }
 
 impl RemoteTerminal {
-    pub fn spawn(
-        size: TermSize,
-        cell_w: u16,
-        cell_h: u16,
-        cwd: Option<PathBuf>,
-        shell: Option<ShellSpec>,
-    ) -> anyhow::Result<(Self, u64)> {
-        Self::spawn_on(
-            &PaneRoute::Local,
-            size,
-            cell_w,
-            cell_h,
-            cwd,
-            shell,
-            None,
-            None,
-        )
-    }
-
     pub fn spawn_on(
         route: &PaneRoute,
         size: TermSize,
@@ -835,10 +872,6 @@ impl RemoteTerminal {
         }
     }
 
-    pub fn attach(size: TermSize, cell_w: u16, cell_h: u16, pane_id: u64) -> anyhow::Result<Self> {
-        Self::attach_on(&PaneRoute::Local, size, cell_w, cell_h, pane_id)
-    }
-
     pub fn attach_on(
         route: &PaneRoute,
         size: TermSize,
@@ -976,7 +1009,6 @@ impl RemoteTerminal {
                 awaiting_replay: false,
                 exited: self.exited_flag.clone(),
                 child_exited: self.child_exited.clone(),
-                zle_reading: self.zle_reading.clone(),
                 shell_vi_mode: self.shell_vi_mode.clone(),
                 running_command: self.running_command.clone(),
                 auth: self.auth_prompts.clone(),
@@ -1026,8 +1058,7 @@ impl RemoteTerminal {
         )
     }
 
-    /// A pane on a pty of this machine's own — what the tests build, and what
-    /// `spawn_on` narrows with the route it dialled.
+    #[cfg(test)]
     pub(super) fn from_stream(stream: Stream, size: TermSize) -> anyhow::Result<Self> {
         Self::from_stream_with(
             stream,
@@ -1080,7 +1111,6 @@ impl RemoteTerminal {
         let agent_session: Arc<Mutex<AgentSlot>> = Arc::new(Mutex::new(AgentSlot::default()));
         let exited_flag = Arc::new(AtomicBool::new(false));
         let child_exited = Arc::new(AtomicBool::new(false));
-        let zle_reading = Arc::new(AtomicBool::new(false));
         let shell_vi_mode = Arc::new(AtomicBool::new(false));
         let running_command: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
         let auth_prompts: Arc<Mutex<VecDeque<(u64, AuthPromptKind)>>> =
@@ -1110,7 +1140,6 @@ impl RemoteTerminal {
                 awaiting_replay,
                 exited: exited_flag.clone(),
                 child_exited: child_exited.clone(),
-                zle_reading: zle_reading.clone(),
                 shell_vi_mode: shell_vi_mode.clone(),
                 running_command: running_command.clone(),
                 auth: auth_prompts.clone(),
@@ -1146,7 +1175,6 @@ impl RemoteTerminal {
             remote_context,
             exited_flag,
             child_exited,
-            zle_reading,
             shell_vi_mode,
             running_command,
             auth_prompts,
@@ -1230,7 +1258,6 @@ impl RemoteTerminal {
                     awaiting_replay,
                     exited: exited_flag,
                     child_exited,
-                    zle_reading,
                     shell_vi_mode,
                     running_command,
                     auth,
@@ -1249,7 +1276,7 @@ impl RemoteTerminal {
                 let mut processor: ansi::Processor = ansi::Processor::new();
                 let mut osc = OscNotifyScanner::default();
                 let mut mode_tok = OscTokenizer::new(&[b"133"]);
-                let mut zle_tok = OscTokenizer::new(&[b"133"]);
+                let mut running_tok = OscTokenizer::new(&[b"133"]);
                 // #889: an OSC 0/2 the emulator above has already adopted, read
                 // a second time only to learn whether the program that wrote it
                 // has since exited. `TitleLifetime` is the daemon's rule too,
@@ -1395,11 +1422,10 @@ impl RemoteTerminal {
                                         );
                                     }
                                 });
-                                zle_tok.feed(&out_batch, |payload| {
+                                running_tok.feed(&out_batch, |payload| {
                                     if let Some(mark) = payload.strip_prefix(b"133;") {
                                         match mark.first() {
                                             Some(b'B') => {
-                                                zle_reading.store(true, Ordering::Relaxed);
                                                 // Back at a prompt: whatever
                                                 // ran is over, so the name of
                                                 // it must not outlive it into
@@ -1416,7 +1442,6 @@ impl RemoteTerminal {
                                                 );
                                             }
                                             Some(b'C') => {
-                                                zle_reading.store(false, Ordering::Relaxed);
                                                 // `C` alone is a command start
                                                 // with no line to report — the
                                                 // PowerShell path sends that —
@@ -1431,7 +1456,7 @@ impl RemoteTerminal {
                                                     *cmd = line;
                                                 }
                                             }
-                                            _ => zle_reading.store(false, Ordering::Relaxed),
+                                            _ => {},
                                         }
                                     }
                                 });
@@ -1711,7 +1736,7 @@ impl RemoteTerminal {
                             DaemonMsg::Prompt {
                                 active,
                                 at_prompt,
-                                last_exit,
+                                ..
                             } => {
                                 flush_batch!();
                                 // The replay says a command owns the pane
@@ -1726,7 +1751,6 @@ impl RemoteTerminal {
                                     *guard = ShellState {
                                         active,
                                         at_prompt,
-                                        last_exit,
                                         seq: guard.seq + 1,
                                         cycle: guard.cycle
                                             + u64::from(at_prompt && !guard.at_prompt),
@@ -2067,18 +2091,6 @@ impl RemoteTerminal {
             .unwrap_or(false)
     }
 
-    pub fn prompt_seq(&self) -> u64 {
-        self.shell_state.lock().map(|s| s.seq).unwrap_or(0)
-    }
-
-    pub fn prompt_cycle(&self) -> u64 {
-        self.shell_state.lock().map(|s| s.cycle).unwrap_or(0)
-    }
-
-    pub fn last_exit_code(&self) -> Option<i32> {
-        self.shell_state.lock().ok().and_then(|s| s.last_exit)
-    }
-
     pub fn shell_active(&self) -> bool {
         self.shell_state.lock().map(|s| s.active).unwrap_or(false)
     }
@@ -2148,10 +2160,6 @@ impl RemoteTerminal {
         Some(guard.state.as_ref().map(|s| s.status))
     }
 
-    pub fn zle_reading(&self) -> bool {
-        self.zle_reading.load(Ordering::Relaxed)
-    }
-
     pub fn shell_vi_mode(&self) -> bool {
         self.shell_vi_mode.load(Ordering::Relaxed)
     }
@@ -2170,14 +2178,6 @@ impl RemoteTerminal {
         self.size
     }
 
-    pub fn list_panes() -> Vec<crate::daemon::protocol::PaneInfo> {
-        Self::list_panes_on(&PaneRoute::Local)
-    }
-
-    pub fn list_panes_on(route: &PaneRoute) -> Vec<crate::daemon::protocol::PaneInfo> {
-        Self::try_list_panes_on(route).unwrap_or_default()
-    }
-
     pub fn try_list_panes_on(
         route: &PaneRoute,
     ) -> anyhow::Result<Vec<crate::daemon::protocol::PaneInfo>> {
@@ -2187,10 +2187,6 @@ impl RemoteTerminal {
             DaemonMsg::PaneList(list) => Ok(list),
             other => Err(anyhow::anyhow!("unexpected reply to List: {other:?}")),
         }
-    }
-
-    pub fn kill_pane(pane_id: u64) {
-        Self::kill_pane_on(&PaneRoute::Local, pane_id)
     }
 
     pub fn kill_pane_on(route: &PaneRoute, pane_id: u64) {
@@ -2350,61 +2346,6 @@ impl RemoteTerminal {
         });
     }
 
-    /// The client half of known-hosts management.
-    ///
-    /// Nothing calls this yet: there is no known-hosts surface in the window or
-    /// the CLI. What sits behind it is not a stub, though — `ssh::known_hosts`
-    /// parses the real file, fingerprints each key, and rewrites through a
-    /// 0600 temp file — so this is an interface waiting for a screen, not
-    /// scaffolding around nothing. Deleting it would throw away the finished
-    /// half of the feature.
-    pub fn list_known_hosts() -> Vec<KnownHostEntry> {
-        fn query() -> anyhow::Result<Vec<KnownHostEntry>> {
-            let mut stream = connect()?;
-            ClientMsg::ListKnownHosts.encode(&mut stream)?;
-            match DaemonMsg::read(&mut stream)? {
-                DaemonMsg::KnownHostsList(list) => Ok(list),
-                other => Err(anyhow::anyhow!(
-                    "unexpected reply to ListKnownHosts: {other:?}"
-                )),
-            }
-        }
-        query().unwrap_or_default()
-    }
-
-    /// Ask the daemon to dial this spec and say what happened. Blocking, and
-    /// bounded by the spec's own connect timeout on the far side — call it off
-    /// the UI thread.
-    pub fn test_ssh(spec: Box<NativeSshSpec>) -> SshTestReport {
-        fn query(spec: Box<NativeSshSpec>) -> anyhow::Result<SshTestReport> {
-            let mut stream = connect()?;
-            ClientMsg::TestSsh { spec }.encode(&mut stream)?;
-            match DaemonMsg::read(&mut stream)? {
-                DaemonMsg::SshTestResult(report) => Ok(report),
-                other => Err(anyhow::anyhow!("unexpected reply to TestSsh: {other:?}")),
-            }
-        }
-        query(spec).unwrap_or_else(|e| SshTestReport::Failed {
-            reason: e.to_string(),
-        })
-    }
-
-    /// See [`Self::list_known_hosts`] — same story, and it returns the list
-    /// after the removal so a caller can redraw from one round trip.
-    pub fn delete_known_host(id: KnownHostId) -> Vec<KnownHostEntry> {
-        fn query(id: KnownHostId) -> anyhow::Result<Vec<KnownHostEntry>> {
-            let mut stream = connect()?;
-            ClientMsg::DeleteKnownHost(id).encode(&mut stream)?;
-            match DaemonMsg::read(&mut stream)? {
-                DaemonMsg::KnownHostsList(list) => Ok(list),
-                other => Err(anyhow::anyhow!(
-                    "unexpected reply to DeleteKnownHost: {other:?}"
-                )),
-            }
-        }
-        query(id).unwrap_or_default()
-    }
-
     pub fn sftp_list(pane_id: u64, path: &str) -> Result<Vec<SftpEntry>, String> {
         fn query(pane_id: u64, path: String) -> anyhow::Result<Result<Vec<SftpEntry>, String>> {
             let mut stream = connect()?;
@@ -2442,20 +2383,6 @@ impl RemoteTerminal {
             })
         }
         query(spec).unwrap_or_else(|e| Err(e.to_string()))
-    }
-
-    pub fn sftp_transfer_cancel(job_id: u64) -> Vec<SftpJobProgress> {
-        fn query(job_id: u64) -> anyhow::Result<Vec<SftpJobProgress>> {
-            let mut stream = connect()?;
-            ClientMsg::SftpTransferCancel { job_id }.encode(&mut stream)?;
-            match DaemonMsg::read(&mut stream)? {
-                DaemonMsg::SftpTransferProgress(jobs) => Ok(jobs),
-                other => Err(anyhow::anyhow!(
-                    "unexpected reply to SftpTransferCancel: {other:?}"
-                )),
-            }
-        }
-        query(job_id).unwrap_or_default()
     }
 
     /// A failed poll is not an empty transfer list: the caller has to be able
@@ -2559,20 +2486,6 @@ impl RemoteTerminal {
         match DaemonMsg::read(&mut stream)? {
             DaemonMsg::Error(msg) => Err(anyhow::anyhow!(msg)),
             reply => Ok(reply),
-        }
-    }
-
-    pub fn on_workspace_forwards(req: WorkspaceRequest) -> Vec<ManagedForward> {
-        match Self::on_workspace(req) {
-            Ok(DaemonMsg::ForwardList(list)) => list,
-            Ok(other) => {
-                log::warn!("unexpected reply to a workspace forward request: {other:?}");
-                Vec::new()
-            }
-            Err(e) => {
-                log::warn!("workspace forward request failed: {e}");
-                Vec::new()
-            }
         }
     }
 
@@ -2854,10 +2767,6 @@ fn stale_mode_resets(mode: TermMode) -> Vec<u8> {
     // The kitty keyboard flags are not reset here: no sequence clears their
     // stacks, so the caller does it through `Term::reset_keyboard_modes`.
     seq
-}
-
-pub(crate) fn notify_desktop(title: Option<&str>, body: &str) {
-    notify_desktop_for_pane(title, body, None);
 }
 
 /// Show a desktop notification.
@@ -4584,10 +4493,8 @@ mod replay_tests {
         );
     }
 
-    /// What a physical Escape is written to the pane as, by the encoder a
-    /// local ConPTY pane uses (#1155 is a ConPTY-only symptom), once the
-    /// reader has applied everything up to `barrier`. Also returns the reply
-    /// a `CSI ? u` sent after the barrier gets.
+    /// Encode Escape using VT keyboard modes after the reader has applied
+    /// everything up to `barrier`. Also return the reply to `CSI ? u`.
     fn escape_after(frames: Vec<DaemonMsg>, barrier: &str) -> (Vec<u8>, Option<String>) {
         use crate::terminal::input::{KeyFlags, keystroke_to_bytes};
         crate::core::config::pin_test_config_dir();
@@ -4614,7 +4521,7 @@ mod replay_tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let mode = *term.term.lock().mode();
-        let flags = KeyFlags::from_mode_with_local_conpty(&mode, true);
+        let flags = KeyFlags::from_mode(&mode);
         let escape = keystroke_to_bytes(&gpui::Keystroke::parse("escape").unwrap(), flags);
         drop(daemon);
         (escape.unwrap_or_default(), reply)
@@ -7337,58 +7244,6 @@ mod tests {
     }
 
     #[test]
-    fn zle_reading_follows_live_prompt_end_marks() {
-        let (client_side, mut daemon_side) = UnixStream::pair().unwrap();
-        let term = RemoteTerminal::from_stream(client_side, TermSize::new(80, 24)).unwrap();
-        let poll = |want: bool| {
-            for _ in 0..200 {
-                if term.zle_reading() == want {
-                    return true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            false
-        };
-        assert!(!term.zle_reading(), "conservative false before any mark");
-
-        DaemonMsg::Snapshot(b"\x1b]133;B\x07".to_vec())
-            .encode(&mut daemon_side)
-            .unwrap();
-        DaemonMsg::Output(b"\x1b]133;D;0\x07m".to_vec())
-            .encode(&mut daemon_side)
-            .unwrap();
-        daemon_side.flush().unwrap();
-        let mut synced = false;
-        for _ in 0..200 {
-            let c = term.term.lock().grid()[alacritty_terminal::index::Line(0)]
-                [alacritty_terminal::index::Column(0)]
-            .c;
-            if c == 'm' {
-                synced = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        assert!(synced, "reader should have applied both frames");
-        assert!(
-            !term.zle_reading(),
-            "replayed B / live D must not arm the flag"
-        );
-
-        DaemonMsg::Output(b"\x1b]133;B\x07".to_vec())
-            .encode(&mut daemon_side)
-            .unwrap();
-        daemon_side.flush().unwrap();
-        assert!(poll(true), "live B should arm zle_reading");
-
-        DaemonMsg::Output(b"\x1b]133;C\x07".to_vec())
-            .encode(&mut daemon_side)
-            .unwrap();
-        daemon_side.flush().unwrap();
-        assert!(poll(false), "C (command start) should disarm zle_reading");
-    }
-
-    #[test]
     fn the_running_command_is_the_line_the_shell_marked_and_ends_with_it() {
         crate::core::config::pin_test_config_dir();
         let (client_side, mut daemon_side) = UnixStream::pair().unwrap();
@@ -7439,54 +7294,6 @@ mod tests {
     }
 
     #[test]
-    fn shell_vi_mode_follows_live_prompt_mode_marks_without_disarming_zle() {
-        let (client_side, mut daemon_side) = UnixStream::pair().unwrap();
-        let term = RemoteTerminal::from_stream(client_side, TermSize::new(80, 24)).unwrap();
-        let poll = |vi: bool, zle: bool| {
-            for _ in 0..200 {
-                if term.shell_vi_mode() == vi && term.zle_reading() == zle {
-                    return true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            false
-        };
-
-        assert!(!term.shell_vi_mode(), "conservative false before any mark");
-        assert!(!term.zle_reading(), "zle also starts false");
-
-        DaemonMsg::Output(b"\x1b]133;B\x07".to_vec())
-            .encode(&mut daemon_side)
-            .unwrap();
-        daemon_side.flush().unwrap();
-        assert!(poll(false, true), "B should arm zle only");
-
-        DaemonMsg::Output(b"\x1b]133;V;1\x07".to_vec())
-            .encode(&mut daemon_side)
-            .unwrap();
-        daemon_side.flush().unwrap();
-        assert!(
-            poll(true, true),
-            "V;1 should set shell vi-mode without disarming zle"
-        );
-
-        DaemonMsg::Output(b"\x1b]133;V;0\x07".to_vec())
-            .encode(&mut daemon_side)
-            .unwrap();
-        daemon_side.flush().unwrap();
-        assert!(
-            poll(false, true),
-            "V;0 should clear shell vi-mode without disarming zle"
-        );
-
-        DaemonMsg::Output(b"\x1b]133;C\x07".to_vec())
-            .encode(&mut daemon_side)
-            .unwrap();
-        daemon_side.flush().unwrap();
-        assert!(poll(false, false), "C still disarms zle");
-    }
-
-    #[test]
     fn shell_vi_mode_is_restored_from_snapshot_replay() {
         let (client_side, mut daemon_side) = UnixStream::pair().unwrap();
         let term = RemoteTerminal::from_stream(client_side, TermSize::new(80, 24)).unwrap();
@@ -7507,10 +7314,6 @@ mod tests {
         assert!(
             poll(true),
             "attached clients should inherit the prompt's vi-mode state"
-        );
-        assert!(
-            !term.zle_reading(),
-            "historical replay must not imply zle is currently reading"
         );
 
         DaemonMsg::Snapshot(b"\x1b]133;V;0\x07".to_vec())

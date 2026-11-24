@@ -2,8 +2,6 @@ use alacritty_terminal::term::TermMode;
 use gpui::{App, Bounds, InputHandler, Pixels, UTF16Selection, Window};
 
 use super::view::TerminalView;
-#[cfg(target_os = "macos")]
-use crate::core::config::Config;
 
 /// Everything about the terminal's current state that changes how a keystroke
 /// is encoded: keyboard modes and the PTY that receives the bytes.
@@ -40,10 +38,8 @@ impl KeyFlags {
         self.disambiguate || self.report_all_keys
     }
 
-    /// 根据终端来源和键盘协议编码无修饰键的 ESC。
     pub(super) fn escape_bytes(self) -> &'static [u8] {
         if self.local_conpty {
-            // 显式发送 VK_ESCAPE 的按下和松开事件，避免 ConPTY 将 CSI-u 当作文本。
             b"\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"
         } else if self.kitty_active() {
             b"\x1b[27u"
@@ -118,13 +114,6 @@ pub(super) fn defer_to_ime(ks: &gpui::Keystroke, flags: KeyFlags) -> bool {
         .is_some_and(|ch| !ch.is_empty() && ch.chars().all(|c| c >= '\u{20}' && c != '\u{7f}'))
 }
 
-#[cfg(any(target_os = "macos", test))]
-pub(super) fn meta_chord_bypasses_ime(ks: &gpui::Keystroke, option_as_alt: bool) -> bool {
-    let m = &ks.modifiers;
-    option_as_alt && m.alt && !m.platform && !m.control
-}
-
-/// 将按键编码为目标终端的输入字节，优先保留本地 ConPTY 的 ESC 虚拟键。
 pub(super) fn keystroke_to_bytes(ks: &gpui::Keystroke, flags: KeyFlags) -> Option<Vec<u8>> {
     if ks.key == "escape" && ks.modifiers == gpui::Modifiers::default() {
         return Some(flags.escape_bytes().to_vec());
@@ -338,15 +327,6 @@ fn kitty_function_key(key: &str) -> Option<u32> {
     (13..=24).contains(&n).then(|| 57376 + (n - 13))
 }
 
-/// Whether a key name is one of the function keys — the range that means
-/// nothing to a text editor and everything to a shell. The inline editor asks
-/// this to know a keystroke it holds no meaning for but the shell does; it
-/// still only hands over what actually encodes, which for F13 and up is the
-/// kitty path alone.
-pub(crate) fn is_function_key(key: &str) -> bool {
-    function_key(key).is_some() || kitty_function_key(key).is_some()
-}
-
 fn text_key_code(ks: &gpui::Keystroke) -> Option<u32> {
     match ks.key.as_str() {
         "space" => Some(0x20),
@@ -425,6 +405,9 @@ fn legacy_keystroke_to_bytes(ks: &gpui::Keystroke, flags: KeyFlags) -> Option<Ve
     }
 
     let seq: Option<&[u8]> = match key {
+        "enter" if m.shift && !m.control && !m.alt && !m.platform => {
+            Some(flags.legacy_newline_bytes())
+        }
         "enter" => Some(b"\r"),
         "tab" => Some(b"\t"),
         "backspace" => Some(b"\x7f"),
@@ -562,17 +545,7 @@ impl InputHandler for TerminalInputHandler {
         false
     }
 
-    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-    fn prefers_ime_for_printable_keys(
-        &mut self,
-        keystroke: &gpui::Keystroke,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> bool {
-        #[cfg(target_os = "macos")]
-        if meta_chord_bypasses_ime(keystroke, cx.global::<Config>().macos_option_as_alt) {
-            return false;
-        }
+    fn prefers_ime_for_printable_keys(&mut self, window: &mut Window, cx: &mut App) -> bool {
         if self.view.read(cx).key_flags().report_all_keys {
             return false;
         }
@@ -585,10 +558,7 @@ impl InputHandler for TerminalInputHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        KeyFlags, defer_to_ime, keystroke_to_bytes, meta_chord_bypasses_ime,
-        reshape_option_keystroke, tab_bytes,
-    };
+    use super::{KeyFlags, defer_to_ime, keystroke_to_bytes, reshape_option_keystroke, tab_bytes};
     use alacritty_terminal::term::TermMode;
     use gpui::{Keystroke, Modifiers};
 
@@ -1543,46 +1513,6 @@ mod tests {
             reshaped_bytes(&option_b(), false, KeyFlags::default()),
             Some("∫".as_bytes().to_vec())
         );
-    }
-
-    #[test]
-    fn meta_chords_skip_the_ime_only_when_option_is_meta() {
-        let alt = Modifiers {
-            alt: true,
-            ..Default::default()
-        };
-        assert!(meta_chord_bypasses_ime(&option_b(), true));
-        let alt_shift = Modifiers {
-            alt: true,
-            shift: true,
-            ..Default::default()
-        };
-        assert!(meta_chord_bypasses_ime(
-            &ks(alt_shift, "b", Some("ı")),
-            true
-        ));
-
-        assert!(!meta_chord_bypasses_ime(&option_b(), false));
-
-        assert!(!meta_chord_bypasses_ime(
-            &ks(Modifiers::default(), "n", Some("n")),
-            true
-        ));
-
-        let cmd_alt = Modifiers {
-            alt: true,
-            platform: true,
-            ..Default::default()
-        };
-        assert!(!meta_chord_bypasses_ime(&ks(cmd_alt, "b", None), true));
-        let ctrl_alt = Modifiers {
-            alt: true,
-            control: true,
-            ..Default::default()
-        };
-        assert!(!meta_chord_bypasses_ime(&ks(ctrl_alt, "b", None), true));
-
-        assert!(meta_chord_bypasses_ime(&ks(alt, "left", None), true));
     }
 
     #[test]

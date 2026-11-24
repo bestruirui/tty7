@@ -17,8 +17,8 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use gpui::component::WindowExt as _;
 use gpui::{App, Axis, Context, Window};
-use gpui_component::WindowExt as _;
 
 use crate::core::cli_agent::{CLIAgent, launch_program, program_on_path};
 use crate::core::config::{Config, ProfileUsage, unix_now};
@@ -39,14 +39,6 @@ pub(crate) fn launch_action_names() -> &'static [(CLIAgent, String)] {
             .collect()
     });
     &NAMES
-}
-
-pub(crate) fn launch_action_name(agent: CLIAgent) -> &'static str {
-    launch_action_names()
-        .iter()
-        .find(|(a, _)| *a == agent)
-        .map(|(_, name)| name.as_str())
-        .expect("every agent has a launch action")
 }
 
 pub(crate) fn agent_for_launch_action(action: &str) -> Option<CLIAgent> {
@@ -119,32 +111,6 @@ pub(crate) fn remember_launch_line(cfg: &mut Config, agent: CLIAgent, line: Stri
     cfg.agent_launch
         .retain(|slug, _| CLIAgent::from_slug(slug) != Some(agent));
     cfg.agent_launch.insert(agent.slug().to_string(), line);
-}
-
-/// The line that resumes `agent`'s session `session_id`, carrying the flags
-/// `agent_launch` gives the agent: a session started with
-/// `--dangerously-skip-permissions` comes back with it.
-pub(crate) fn resume_line(
-    agent: CLIAgent,
-    session_id: &str,
-    overrides: &HashMap<String, String>,
-) -> Option<String> {
-    let launch = agent.launch_command(overrides);
-    let argv: Vec<String> = launch.split_whitespace().map(str::to_string).collect();
-    agent.resume_command(session_id, Some(&argv))
-}
-
-/// The line that forks `agent`'s session `session_id` into a new one, with
-/// the same flags [`resume_line`] carries. `None` for an agent that cannot
-/// fork.
-pub(crate) fn fork_line(
-    agent: CLIAgent,
-    session_id: &str,
-    overrides: &HashMap<String, String>,
-) -> Option<String> {
-    let launch = agent.launch_command(overrides);
-    let argv: Vec<String> = launch.split_whitespace().map(str::to_string).collect();
-    agent.fork_command(session_id, Some(&argv))
 }
 
 /// How long a new shell is given to reach its first prompt before a queued
@@ -244,60 +210,6 @@ impl Tty7App {
                 .or_default()
                 .last_used = unix_now();
         });
-    }
-
-    /// Reopen `agent`'s session `session_id` in a new tab in `cwd`, the
-    /// directory it ran in — an agent keys its history by directory, and
-    /// `--resume` elsewhere finds nothing. The resume carries the flags the
-    /// agent is configured to launch with (`agent_launch`), so a session
-    /// started with them comes back with them.
-    ///
-    /// With `fork`, the session is branched instead: the agent starts a new
-    /// one from its history and the original is left as it was.
-    pub(crate) fn resume_session(
-        &mut self,
-        agent: CLIAgent,
-        session_id: &str,
-        cwd: Option<std::path::PathBuf>,
-        fork: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let launch = &cx.global::<Config>().agent_launch;
-        let command = match fork {
-            true => fork_line(agent, session_id, launch),
-            false => resume_line(agent, session_id, launch),
-        };
-        let Some(command) = command else {
-            window.push_notification(
-                t_fmt(
-                    L10nKey::AppSessionNotResumable,
-                    &[("name", agent.display_name())],
-                ),
-                cx,
-            );
-            return;
-        };
-        // A directory that is gone cannot hold the session either; say so
-        // rather than resume into a history the agent will not find. Only
-        // asked of this machine: a remote session's directory is not here.
-        if self.spawn_host(cx).is_local()
-            && let Some(dir) = cwd.as_ref().filter(|dir| !dir.is_dir())
-        {
-            window.push_notification(
-                t_fmt(
-                    L10nKey::AppSessionDirectoryGone,
-                    &[("path", &dir.display().to_string())],
-                ),
-                cx,
-            );
-            return;
-        }
-        let Some(slot) = self.new_tab_slot(cwd, None, window, cx) else {
-            log::warn!("no pane opened to resume {} {session_id}", agent.slug());
-            return;
-        };
-        run_when_ready(&slot, command, cx);
     }
 
     /// "New Agent Tab": launch the agent used most recently.
@@ -516,9 +428,8 @@ mod tests {
 
     #[test]
     fn every_agent_has_a_bindable_launch_action() {
-        for agent in CLIAgent::ALL {
-            let name = launch_action_name(agent);
-            assert_eq!(agent_for_launch_action(name), Some(agent), "{name}");
+        for (agent, name) in launch_action_names() {
+            assert_eq!(agent_for_launch_action(name), Some(*agent), "{name}");
         }
         assert_eq!(agent_for_launch_action("LaunchAgent:nobody"), None);
         assert_eq!(agent_for_launch_action("NewAgentTab"), None);
@@ -546,33 +457,5 @@ mod tests {
         .into_iter()
         .collect();
         assert_eq!(installed_on(path, &overrides), vec![CLIAgent::Claude]);
-    }
-
-    #[test]
-    fn a_resume_carries_the_configured_launch_flags() {
-        let none = HashMap::new();
-        assert_eq!(
-            resume_line(CLIAgent::Claude, "abc-1", &none).as_deref(),
-            Some("claude --resume abc-1")
-        );
-        assert_eq!(
-            resume_line(CLIAgent::Codex, "0199-x", &none).as_deref(),
-            Some("codex resume 0199-x")
-        );
-        let flagged = HashMap::from([(
-            "claude".to_string(),
-            "claude --dangerously-skip-permissions".to_string(),
-        )]);
-        assert_eq!(
-            resume_line(CLIAgent::Claude, "abc-1", &flagged).as_deref(),
-            Some("claude --dangerously-skip-permissions --resume abc-1")
-        );
-    }
-
-    #[test]
-    fn an_id_that_could_smuggle_a_command_is_not_resumed() {
-        let none = HashMap::new();
-        assert_eq!(resume_line(CLIAgent::Claude, "x; rm -rf ~", &none), None);
-        assert_eq!(resume_line(CLIAgent::Claude, "", &none), None);
     }
 }

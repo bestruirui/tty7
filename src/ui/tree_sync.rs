@@ -2,8 +2,8 @@ use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::Arc;
 
+use gpui::component::WindowExt as _;
 use gpui::{App, Global};
-use gpui_component::WindowExt as _;
 use tty7_core::core::machine::{
     AgentFacts, Axis as TreeAxis, LayoutDelta, Machine, PaneNode, PaneRecord, PaneSeed, Side,
     Tab as TreeTab, TabId, Workspace,

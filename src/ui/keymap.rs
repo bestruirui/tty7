@@ -4,16 +4,49 @@ use crate::core::actions::*;
 use crate::core::config::{Config, KeybindingOverride};
 use crate::terminal::view::{
     AlternatePaste, ClearScrollback, CopyRaw, CopyText, FindInTerminal, FindNext, FindPrevious,
-    InsertNewline, InsertNewlineFallback, PasteText, RunReverseSearchSelection, ToggleComposer,
+    PasteText, ToggleComposer,
 };
 use crate::ui::i18n::{L10nKey, t, t_fmt};
-use crate::ui::palette;
-use crate::ui::search::CommandGroup;
 use crate::ui::settings::humanize_action;
 use crate::ui::theme::set_menus;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CommandGroup {
+    TabsPanes,
+    Workspaces,
+    View,
+    Terminal,
+    Ssh,
+    Agents,
+    Application,
+}
+
+impl CommandGroup {
+    pub(crate) const ORDER: [CommandGroup; 7] = [
+        CommandGroup::TabsPanes,
+        CommandGroup::Workspaces,
+        CommandGroup::View,
+        CommandGroup::Terminal,
+        CommandGroup::Ssh,
+        CommandGroup::Agents,
+        CommandGroup::Application,
+    ];
+
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            CommandGroup::TabsPanes => t(L10nKey::CmdGroupTabsPanes),
+            CommandGroup::Workspaces => t(L10nKey::CmdGroupWorkspaces),
+            CommandGroup::View => t(L10nKey::CmdGroupView),
+            CommandGroup::Terminal => t(L10nKey::CmdGroupTerminal),
+            CommandGroup::Ssh => t(L10nKey::CmdGroupSsh),
+            CommandGroup::Agents => t(L10nKey::CmdGroupAgents),
+            CommandGroup::Application => t(L10nKey::CmdGroupApplication),
+        }
+    }
+}
+
 /// The bindings that were already in the keymap before tty7 put its own
-/// there. gpui-component installs a table of its own from `gpui_component::
+/// there. gpui-component installs a table of its own from `gpui::component::
 /// init` — the `Input` context's editing keys, the list and menu navigation,
 /// the escape that closes a dialog — and it has no entry point to install
 /// them a second time. A rebuild replaces the whole map, so it has to lay
@@ -39,7 +72,6 @@ pub fn init(cx: &mut App) {
     // gpui runs the window's bubble phase first and returns before the global
     // one, so the two never both fire.
     cx.on_action(|_: &NewWindow, cx: &mut App| crate::ui::windows::open(cx, None));
-    palette::init(cx);
     set_menus(cx);
 }
 
@@ -48,21 +80,19 @@ pub fn init(cx: &mut App) {
 /// that has no settings row, and the modal-context guards the dispatch path
 /// needs — none of them come from `effective_bindings`, so a rebuild that
 /// only replayed the config would drop them.
-fn fixed_bindings() -> Vec<KeyBinding> {
+fn fixed_bindings(cx: &App) -> Vec<KeyBinding> {
     let mut bindings = vec![
-        KeyBinding::new("secondary-+", IncreaseFontSize, None),
+        KeyBinding::load(
+            "secondary-+",
+            Box::new(IncreaseFontSize),
+            None,
+            false,
+            None,
+            cx,
+        )
+        .expect("valid font-size shortcut"),
         KeyBinding::new("tab", SendTab, Some("Terminal")),
         KeyBinding::new("shift-tab", SendBackTab, Some("Terminal")),
-        // The Ctrl+R menu runs its selection on Cmd+Enter, which on macOS is
-        // also `ToggleFullscreen`. Scoped to the open menu, it is deeper in
-        // the dispatch path than the window binding and wins only there.
-        // `cmd`, not `secondary`: the menu's own key handler runs on the
-        // platform key everywhere, and Ctrl+Enter off macOS only accepts.
-        KeyBinding::new(
-            "cmd-enter",
-            RunReverseSearchSelection,
-            Some("Terminal && reverse_search"),
-        ),
     ];
     // The switcher's footer tells you Tab is the way across to the tab column
     // once a query is in the box. gpui-component's Root binds `tab` to its
@@ -76,95 +106,6 @@ fn fixed_bindings() -> Vec<KeyBinding> {
         SwitcherAcrossBack,
         Some("Switcher"),
     ));
-    // Tab walks the search's tabs. Bound on the search's own context for the
-    // switcher's reason: Root's focus walker would otherwise take it out of
-    // the modal, onto whichever chrome tile is behind it, ring and all.
-    let search = Some(crate::ui::search::KEY_CONTEXT);
-    bindings.push(KeyBinding::new("tab", SearchNextTab, search));
-    bindings.push(KeyBinding::new("shift-tab", SearchPrevTab, search));
-    // The code editor's multi-cursor chords, laid down again after tty7's
-    // own table. gpui ranks a context-free binding as deep as the focused
-    // context, and breaks the tie by whichever was added last — so the copies
-    // gpui-component installs lose ⌘D to `SplitRight` and ⌘⌥↑/↓ to
-    // `FocusPaneUp`/`Down`, whose handlers sit on the workspace root and take
-    // the key before the editor is asked. Re-added here they win inside an
-    // `Input`; only the code editor handles them, so in any other text field
-    // gpui falls through to the pane binding next in line.
-    {
-        use gpui_component::input::{
-            AddCursorAbove, AddCursorBelow, SelectAllOccurrences, SelectNextOccurrence,
-        };
-        let input = Some("Input");
-        bindings.push(KeyBinding::new("secondary-d", SelectNextOccurrence, input));
-        bindings.push(KeyBinding::new(
-            "secondary-shift-l",
-            SelectAllOccurrences,
-            input,
-        ));
-        bindings.push(KeyBinding::new("secondary-alt-up", AddCursorAbove, input));
-        bindings.push(KeyBinding::new("secondary-alt-down", AddCursorBelow, input));
-        // ⌘K ⌘D: a chord whose first key is `ClearScrollback` on macOS. gpui
-        // drops a pending chord that ranks below a complete match, so this
-        // too has to come after tty7's table. Code editor only: in any other
-        // field ⌘K goes straight through, without waiting for a second key.
-        bindings.push(KeyBinding::new(
-            "secondary-k secondary-d",
-            gpui_component::input::SkipOccurrence,
-            Some(gpui_component::input::CODE_EDITOR_CONTEXT),
-        ));
-    }
-    // The language-server commands, on the keys VS Code taught everyone, and
-    // only inside a text field: F2 and F12 in a terminal belong to the
-    // program running there. The handlers act only for the code editor and
-    // let the key go on anywhere else. ⌘. / Ctrl+. needs nothing here: the
-    // editor binds it to the same code-action menu itself.
-    let input = Some("Input");
-    bindings.push(KeyBinding::new("f12", EditorGoToDefinition, input));
-    bindings.push(KeyBinding::new("f2", EditorRenameSymbol, input));
-    bindings.push(KeyBinding::new("shift-alt-f", EditorFormatDocument, input));
-    bindings.push(KeyBinding::new("shift-f12", EditorFindReferences, input));
-    // The gutter's change markers, on VS Code's chords. Only in an `Input`:
-    // a function key bound for the whole window would never reach the shell,
-    // and the handlers let the key through when the code editor is not the
-    // field that has it.
-    {
-        let input = Some("Input");
-        bindings.push(KeyBinding::new("alt-f5", EditorNextChange, input));
-        bindings.push(KeyBinding::new("shift-alt-f5", EditorPrevChange, input));
-        bindings.push(KeyBinding::new("alt-f3", EditorPeekChange, input));
-    }
-    // The code editor's line commands, for the same tie: ⌘/ is the shortcut
-    // sheet, ⌘↵ fullscreen, ⌘⇧↵ maximize and ⌥↑/⌥↓ pane focus off macOS, all
-    // context-free. Bound on `CodeEditor`, which only a multi-line code
-    // editor declares, so every other text field and the terminal keep the
-    // app's keys.
-    {
-        use gpui_component::input::{
-            CODE_EDITOR_CONTEXT, CopyLineDown, CopyLineUp, DeleteLine, InsertLineAbove,
-            InsertLineBelow, MoveLineDown, MoveLineUp, MoveToMatchingBracket, SelectLine,
-            ToggleBlockComment, ToggleLineComment,
-        };
-        let editor = Some(CODE_EDITOR_CONTEXT);
-        bindings.extend([
-            KeyBinding::new("secondary-/", ToggleLineComment, editor),
-            KeyBinding::new("alt-shift-a", ToggleBlockComment, editor),
-            KeyBinding::new("alt-up", MoveLineUp, editor),
-            KeyBinding::new("alt-down", MoveLineDown, editor),
-            KeyBinding::new("alt-shift-up", CopyLineUp, editor),
-            KeyBinding::new("alt-shift-down", CopyLineDown, editor),
-            KeyBinding::new("secondary-shift-k", DeleteLine, editor),
-            KeyBinding::new("secondary-enter", InsertLineBelow, editor),
-            KeyBinding::new("secondary-shift-enter", InsertLineAbove, editor),
-            KeyBinding::new("secondary-l", SelectLine, editor),
-            KeyBinding::new("secondary-shift-\\", MoveToMatchingBracket, editor),
-        ]);
-        #[cfg(target_os = "macos")]
-        bindings.push(KeyBinding::new(
-            "ctrl-j",
-            gpui_component::input::JoinLines,
-            editor,
-        ));
-    }
     bindings
 }
 
@@ -186,8 +127,8 @@ fn rebuild_keymap(cx: &mut App) {
         .try_global::<BaseBindings>()
         .map(|base| base.0.clone())
         .unwrap_or_default();
-    bindings.extend(action_bindings(&effective));
-    bindings.extend(fixed_bindings());
+    bindings.extend(action_bindings(&effective, cx));
+    bindings.extend(fixed_bindings(cx));
     cx.clear_key_bindings();
     cx.bind_keys(bindings);
 }
@@ -215,10 +156,6 @@ pub(crate) fn keybinding_config(cx: &App) -> (Vec<(String, KeybindingOverride)>,
     (overrides, cfg.keybinding_preset.clone(), cfg.prefix.clone())
 }
 
-const INSERT_NEWLINE_DEFAULT: &str = "shift-enter";
-
-const INSERT_NEWLINE_ALT_DEFAULT: &str = "alt-enter";
-
 const PASTE_ALT_DEFAULT: &str = "shift-insert";
 
 fn paste_text_default() -> &'static str {
@@ -238,14 +175,7 @@ fn alternate_paste_default() -> &'static str {
 }
 
 fn extra_defaults() -> Vec<(&'static str, &'static str, &'static str)> {
-    vec![
-        (
-            "InsertNewline",
-            INSERT_NEWLINE_DEFAULT,
-            INSERT_NEWLINE_ALT_DEFAULT,
-        ),
-        ("PasteText", paste_text_default(), PASTE_ALT_DEFAULT),
-    ]
+    vec![("PasteText", paste_text_default(), PASTE_ALT_DEFAULT)]
 }
 
 fn extra_keystrokes(effective: &[(String, String)]) -> Vec<(&'static str, &'static str)> {
@@ -256,10 +186,6 @@ fn extra_keystrokes(effective: &[(String, String)]) -> Vec<(&'static str, &'stat
         })
         .map(|(action, _, extra)| (action, extra))
         .collect()
-}
-
-fn is_default_insert_newline_binding(action: &str, key: &str) -> bool {
-    action == "InsertNewline" && key == INSERT_NEWLINE_DEFAULT
 }
 
 pub(crate) fn extra_bindings(cx: &App) -> Vec<(String, String)> {
@@ -277,23 +203,23 @@ pub(crate) fn extra_bindings(cx: &App) -> Vec<(String, String)> {
 ///
 /// Answers whether the action was known at all, which is the caller's cue to
 /// warn about a name it cannot bind.
-fn push_binding(bindings: &mut Vec<KeyBinding>, action: &str, key: &str) -> bool {
-    let Some(binding) = make_binding(action, key) else {
+fn push_binding(bindings: &mut Vec<KeyBinding>, action: &str, key: &str, cx: &App) -> bool {
+    let Some(binding) = make_binding(action, key, cx) else {
         return false;
     };
     bindings.push(binding);
     if let Some(folded) = folded_spec(key)
-        && let Some(alias) = make_binding(action, &folded)
+        && let Some(alias) = make_binding(action, &folded, cx)
     {
         bindings.push(alias);
     }
     true
 }
 
-fn action_bindings(effective: &[(String, String)]) -> Vec<KeyBinding> {
+fn action_bindings(effective: &[(String, String)], cx: &App) -> Vec<KeyBinding> {
     let mut bindings = Vec::new();
     for (action, key) in extra_keystrokes(effective) {
-        push_binding(&mut bindings, action, key);
+        push_binding(&mut bindings, action, key, cx);
     }
     for (action, key) in effective {
         if key.is_empty() {
@@ -331,17 +257,24 @@ fn action_bindings(effective: &[(String, String)]) -> Vec<KeyBinding> {
                 );
             }
         }
-        if !push_binding(&mut bindings, action, key) {
+        if !push_binding(&mut bindings, action, key, cx) {
             log::warn!("ignoring keybinding: unknown action '{action}'");
-        } else if is_default_insert_newline_binding(action, key) {
-            bindings.push(KeyBinding::new(
-                INSERT_NEWLINE_DEFAULT,
-                InsertNewlineFallback,
-                Some("Terminal"),
-            ));
         }
     }
     bindings
+}
+
+fn parse_keystroke(source: &str) -> Result<Keystroke, gpui::InvalidKeystrokeError> {
+    Keystroke::parse_with_os(
+        source,
+        if cfg!(target_os = "macos") {
+            gpui::OperatingSystem::Mac
+        } else if cfg!(target_os = "windows") {
+            gpui::OperatingSystem::Windows
+        } else {
+            gpui::OperatingSystem::Linux
+        },
+    )
 }
 
 /// Whether a chord is one the terminal owes the PTY as a control code.
@@ -358,7 +291,7 @@ fn action_bindings(effective: &[(String, String)]) -> Vec<KeyBinding> {
 /// a chord that encodes nothing gets a warning it did not strictly earn,
 /// which is cheaper than a default quietly eating one that does.
 fn steals_a_control_code(chord: &str) -> bool {
-    let Ok(ks) = Keystroke::parse(chord) else {
+    let Ok(ks) = parse_keystroke(chord) else {
         return false;
     };
     let m = &ks.modifiers;
@@ -373,26 +306,8 @@ fn steals_a_control_code(chord: &str) -> bool {
 }
 
 /// The bindings allowed to sit on a control code anyway.
-///
-/// `EditorSave` stays on Ctrl+S — and `EditorGoToLine` on Ctrl+G, as in
-/// every other code editor — because its handler in `app.rs` calls
-/// `cx.propagate()` whenever the editor does not have focus, so the keystroke
-/// reaches the terminal as XOFF instead of dying at the window. Ctrl+V is the
-/// paste chord every Windows and Linux desktop trains its users on; tty7
-/// answers it the way Windows Terminal does, and keeps it off the alternate
-/// screen (see `alternate_paste_default`), so it is allowed under any action —
-/// including a `PasteText` a user deliberately moves onto it (#677).
-///
-/// Anything else added here needs a fall-through of its own; a binding that
-/// simply swallows the byte does not belong on this list.
-fn control_code_binding_allowed(action: &str, chord: &str) -> bool {
-    matches!(action, "EditorSave" | "EditorGoToLine")
-        // Bound in the text field's context only, and handled only by the
-        // code editor: in the terminal the chord is never matched, and in any
-        // other field it falls through. VS Code's Go Forward, ⌃⇧-, folds to
-        // Ctrl+_ (US) there.
-        || action_context(action) == Some(crate::ui::code_editor::NAV_KEY_CONTEXT)
-        || (cfg!(not(target_os = "macos")) && chord == "ctrl-v")
+fn control_code_binding_allowed(_action: &str, chord: &str) -> bool {
+    cfg!(not(target_os = "macos")) && chord == "ctrl-v"
 }
 
 fn per_platform(mac: &'static str, other: &'static str) -> &'static str {
@@ -405,9 +320,9 @@ fn per_platform(mac: &'static str, other: &'static str) -> &'static str {
 
 pub(crate) fn default_bindings() -> Vec<(&'static str, &'static str)> {
     let mut bindings = shipped_bindings();
-    // One slot per agent, unbound: the palette's `Agent: …` rows are what these
-    // run, and each takes a key the same way any other action does. Right
-    // after the other agent actions, so the Keybindings page keeps them together.
+    // One slot per agent, unbound: each takes a key the same way any other
+    // action does. Right after the other agent actions, so the Keybindings page
+    // keeps them together.
     let at = bindings
         .iter()
         .position(|(action, _)| *action == "NewAgentTab")
@@ -432,8 +347,8 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
         // over, and Ctrl+Shift+N — where that same test says window actions
         // belong — has been `NewWorkspace` for far longer than this action has
         // existed. Minting an unguessable third chord would be worse than
-        // shipping unbound: the palette and the Keybindings page both carry
-        // this, so a key is one line of config away.
+        // shipping unbound: the Keybindings page carries this, so a key is one
+        // line of config away.
         ("NewWindow", per_platform("secondary-n", "")),
         // Closing the window is how tty7 is put away with every shell still
         // running, and Cmd+Q — the only chord a Mac user reaches for — stops
@@ -445,7 +360,6 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
             per_platform("secondary-w", "secondary-shift-w"),
         ),
         ("RenameTab", ""),
-        ("NewWorktreeTab", ""),
         ("CloseOtherTabs", ""),
         ("CloseTabsToTheRight", ""),
         ("CopyWorkingDirectory", ""),
@@ -459,7 +373,7 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
         ("CopyAgentSessionId", ""),
         // ⌘⇧A for "agent" on macOS, where nothing else in the table or the
         // terminal holds it. Off macOS Ctrl+Shift+A is select-all in every
-        // Linux terminal and in this prompt editor's Ctrl+A family, so it ships
+        // Linux terminal, so it ships
         // unbound there rather than on a chord nobody would guess.
         ("NewAgentTab", per_platform("secondary-shift-a", "")),
         // U for "up next": the agent that has waited on you longest. Free in
@@ -524,9 +438,6 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
             "SelectPrevTab",
             per_platform("secondary-shift-[", "ctrl-pageup"),
         ),
-        // Reordering, not switching: bound by the user who wants it (the
-        // palette and the Keybindings page both carry these), like the pane
-        // swap pair above. No chord ships free enough to spend on both.
         ("MoveTabLeft", ""),
         ("MoveTabRight", ""),
         ("ActivateTab1", per_platform("secondary-1", "alt-1")),
@@ -550,18 +461,6 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
         ("IncreaseFontSize", "secondary-="),
         ("DecreaseFontSize", "secondary--"),
         ("ResetFontSize", "secondary-0"),
-        (
-            "TogglePalette",
-            per_platform("secondary-p", "secondary-shift-p"),
-        ),
-        // VS Code's ⌘P, which here is already Search Everywhere. ⌘O instead:
-        // it is "Open…" in every Mac app, and nothing in the table or the
-        // terminal holds it. Off macOS the obvious chords are gone — Ctrl+P
-        // and Ctrl+O are bytes the shell is owed, Ctrl+Shift+P is Search
-        // Everywhere and Ctrl+Shift+O the workspace switcher — so it ships
-        // unbound there, like `NewWindow`, rather than on a chord nobody would
-        // guess. The Files tab is a Tab press away inside the search either way.
-        ("QuickOpenFile", per_platform("secondary-o", "")),
         (
             "ReopenClosedTab",
             per_platform("secondary-shift-t", "alt-shift-t"),
@@ -614,7 +513,6 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
             "ClearScrollback",
             per_platform("secondary-k", "secondary-shift-k"),
         ),
-        ("InsertNewline", INSERT_NEWLINE_DEFAULT),
         // ⌘I for "input". Nothing in the table holds it, and no shell or agent
         // reads Cmd at all. Off macOS Ctrl+I is Tab, so the chord takes Shift
         // like every other terminal command there.
@@ -666,103 +564,7 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
             },
         ),
         ("ZoomWindow", ""),
-        // `secondary-enter` is `ToggleFullscreen` on macOS. That is not a
-        // clash: `ScmCommit` binds inside the `ScmCommit` key context, so it
-        // only wins while the caret sits in the commit box.
-        ("ScmCommit", "secondary-enter"),
-        ("ScmCommitAmend", ""),
-        ("ScmStageAll", ""),
-        ("ScmUnstageAll", ""),
-        ("ScmDiscardAll", ""),
-        ("ScmRefresh", ""),
-        ("ScmSync", ""),
-        ("ScmPush", ""),
-        ("ScmPull", ""),
-        ("ScmFetch", ""),
-        ("ScmCheckoutBranch", ""),
-        ("ScmCreateBranch", ""),
-        ("ScmToggleGraph", ""),
-        ("ToggleDiffViewMode", ""),
-        ("ToggleSftp", ""),
         ("ShowSshForwards", ""),
-        ("ToggleCodePanel", "secondary-shift-e"),
-        // Deliberately unbound. Docking is the default and Esc already gets the
-        // terminal back, so a default chord here would only be one more thing
-        // competing for a two-key combination nobody asked for.
-        ("ToggleDocumentFill", ""),
-        ("DocumentWidthThird", ""),
-        ("DocumentWidthHalf", ""),
-        ("DocumentWidthTwoThirds", ""),
-        // Unbound for the same reason, and because the obvious chords belong
-        // to the editor that has the focus when you would reach for them.
-        ("ToggleDocumentPreview", ""),
-        ("ToggleDocumentWrap", ""),
-        // Implemented, dispatchable, and until now unbindable: `set_binding`
-        // only fills slots that exist here, so `"ShowRightPanelInfo": "ctrl-1"`
-        // in config.json was dropped without a word, and the Keybindings page —
-        // which reads this list — never showed them at all.
-        ("ShowRightPanelInfo", ""),
-        ("ShowRightPanelFiles", ""),
-        ("ShowRightPanelSearch", ""),
-        ("ShowRightPanelChanges", ""),
-        ("ShowRightPanelGitHub", ""),
-        ("EditorSave", "secondary-s"),
-        ("EditorSaveAs", "secondary-shift-s"),
-        ("EditorGoToLine", "ctrl-g"),
-        // VS Code's chords. ⌘⇧O is the workspace switcher everywhere but the
-        // editor, which takes it back while it has the focus (see
-        // `action_context`). Back and Forward are ⌃- and ⌃⇧- on macOS; off
-        // it ⌃- is Decrease Font Size, so Alt+←/→ as VS Code has them there.
-        ("EditorGoToSymbol", "secondary-shift-o"),
-        ("EditorNavigateBack", per_platform("ctrl--", "alt-left")),
-        (
-            "EditorNavigateForward",
-            per_platform("ctrl-shift--", "alt-right"),
-        ),
-        // VS Code's Split Editor. Off macOS Ctrl+\ is the terminal's SIGQUIT,
-        // which it keeps: the binding lives in the editor's context only.
-        ("EditorSplitRight", "secondary-\\"),
-        // Moving between the two groups, on the chords that move between
-        // panes — at the edge of the editor, or with no split, they carry on
-        // to the panes. Off macOS those are Alt+←/→, which Back and Forward
-        // hold inside the editor.
-        (
-            "EditorFocusLeftGroup",
-            per_platform("secondary-alt-left", "ctrl-alt-left"),
-        ),
-        (
-            "EditorFocusRightGroup",
-            per_platform("secondary-alt-right", "ctrl-alt-right"),
-        ),
-        // Unbound: ⌘N is New Window, and the editor's header has a + for it.
-        ("EditorNewFile", ""),
-        // The language-server commands. Unbound here — a default on a bare
-        // function key would take it from the shell — and bound instead in
-        // the editor's own context by `fixed_bindings`.
-        ("EditorGoToDefinition", ""),
-        ("EditorQuickFix", ""),
-        ("EditorRenameSymbol", ""),
-        ("EditorFormatDocument", ""),
-        // The editor's text commands. Unbound: none of them has a chord in
-        // VS Code either, except Join Lines, whose ⌃J is a fixed `CodeEditor`
-        // binding on macOS (in the terminal it is a line feed).
-        ("EditorTransformUppercase", ""),
-        ("EditorTransformLowercase", ""),
-        ("EditorTransformTitleCase", ""),
-        ("EditorTrimTrailingWhitespace", ""),
-        ("EditorJoinLines", ""),
-        ("EditorRemoveSurroundingBrackets", ""),
-        ("EditorFindReferences", ""),
-        // Alt+F5 / Shift+Alt+F5 (VS Code's) are fixed `Input`-context
-        // bindings: a default on a function key would hide it from the shell.
-        ("EditorNextChange", ""),
-        ("EditorPrevChange", ""),
-        ("EditorRevertChange", ""),
-        ("ToggleEditorGitGutter", ""),
-        // Alt+F3 is a fixed `Input`-context binding, like Alt+F5.
-        ("EditorPeekChange", ""),
-        // VS Code's chord for its Problems panel.
-        ("ToggleEditorProblems", "secondary-shift-m"),
         ("OpenSshProfiles", ""),
         ("RestartSshSession", "secondary-shift-r"),
         ("Quit", per_platform("secondary-q", "secondary-shift-q")),
@@ -770,12 +572,6 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
 }
 
 /// Where an action sits on the Keybindings page, and what it is called there.
-///
-/// The page used to render `humanize_action`'s CamelCase split — English in a
-/// three-locale app, and a fourth vocabulary on top of the menu bar, the
-/// palette and the docs ("Toggle Maximize Pane" for what everything else calls
-/// Zoom Pane). This routes both the name and the section through the strings
-/// the rest of the app already uses.
 pub(crate) fn action_entry(action: &str) -> (CommandGroup, String) {
     authored_entry(action).unwrap_or_else(|| {
         // An action with no entry still renders, under Application and with its
@@ -819,10 +615,6 @@ fn authored_entry(action: &str) -> Option<(CommandGroup, String)> {
         "RenameTab" => (
             CommandGroup::TabsPanes,
             t(L10nKey::CmdRenameTab).to_string(),
-        ),
-        "NewWorktreeTab" => (
-            CommandGroup::TabsPanes,
-            t(L10nKey::CmdNewWorktreeTab).to_string(),
         ),
         "CloseOtherTabs" => (
             CommandGroup::TabsPanes,
@@ -905,7 +697,7 @@ fn authored_entry(action: &str) -> Option<(CommandGroup, String)> {
         // `NextTab` / `PrevTab` keep their names — `Config::keybindings` is
         // keyed by them — but what they do is open the MRU switcher, so that
         // is what the page calls them. "Next Tab" belongs to the action that
-        // actually goes to the next tab, the same one the palette runs.
+        // actually goes to the next tab.
         "NextTab" => (
             CommandGroup::TabsPanes,
             t(L10nKey::CmdRecentTabSwitcher).to_string(),
@@ -972,51 +764,6 @@ fn authored_entry(action: &str) -> Option<(CommandGroup, String)> {
             CommandGroup::View,
             t(L10nKey::AppMenuRightPanel).to_string(),
         ),
-        "ToggleCodePanel" => (CommandGroup::View, t(L10nKey::AppMenuCodePanel).to_string()),
-        "ToggleDocumentFill" => (
-            CommandGroup::View,
-            t(L10nKey::CmdToggleDocumentFill).to_string(),
-        ),
-        "DocumentWidthThird" => (
-            CommandGroup::View,
-            t(L10nKey::CmdDocumentWidthThird).to_string(),
-        ),
-        "DocumentWidthHalf" => (
-            CommandGroup::View,
-            t(L10nKey::CmdDocumentWidthHalf).to_string(),
-        ),
-        "DocumentWidthTwoThirds" => (
-            CommandGroup::View,
-            t(L10nKey::CmdDocumentWidthTwoThirds).to_string(),
-        ),
-        "ToggleDocumentPreview" => (
-            CommandGroup::View,
-            t(L10nKey::CmdToggleDocumentPreview).to_string(),
-        ),
-        "ToggleDocumentWrap" => (
-            CommandGroup::View,
-            t(L10nKey::CmdToggleDocumentWrap).to_string(),
-        ),
-        "ShowRightPanelInfo" => (
-            CommandGroup::View,
-            t(L10nKey::CmdRightPanelInfo).to_string(),
-        ),
-        "ShowRightPanelChanges" => (
-            CommandGroup::View,
-            t(L10nKey::CmdRightPanelChanges).to_string(),
-        ),
-        "ShowRightPanelFiles" => (
-            CommandGroup::View,
-            t(L10nKey::CmdRightPanelFiles).to_string(),
-        ),
-        "ShowRightPanelSearch" => (
-            CommandGroup::View,
-            t(L10nKey::CmdRightPanelSearch).to_string(),
-        ),
-        "ShowRightPanelGitHub" => (
-            CommandGroup::View,
-            t(L10nKey::CmdRightPanelGitHub).to_string(),
-        ),
         "FindInTerminal" => (
             CommandGroup::Terminal,
             t(L10nKey::CmdFindInTerminal).to_string(),
@@ -1041,118 +788,11 @@ fn authored_entry(action: &str) -> Option<(CommandGroup, String)> {
             CommandGroup::Terminal,
             t(L10nKey::CmdAlternatePaste).to_string(),
         ),
-        "InsertNewline" => (
-            CommandGroup::Terminal,
-            t(L10nKey::KeybindInsertNewline).to_string(),
-        ),
-        "EditorSave" => (CommandGroup::Terminal, t(L10nKey::Save).to_string()),
-        "EditorSaveAs" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorSaveAsAction).to_string(),
-        ),
-        "EditorGoToLine" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorGoToLineAction).to_string(),
-        ),
-        "EditorGoToDefinition" => (
-            CommandGroup::Terminal,
-            t(L10nKey::LspGoToDefinition).to_string(),
-        ),
-        "EditorQuickFix" => (CommandGroup::Terminal, t(L10nKey::LspQuickFix).to_string()),
-        "EditorRenameSymbol" => (
-            CommandGroup::Terminal,
-            t(L10nKey::LspRenameSymbolAction).to_string(),
-        ),
-        "EditorFormatDocument" => (
-            CommandGroup::Terminal,
-            t(L10nKey::LspFormatDocument).to_string(),
-        ),
-        "EditorTransformUppercase" => (
-            CommandGroup::Terminal,
-            t(L10nKey::CmdEditorTransformUppercase).to_string(),
-        ),
-        "EditorTransformLowercase" => (
-            CommandGroup::Terminal,
-            t(L10nKey::CmdEditorTransformLowercase).to_string(),
-        ),
-        "EditorTransformTitleCase" => (
-            CommandGroup::Terminal,
-            t(L10nKey::CmdEditorTransformTitleCase).to_string(),
-        ),
-        "EditorTrimTrailingWhitespace" => (
-            CommandGroup::Terminal,
-            t(L10nKey::CmdEditorTrimTrailingWhitespace).to_string(),
-        ),
-        "EditorJoinLines" => (
-            CommandGroup::Terminal,
-            t(L10nKey::CmdEditorJoinLines).to_string(),
-        ),
-        "EditorRemoveSurroundingBrackets" => (
-            CommandGroup::Terminal,
-            t(L10nKey::CmdEditorRemoveSurroundingBrackets).to_string(),
-        ),
-        "EditorFindReferences" => (
-            CommandGroup::Terminal,
-            t(L10nKey::LspFindReferences).to_string(),
-        ),
-        "EditorGoToSymbol" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorGoToSymbolAction).to_string(),
-        ),
-        "EditorNavigateBack" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorNavigateBack).to_string(),
-        ),
-        "EditorNavigateForward" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorNavigateForward).to_string(),
-        ),
-        "EditorSplitRight" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorSplitRight).to_string(),
-        ),
-        "EditorFocusLeftGroup" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorFocusLeftGroup).to_string(),
-        ),
-        "EditorFocusRightGroup" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorFocusRightGroup).to_string(),
-        ),
-        "EditorNewFile" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorNewFile).to_string(),
-        ),
-        "EditorNextChange" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorGitNextChange).to_string(),
-        ),
-        "EditorPrevChange" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorGitPrevChange).to_string(),
-        ),
-        "EditorRevertChange" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorGitRevertChange).to_string(),
-        ),
-        "ToggleEditorGitGutter" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorGitToggleGutter).to_string(),
-        ),
-        "EditorPeekChange" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorGitPeekChange).to_string(),
-        ),
-        "ToggleEditorProblems" => (
-            CommandGroup::Terminal,
-            t(L10nKey::EditorProblemsToggle).to_string(),
-        ),
         "OpenSshProfiles" => (
             CommandGroup::Ssh,
             t(L10nKey::CmdSshManageProfiles).to_string(),
         ),
         "RestartSshSession" => (CommandGroup::Ssh, t(L10nKey::CmdSshReconnect).to_string()),
-        "ToggleSftp" => (CommandGroup::Ssh, t(L10nKey::CmdSshRemoteFiles).to_string()),
         "ShowSshForwards" => (
             CommandGroup::Ssh,
             t(L10nKey::CmdSshPortForwarding).to_string(),
@@ -1183,11 +823,6 @@ fn authored_entry(action: &str) -> Option<(CommandGroup, String)> {
             CommandGroup::Agents,
             t(L10nKey::CmdNextAgentNeedingAttention).to_string(),
         ),
-        "TogglePalette" => (
-            CommandGroup::Application,
-            t(L10nKey::AppMenuSearchEverywhere).to_string(),
-        ),
-        "QuickOpenFile" => (CommandGroup::View, t(L10nKey::CmdGoToFile).to_string()),
         "NewWindow" => (
             CommandGroup::Application,
             t(L10nKey::CmdNewWindow).to_string(),
@@ -1247,31 +882,6 @@ fn authored_entry(action: &str) -> Option<(CommandGroup, String)> {
         "Quit" => (
             CommandGroup::Application,
             t(L10nKey::CmdQuitTty7).to_string(),
-        ),
-        // The source control verbs wear their palette names, so the
-        // Keybindings page and the palette agree on what a chord does.
-        "ScmCommit" => (CommandGroup::Git, t(L10nKey::CmdGitCommit).to_string()),
-        "ScmCommitAmend" => (
-            CommandGroup::Git,
-            t(L10nKey::ScmAmendLastCommit).to_string(),
-        ),
-        "ScmStageAll" => (CommandGroup::Git, t(L10nKey::CmdGitStageAll).to_string()),
-        "ScmUnstageAll" => (CommandGroup::Git, t(L10nKey::CmdGitUnstageAll).to_string()),
-        "ScmDiscardAll" => (CommandGroup::Git, t(L10nKey::CmdGitDiscardAll).to_string()),
-        "ScmRefresh" => (CommandGroup::Git, t(L10nKey::ScmRefresh).to_string()),
-        "ScmSync" => (CommandGroup::Git, t(L10nKey::CmdGitSync).to_string()),
-        "ScmPush" => (CommandGroup::Git, t(L10nKey::CmdGitPush).to_string()),
-        "ScmPull" => (CommandGroup::Git, t(L10nKey::CmdGitPull).to_string()),
-        "ScmFetch" => (CommandGroup::Git, t(L10nKey::CmdGitFetch).to_string()),
-        "ScmCheckoutBranch" => (CommandGroup::Git, t(L10nKey::CmdGitCheckoutTo).to_string()),
-        "ScmCreateBranch" => (
-            CommandGroup::Git,
-            t(L10nKey::CmdGitCreateBranch).to_string(),
-        ),
-        "ScmToggleGraph" => (CommandGroup::Git, t(L10nKey::CmdGitToggleGraph).to_string()),
-        "ToggleDiffViewMode" => (
-            CommandGroup::View,
-            t(L10nKey::CmdToggleDiffViewMode).to_string(),
         ),
         _ => return None,
     })
@@ -1466,7 +1076,7 @@ pub(crate) fn tab_badge_hold(cx: &App) -> Option<Modifiers> {
     let (chord, None) = (chords.next()?, chords.next()) else {
         return None;
     };
-    let ks = Keystroke::parse(chord).ok()?;
+    let ks = Keystroke::parse_with_os(chord, cx.platform_info().os).ok()?;
     (ks.key == "1" && ks.modifiers.modified()).then_some(ks.modifiers)
 }
 
@@ -1564,8 +1174,8 @@ const SHIFTED_GLYPHS: [(char, char); 21] = [
 /// The table is US-layout, and a chord it does not know is left alone rather
 /// than guessed at. It cannot be layout-aware from here: `?` is Shift+ß on a
 /// German keyboard and Shift+, on a French one, and the only mapper that knows
-/// which is gpui's, reached through `KeyBinding::load` rather than the
-/// `KeyBinding::new` that `make_binding` uses — and it exists on Windows only,
+/// which is gpui's. `make_binding` disables key equivalents when calling
+/// `KeyBinding::load`; the mapper exists on Windows only,
 /// where `MacKeyboardMapper` does no shift folding at all. So off a US layout
 /// the fold is a widening that may not land: `ctrl-shift-4` picks up `ctrl-$`,
 /// which on AZERTY is a key of its own. Harmless, because the fold only ever
@@ -1584,7 +1194,7 @@ const SHIFTED_GLYPHS: [(char, char); 21] = [
 /// drops it) and Linux names those keys `divide`/`multiply`/`add`/`subtract`,
 /// which are not one character and never reach this.
 fn fold_shift_into_glyph(chord: &str) -> Option<String> {
-    let mut ks = Keystroke::parse(chord).ok()?;
+    let mut ks = parse_keystroke(chord).ok()?;
     if !ks.modifiers.shift {
         return None;
     }
@@ -1721,7 +1331,7 @@ fn keystroke_is_valid(s: &str) -> bool {
     let mut any = false;
     for token in s.split_whitespace() {
         any = true;
-        if gpui::Keystroke::parse(token).is_err() {
+        if parse_keystroke(token).is_err() {
             return false;
         }
     }
@@ -1730,213 +1340,126 @@ fn keystroke_is_valid(s: &str) -> bool {
 
 fn action_context(action: &str) -> Option<&'static str> {
     match action {
-        "FindInTerminal" | "FindNext" | "FindPrevious" | "ClearScrollback" | "InsertNewline"
-        | "CopyText" | "CopyRaw" | "PasteText" | "ToggleComposer" => Some("Terminal"),
+        "FindInTerminal" | "FindNext" | "FindPrevious" | "ClearScrollback" | "CopyText"
+        | "CopyRaw" | "PasteText" | "ToggleComposer" => Some("Terminal"),
         // `alt_screen` is declared by the pane whenever a full-screen program
         // owns the grid, so this binding is simply absent there and Ctrl+V
         // carries on to the PTY as SYN (#677).
         "AlternatePaste" => Some("Terminal && !alt_screen"),
-        "ScmCommit" | "ScmCommitAmend" => Some("ScmCommit"),
-        "EditorGoToSymbol"
-        | "EditorNavigateBack"
-        | "EditorNavigateForward"
-        | "EditorSplitRight"
-        | "EditorFocusLeftGroup"
-        | "EditorFocusRightGroup" => Some(crate::ui::code_editor::NAV_KEY_CONTEXT),
         _ => None,
     }
 }
 
-fn make_binding(action: &str, keystroke: &str) -> Option<KeyBinding> {
-    if let Some(agent) = crate::ui::agent_launch::agent_for_launch_action(action) {
-        return Some(KeyBinding::new(keystroke, LaunchAgent { agent }, None));
-    }
-    Some(match action {
-        "NewTab" => KeyBinding::new(keystroke, NewTab, None),
-        "NewWorkspace" => KeyBinding::new(keystroke, NewWorkspace, None),
-        "StopWorkspace" => KeyBinding::new(keystroke, StopWorkspace, None),
-        "DeleteWorkspace" => KeyBinding::new(keystroke, DeleteWorkspace, None),
-        "RenameWorkspace" => KeyBinding::new(keystroke, RenameWorkspace, None),
-        "ToggleSwitcher" => KeyBinding::new(keystroke, ToggleSwitcher, None),
-        "NewWindow" => KeyBinding::new(keystroke, NewWindow, None),
-        "CloseWindow" => KeyBinding::new(keystroke, CloseWindow, None),
-        "CloseActiveTab" => KeyBinding::new(keystroke, CloseActiveTab, None),
-        "RenameTab" => KeyBinding::new(keystroke, RenameTab, None),
-        "NewWorktreeTab" => KeyBinding::new(keystroke, NewWorktreeTab, None),
-        "CloseOtherTabs" => KeyBinding::new(keystroke, CloseOtherTabs, None),
-        "CloseTabsToTheRight" => KeyBinding::new(keystroke, CloseTabsToTheRight, None),
-        "CopyWorkingDirectory" => KeyBinding::new(keystroke, CopyWorkingDirectory, None),
-        "MarkTabUnread" => KeyBinding::new(keystroke, MarkTabUnread, None),
-        "HibernateTab" => KeyBinding::new(keystroke, HibernateTab, None),
-        "ForkAgentSession" => KeyBinding::new(keystroke, ForkAgentSession, None),
-        "ForkAgentSessionRight" => KeyBinding::new(keystroke, ForkAgentSessionRight, None),
-        "ForkAgentSessionLeft" => KeyBinding::new(keystroke, ForkAgentSessionLeft, None),
-        "ForkAgentSessionDown" => KeyBinding::new(keystroke, ForkAgentSessionDown, None),
-        "ForkAgentSessionUp" => KeyBinding::new(keystroke, ForkAgentSessionUp, None),
-        "CopyAgentSessionId" => KeyBinding::new(keystroke, CopyAgentSessionId, None),
-        "NewAgentTab" => KeyBinding::new(keystroke, NewAgentTab, None),
-        "FocusNextAgentNeedingAttention" => {
-            KeyBinding::new(keystroke, FocusNextAgentNeedingAttention, None)
-        }
-        "SplitRight" => KeyBinding::new(keystroke, SplitRight, None),
-        "SplitDown" => KeyBinding::new(keystroke, SplitDown, None),
-        "FocusNextPane" => KeyBinding::new(keystroke, FocusNextPane, None),
-        "FocusPrevPane" => KeyBinding::new(keystroke, FocusPrevPane, None),
-        "FocusPaneLeft" => KeyBinding::new(keystroke, FocusPaneLeft, None),
-        "FocusPaneRight" => KeyBinding::new(keystroke, FocusPaneRight, None),
-        "FocusPaneUp" => KeyBinding::new(keystroke, FocusPaneUp, None),
-        "FocusPaneDown" => KeyBinding::new(keystroke, FocusPaneDown, None),
-        "ResizePaneLeft" => KeyBinding::new(keystroke, ResizePaneLeft, None),
-        "ResizePaneRight" => KeyBinding::new(keystroke, ResizePaneRight, None),
-        "ResizePaneUp" => KeyBinding::new(keystroke, ResizePaneUp, None),
-        "ResizePaneDown" => KeyBinding::new(keystroke, ResizePaneDown, None),
-        "SwapPaneNext" => KeyBinding::new(keystroke, SwapPaneNext, None),
-        "SwapPanePrev" => KeyBinding::new(keystroke, SwapPanePrev, None),
-        "NextTab" => KeyBinding::new(keystroke, NextTab, None),
-        "PrevTab" => KeyBinding::new(keystroke, PrevTab, None),
-        "SelectNextTab" => KeyBinding::new(keystroke, SelectNextTab, None),
-        "SelectPrevTab" => KeyBinding::new(keystroke, SelectPrevTab, None),
-        "MoveTabLeft" => KeyBinding::new(keystroke, MoveTabLeft, None),
-        "MoveTabRight" => KeyBinding::new(keystroke, MoveTabRight, None),
-        "ActivateTab1" => KeyBinding::new(keystroke, ActivateTab1, None),
-        "ActivateTab2" => KeyBinding::new(keystroke, ActivateTab2, None),
-        "ActivateTab3" => KeyBinding::new(keystroke, ActivateTab3, None),
-        "ActivateTab4" => KeyBinding::new(keystroke, ActivateTab4, None),
-        "ActivateTab5" => KeyBinding::new(keystroke, ActivateTab5, None),
-        "ActivateTab6" => KeyBinding::new(keystroke, ActivateTab6, None),
-        "ActivateTab7" => KeyBinding::new(keystroke, ActivateTab7, None),
-        "ActivateTab8" => KeyBinding::new(keystroke, ActivateTab8, None),
-        "ActivateTab9" => KeyBinding::new(keystroke, ActivateTab9, None),
-        "SelectWorkspace1" => KeyBinding::new(keystroke, SelectWorkspace1, None),
-        "SelectWorkspace2" => KeyBinding::new(keystroke, SelectWorkspace2, None),
-        "SelectWorkspace3" => KeyBinding::new(keystroke, SelectWorkspace3, None),
-        "SelectWorkspace4" => KeyBinding::new(keystroke, SelectWorkspace4, None),
-        "SelectWorkspace5" => KeyBinding::new(keystroke, SelectWorkspace5, None),
-        "SelectWorkspace6" => KeyBinding::new(keystroke, SelectWorkspace6, None),
-        "SelectWorkspace7" => KeyBinding::new(keystroke, SelectWorkspace7, None),
-        "SelectWorkspace8" => KeyBinding::new(keystroke, SelectWorkspace8, None),
-        "SelectWorkspace9" => KeyBinding::new(keystroke, SelectWorkspace9, None),
-        "IncreaseFontSize" => KeyBinding::new(keystroke, IncreaseFontSize, None),
-        "DecreaseFontSize" => KeyBinding::new(keystroke, DecreaseFontSize, None),
-        "ResetFontSize" => KeyBinding::new(keystroke, ResetFontSize, None),
-        "TogglePalette" => KeyBinding::new(keystroke, TogglePalette, None),
-        "QuickOpenFile" => KeyBinding::new(keystroke, QuickOpenFile, None),
-        "ReopenClosedTab" => KeyBinding::new(keystroke, ReopenClosedTab, None),
-        "ToggleMaximizePane" => KeyBinding::new(keystroke, ToggleMaximizePane, None),
-        "ToggleFullscreen" => KeyBinding::new(keystroke, ToggleFullscreen, None),
-        "ToggleTabSidebar" => KeyBinding::new(keystroke, ToggleTabSidebar, None),
-        "ToggleLeftPanel" => KeyBinding::new(keystroke, ToggleLeftPanel, None),
-        "ToggleRightPanel" => KeyBinding::new(keystroke, ToggleRightPanel, None),
-        "ShowRightPanelInfo" => KeyBinding::new(keystroke, ShowRightPanelInfo, None),
-        "ShowRightPanelChanges" => KeyBinding::new(keystroke, ShowRightPanelChanges, None),
-        "ShowRightPanelFiles" => KeyBinding::new(keystroke, ShowRightPanelFiles, None),
-        "ShowRightPanelSearch" => KeyBinding::new(keystroke, ShowRightPanelSearch, None),
-        "ShowRightPanelGitHub" => KeyBinding::new(keystroke, ShowRightPanelGitHub, None),
-        "ScmCommit" => KeyBinding::new(keystroke, ScmCommit, action_context(action)),
-        "ScmCommitAmend" => KeyBinding::new(keystroke, ScmCommitAmend, action_context(action)),
-        "ScmStageAll" => KeyBinding::new(keystroke, ScmStageAll, None),
-        "ScmUnstageAll" => KeyBinding::new(keystroke, ScmUnstageAll, None),
-        "ScmDiscardAll" => KeyBinding::new(keystroke, ScmDiscardAll, None),
-        "ScmRefresh" => KeyBinding::new(keystroke, ScmRefresh, None),
-        "ScmSync" => KeyBinding::new(keystroke, ScmSync, None),
-        "ScmPush" => KeyBinding::new(keystroke, ScmPush, None),
-        "ScmPull" => KeyBinding::new(keystroke, ScmPull, None),
-        "ScmFetch" => KeyBinding::new(keystroke, ScmFetch, None),
-        "ScmCheckoutBranch" => KeyBinding::new(keystroke, ScmCheckoutBranch, None),
-        "ScmCreateBranch" => KeyBinding::new(keystroke, ScmCreateBranch, None),
-        "ScmToggleGraph" => KeyBinding::new(keystroke, ScmToggleGraph, None),
-        "ToggleDiffViewMode" => KeyBinding::new(keystroke, ToggleDiffViewMode, None),
-        "FindInTerminal" => KeyBinding::new(keystroke, FindInTerminal, action_context(action)),
-        "FindNext" => KeyBinding::new(keystroke, FindNext, action_context(action)),
-        "ToggleComposer" => KeyBinding::new(keystroke, ToggleComposer, action_context(action)),
-        "FindPrevious" => KeyBinding::new(keystroke, FindPrevious, action_context(action)),
-        "ClearScrollback" => KeyBinding::new(keystroke, ClearScrollback, action_context(action)),
-        "InsertNewline" => KeyBinding::new(keystroke, InsertNewline, action_context(action)),
-        "CopyText" => KeyBinding::new(keystroke, CopyText, action_context(action)),
-        "CopyRaw" => KeyBinding::new(keystroke, CopyRaw, action_context(action)),
-        "PasteText" => KeyBinding::new(keystroke, PasteText, action_context(action)),
-        "AlternatePaste" => KeyBinding::new(keystroke, AlternatePaste, action_context(action)),
-        "OpenSettings" => KeyBinding::new(keystroke, OpenSettings, None),
-        "ShowKeyboardShortcuts" => KeyBinding::new(keystroke, ShowKeyboardShortcuts, None),
-        "About" => KeyBinding::new(keystroke, About, None),
-        "CheckForUpdates" => KeyBinding::new(keystroke, CheckForUpdates, None),
-        "OpenDocumentation" => KeyBinding::new(keystroke, OpenDocumentation, None),
-        "OpenDiscord" => KeyBinding::new(keystroke, OpenDiscord, None),
-        "ReportIssue" => KeyBinding::new(keystroke, ReportIssue, None),
-        "HideApp" => KeyBinding::new(keystroke, HideApp, None),
-        "HideOthers" => KeyBinding::new(keystroke, HideOthers, None),
-        "ShowAll" => KeyBinding::new(keystroke, ShowAll, None),
-        "MinimizeWindow" => KeyBinding::new(keystroke, MinimizeWindow, None),
-        "ZoomWindow" => KeyBinding::new(keystroke, ZoomWindow, None),
-        "ToggleSftp" => KeyBinding::new(keystroke, ToggleSftp, None),
-        "ShowSshForwards" => KeyBinding::new(keystroke, ShowSshForwards, None),
-        "ToggleCodePanel" => KeyBinding::new(keystroke, ToggleCodePanel, None),
-        "ToggleDocumentFill" => KeyBinding::new(keystroke, ToggleDocumentFill, None),
-        "DocumentWidthThird" => KeyBinding::new(keystroke, DocumentWidthThird, None),
-        "DocumentWidthHalf" => KeyBinding::new(keystroke, DocumentWidthHalf, None),
-        "DocumentWidthTwoThirds" => KeyBinding::new(keystroke, DocumentWidthTwoThirds, None),
-        "ToggleDocumentPreview" => KeyBinding::new(keystroke, ToggleDocumentPreview, None),
-        "ToggleDocumentWrap" => KeyBinding::new(keystroke, ToggleDocumentWrap, None),
-        "EditorSave" => KeyBinding::new(keystroke, EditorSave, None),
-        "EditorSaveAs" => KeyBinding::new(keystroke, EditorSaveAs, None),
-        "EditorGoToLine" => KeyBinding::new(keystroke, EditorGoToLine, None),
-        "EditorGoToSymbol" => KeyBinding::new(
-            keystroke,
-            EditorGoToSymbol,
-            Some(crate::ui::code_editor::NAV_KEY_CONTEXT),
-        ),
-        "EditorNavigateBack" => KeyBinding::new(
-            keystroke,
-            EditorNavigateBack,
-            Some(crate::ui::code_editor::NAV_KEY_CONTEXT),
-        ),
-        "EditorNavigateForward" => KeyBinding::new(
-            keystroke,
-            EditorNavigateForward,
-            Some(crate::ui::code_editor::NAV_KEY_CONTEXT),
-        ),
-        "EditorSplitRight" => KeyBinding::new(
-            keystroke,
-            EditorSplitRight,
-            Some(crate::ui::code_editor::NAV_KEY_CONTEXT),
-        ),
-        "EditorFocusLeftGroup" => KeyBinding::new(
-            keystroke,
-            EditorFocusLeftGroup,
-            Some(crate::ui::code_editor::NAV_KEY_CONTEXT),
-        ),
-        "EditorFocusRightGroup" => KeyBinding::new(
-            keystroke,
-            EditorFocusRightGroup,
-            Some(crate::ui::code_editor::NAV_KEY_CONTEXT),
-        ),
-        "EditorNewFile" => KeyBinding::new(keystroke, EditorNewFile, None),
-        "EditorGoToDefinition" => KeyBinding::new(keystroke, EditorGoToDefinition, None),
-        "EditorQuickFix" => KeyBinding::new(keystroke, EditorQuickFix, None),
-        "EditorRenameSymbol" => KeyBinding::new(keystroke, EditorRenameSymbol, None),
-        "EditorFormatDocument" => KeyBinding::new(keystroke, EditorFormatDocument, None),
-        "EditorTransformUppercase" => KeyBinding::new(keystroke, EditorTransformUppercase, None),
-        "EditorTransformLowercase" => KeyBinding::new(keystroke, EditorTransformLowercase, None),
-        "EditorTransformTitleCase" => KeyBinding::new(keystroke, EditorTransformTitleCase, None),
-        "EditorTrimTrailingWhitespace" => {
-            KeyBinding::new(keystroke, EditorTrimTrailingWhitespace, None)
-        }
-        "EditorJoinLines" => KeyBinding::new(keystroke, EditorJoinLines, None),
-        "EditorRemoveSurroundingBrackets" => {
-            KeyBinding::new(keystroke, EditorRemoveSurroundingBrackets, None)
-        }
-        "EditorFindReferences" => KeyBinding::new(keystroke, EditorFindReferences, None),
-        "EditorNextChange" => KeyBinding::new(keystroke, EditorNextChange, None),
-        "EditorPrevChange" => KeyBinding::new(keystroke, EditorPrevChange, None),
-        "EditorRevertChange" => KeyBinding::new(keystroke, EditorRevertChange, None),
-        "ToggleEditorGitGutter" => KeyBinding::new(keystroke, ToggleEditorGitGutter, None),
-        "EditorPeekChange" => KeyBinding::new(keystroke, EditorPeekChange, None),
-        "ToggleEditorProblems" => KeyBinding::new(keystroke, ToggleEditorProblems, None),
-        "OpenSshProfiles" => KeyBinding::new(keystroke, OpenSshProfiles, None),
-        "RestartSshSession" => KeyBinding::new(keystroke, RestartSshSession, None),
-        "Quit" => KeyBinding::new(keystroke, Quit, None),
-        _ => return None,
-    })
+fn make_binding(action: &str, keystroke: &str, cx: &App) -> Option<KeyBinding> {
+    let handler: Box<dyn gpui::Action> =
+        if let Some(agent) = crate::ui::agent_launch::agent_for_launch_action(action) {
+            Box::new(LaunchAgent { agent })
+        } else {
+            match action {
+                "NewTab" => Box::new(NewTab),
+                "NewWorkspace" => Box::new(NewWorkspace),
+                "StopWorkspace" => Box::new(StopWorkspace),
+                "DeleteWorkspace" => Box::new(DeleteWorkspace),
+                "RenameWorkspace" => Box::new(RenameWorkspace),
+                "ToggleSwitcher" => Box::new(ToggleSwitcher),
+                "NewWindow" => Box::new(NewWindow),
+                "CloseWindow" => Box::new(CloseWindow),
+                "CloseActiveTab" => Box::new(CloseActiveTab),
+                "RenameTab" => Box::new(RenameTab),
+                "CloseOtherTabs" => Box::new(CloseOtherTabs),
+                "CloseTabsToTheRight" => Box::new(CloseTabsToTheRight),
+                "CopyWorkingDirectory" => Box::new(CopyWorkingDirectory),
+                "MarkTabUnread" => Box::new(MarkTabUnread),
+                "HibernateTab" => Box::new(HibernateTab),
+                "ForkAgentSession" => Box::new(ForkAgentSession),
+                "ForkAgentSessionRight" => Box::new(ForkAgentSessionRight),
+                "ForkAgentSessionLeft" => Box::new(ForkAgentSessionLeft),
+                "ForkAgentSessionDown" => Box::new(ForkAgentSessionDown),
+                "ForkAgentSessionUp" => Box::new(ForkAgentSessionUp),
+                "CopyAgentSessionId" => Box::new(CopyAgentSessionId),
+                "NewAgentTab" => Box::new(NewAgentTab),
+                "FocusNextAgentNeedingAttention" => Box::new(FocusNextAgentNeedingAttention),
+                "SplitRight" => Box::new(SplitRight),
+                "SplitDown" => Box::new(SplitDown),
+                "FocusNextPane" => Box::new(FocusNextPane),
+                "FocusPrevPane" => Box::new(FocusPrevPane),
+                "FocusPaneLeft" => Box::new(FocusPaneLeft),
+                "FocusPaneRight" => Box::new(FocusPaneRight),
+                "FocusPaneUp" => Box::new(FocusPaneUp),
+                "FocusPaneDown" => Box::new(FocusPaneDown),
+                "ResizePaneLeft" => Box::new(ResizePaneLeft),
+                "ResizePaneRight" => Box::new(ResizePaneRight),
+                "ResizePaneUp" => Box::new(ResizePaneUp),
+                "ResizePaneDown" => Box::new(ResizePaneDown),
+                "SwapPaneNext" => Box::new(SwapPaneNext),
+                "SwapPanePrev" => Box::new(SwapPanePrev),
+                "NextTab" => Box::new(NextTab),
+                "PrevTab" => Box::new(PrevTab),
+                "SelectNextTab" => Box::new(SelectNextTab),
+                "SelectPrevTab" => Box::new(SelectPrevTab),
+                "MoveTabLeft" => Box::new(MoveTabLeft),
+                "MoveTabRight" => Box::new(MoveTabRight),
+                "ActivateTab1" => Box::new(ActivateTab1),
+                "ActivateTab2" => Box::new(ActivateTab2),
+                "ActivateTab3" => Box::new(ActivateTab3),
+                "ActivateTab4" => Box::new(ActivateTab4),
+                "ActivateTab5" => Box::new(ActivateTab5),
+                "ActivateTab6" => Box::new(ActivateTab6),
+                "ActivateTab7" => Box::new(ActivateTab7),
+                "ActivateTab8" => Box::new(ActivateTab8),
+                "ActivateTab9" => Box::new(ActivateTab9),
+                "SelectWorkspace1" => Box::new(SelectWorkspace1),
+                "SelectWorkspace2" => Box::new(SelectWorkspace2),
+                "SelectWorkspace3" => Box::new(SelectWorkspace3),
+                "SelectWorkspace4" => Box::new(SelectWorkspace4),
+                "SelectWorkspace5" => Box::new(SelectWorkspace5),
+                "SelectWorkspace6" => Box::new(SelectWorkspace6),
+                "SelectWorkspace7" => Box::new(SelectWorkspace7),
+                "SelectWorkspace8" => Box::new(SelectWorkspace8),
+                "SelectWorkspace9" => Box::new(SelectWorkspace9),
+                "IncreaseFontSize" => Box::new(IncreaseFontSize),
+                "DecreaseFontSize" => Box::new(DecreaseFontSize),
+                "ResetFontSize" => Box::new(ResetFontSize),
+                "ReopenClosedTab" => Box::new(ReopenClosedTab),
+                "ToggleMaximizePane" => Box::new(ToggleMaximizePane),
+                "ToggleFullscreen" => Box::new(ToggleFullscreen),
+                "ToggleTabSidebar" => Box::new(ToggleTabSidebar),
+                "ToggleLeftPanel" => Box::new(ToggleLeftPanel),
+                "ToggleRightPanel" => Box::new(ToggleRightPanel),
+                "FindInTerminal" => Box::new(FindInTerminal),
+                "FindNext" => Box::new(FindNext),
+                "ToggleComposer" => Box::new(ToggleComposer),
+                "FindPrevious" => Box::new(FindPrevious),
+                "ClearScrollback" => Box::new(ClearScrollback),
+                "CopyText" => Box::new(CopyText),
+                "CopyRaw" => Box::new(CopyRaw),
+                "PasteText" => Box::new(PasteText),
+                "AlternatePaste" => Box::new(AlternatePaste),
+                "OpenSettings" => Box::new(OpenSettings),
+                "ShowKeyboardShortcuts" => Box::new(ShowKeyboardShortcuts),
+                "About" => Box::new(About),
+                "CheckForUpdates" => Box::new(CheckForUpdates),
+                "OpenDocumentation" => Box::new(OpenDocumentation),
+                "OpenDiscord" => Box::new(OpenDiscord),
+                "ReportIssue" => Box::new(ReportIssue),
+                "HideApp" => Box::new(HideApp),
+                "HideOthers" => Box::new(HideOthers),
+                "ShowAll" => Box::new(ShowAll),
+                "MinimizeWindow" => Box::new(MinimizeWindow),
+                "ZoomWindow" => Box::new(ZoomWindow),
+                "ShowSshForwards" => Box::new(ShowSshForwards),
+                "OpenSshProfiles" => Box::new(OpenSshProfiles),
+                "RestartSshSession" => Box::new(RestartSshSession),
+                "Quit" => Box::new(Quit),
+                _ => return None,
+            }
+        };
+    let context = action_context(action).map(|context| {
+        gpui::KeyBindingContextPredicate::parse(context)
+            .expect("valid action context")
+            .into()
+    });
+    KeyBinding::load(keystroke, handler, context, false, None, cx).ok()
 }
 
 #[cfg(test)]
@@ -1954,7 +1477,7 @@ mod tests {
     fn dispatched(effective: &[(String, String)], keys: &str, context: &str) -> Vec<&'static str> {
         let input: Vec<Keystroke> = keys
             .split(' ')
-            .map(|k| Keystroke::parse(k).expect("the typed keystroke parses"))
+            .map(|k| parse_keystroke(k).expect("the typed keystroke parses"))
             .collect();
         dispatched_keystrokes(effective, &input, context)
     }
@@ -1967,15 +1490,18 @@ mod tests {
         input: &[Keystroke],
         context: &str,
     ) -> Vec<&'static str> {
-        let mut keymap = gpui::Keymap::default();
-        keymap.add_bindings(action_bindings(effective));
-        let context = [gpui::KeyContext::parse(context).expect("the context parses")];
-        keymap
-            .bindings_for_input(input, &context)
-            .0
-            .iter()
-            .map(|b| b.action().name())
-            .collect()
+        let cx = gpui::TestAppContext::single();
+        cx.read(|cx| {
+            let mut keymap = gpui::Keymap::default();
+            keymap.add_bindings(action_bindings(effective, cx));
+            let context = [gpui::KeyContext::parse(context).expect("the context parses")];
+            keymap
+                .bindings_for_input(input, &context)
+                .0
+                .iter()
+                .map(|b| b.action().name())
+                .collect()
+        })
     }
 
     /// What every gpui backend delivers when the secondary modifier is held
@@ -1992,30 +1518,6 @@ mod tests {
             },
             key: glyph.to_string(),
             key_char: None,
-        }
-    }
-
-    #[test]
-    fn every_dispatchable_action_has_a_slot_to_bind_it_in() {
-        // `make_binding` is what turns an action name into a real binding, and
-        // `default_bindings` is the only list `set_binding` will write into. An
-        // action in the first but not the second cannot be bound at all — not
-        // from config.json, which drops it silently, and not from the
-        // Keybindings page, which reads the second.
-        let bindable: std::collections::HashSet<&str> =
-            default_bindings().into_iter().map(|(a, _)| a).collect();
-        for action in [
-            "ShowRightPanelInfo",
-            "ShowRightPanelChanges",
-            "ShowRightPanelFiles",
-            "ShowRightPanelSearch",
-            "ShowRightPanelGitHub",
-        ] {
-            assert!(bindable.contains(action), "{action} has nowhere to bind to");
-            assert!(
-                make_binding(action, "ctrl-1").is_some(),
-                "{action} has a slot but nothing to dispatch"
-            );
         }
     }
 
@@ -2037,14 +1539,11 @@ mod tests {
     #[test]
     fn the_page_speaks_the_same_words_as_the_rest_of_the_app() {
         crate::ui::i18n::set_locale("en");
-        // The four names the critique found for one action; the menu bar, the
-        // palette and the docs all say Zoom Pane.
         assert_eq!(action_entry("ToggleMaximizePane").1, "Zoom Pane");
         assert_eq!(action_entry("CloseActiveTab").1, "Close Pane / Tab");
         assert_eq!(action_entry("NewWindow").1, "New Window");
         assert_eq!(action_entry("CloseWindow").1, "Close Window");
         assert_eq!(action_entry("ClearScrollback").1, "Clear Scrollback");
-        assert_eq!(action_entry("TogglePalette").1, "Search…");
         assert_eq!(action_entry("ToggleSwitcher").1, "Switch Workspace…");
         // The numbered families are templated, not nine strings per locale.
         assert_eq!(action_entry("ActivateTab3").1, "Go to Tab 3");
@@ -2052,7 +1551,6 @@ mod tests {
         // And they land in the section they belong to.
         assert_eq!(action_entry("ActivateTab3").0, CommandGroup::TabsPanes);
         assert_eq!(action_entry("SelectWorkspace7").0, CommandGroup::Workspaces);
-        assert_eq!(action_entry("ToggleSftp").0, CommandGroup::Ssh);
         assert_eq!(action_entry("ForkAgentSessionUp").0, CommandGroup::Agents);
     }
 
@@ -2151,128 +1649,93 @@ mod tests {
 
     #[test]
     fn every_default_action_has_a_binding_builder_or_is_unbound() {
-        for (action, key) in default_bindings() {
-            if !key.is_empty() {
-                assert!(
-                    keystroke_is_valid(key),
-                    "default keystroke for {action} is invalid: {key:?}"
-                );
-                assert!(
-                    make_binding(action, key).is_some(),
-                    "no make_binding arm for action {action}"
-                );
+        let cx = gpui::TestAppContext::single();
+        cx.read(|cx| {
+            for (action, key) in default_bindings() {
+                if !key.is_empty() {
+                    assert!(
+                        keystroke_is_valid(key),
+                        "default keystroke for {action} is invalid: {key:?}"
+                    );
+                    assert!(
+                        make_binding(action, key, cx).is_some(),
+                        "no make_binding arm for action {action}"
+                    );
+                }
             }
-        }
+        })
     }
 
     #[test]
     fn every_action_has_a_binding_arm() {
-        // The sibling test above only reaches actions that ship with a default
-        // keystroke, which leaves the unbound ones — the majority — free to be
-        // listed in `default_bindings` with no `make_binding` arm behind them.
-        // Nothing surfaces that: the action shows up in Settings, the user
-        // assigns a key, and the key silently does nothing.
-        for (action, _) in default_bindings() {
-            assert!(
-                make_binding(action, "ctrl-f12").is_some(),
-                "no make_binding arm for action {action}; \
-                 anyone who binds a key to it in Settings gets nothing"
-            );
-        }
-    }
-
-    #[test]
-    fn the_commit_key_only_fires_inside_the_commit_box() {
-        // `secondary-enter` is `ToggleFullscreen` on macOS. The two coexist
-        // only because the commit binding is scoped; drop the context and
-        // committing steals full screen everywhere.
-        assert_eq!(action_context("ScmCommit"), Some("ScmCommit"));
-        assert_eq!(action_context("ScmCommitAmend"), Some("ScmCommit"));
-        assert_eq!(action_context("ToggleFullscreen"), None);
+        let cx = gpui::TestAppContext::single();
+        cx.read(|cx| {
+            // The sibling test above only reaches actions that ship with a default
+            // keystroke, which leaves the unbound ones — the majority — free to be
+            // listed in `default_bindings` with no `make_binding` arm behind them.
+            // Nothing surfaces that: the action shows up in Settings, the user
+            // assigns a key, and the key silently does nothing.
+            for (action, _) in default_bindings() {
+                assert!(
+                    make_binding(action, "ctrl-f12", cx).is_some(),
+                    "no make_binding arm for action {action}; \
+                     anyone who binds a key to it in Settings gets nothing"
+                );
+            }
+        })
     }
 
     #[test]
     fn tmux_preset_keystrokes_all_parse_and_map_to_actions() {
-        for (action, key) in tmux_preset("ctrl-b") {
-            assert!(
-                keystroke_is_valid(&key),
-                "tmux preset keystroke for {action} does not parse: {key:?}"
-            );
-            assert!(
-                make_binding(&action, &key).is_some(),
-                "tmux preset action {action} has no make_binding arm"
-            );
-        }
-    }
-
-    #[test]
-    fn insert_newline_ships_both_default_chords() {
-        let effective: Vec<(String, String)> = default_bindings()
-            .into_iter()
-            .map(|(a, k)| (a.to_string(), k.to_string()))
-            .collect();
-        assert_eq!(
-            effective
-                .iter()
-                .find(|(a, _)| a == "InsertNewline")
-                .map(|(_, k)| k.as_str()),
-            Some("shift-enter")
-        );
-        assert!(extra_keystrokes(&effective).contains(&("InsertNewline", "alt-enter")));
-        for key in ["shift-enter", "alt-enter"] {
-            assert!(keystroke_is_valid(key), "{key} does not parse");
-            assert!(
-                dispatched(&effective, key, "Terminal").contains(&InsertNewline::name_for_type()),
-                "{key} does not reach InsertNewline in a terminal"
-            );
-        }
-        assert_eq!(key_tokens("shift-enter"), vec![SHIFT, "↵"]);
-    }
-
-    #[test]
-    fn shift_enter_fallback_retires_with_an_insert_newline_rebind() {
-        assert!(is_default_insert_newline_binding(
-            "InsertNewline",
-            "shift-enter"
-        ));
-        assert!(!is_default_insert_newline_binding(
-            "InsertNewline",
-            "ctrl-o"
-        ));
-        assert!(!is_default_insert_newline_binding("InsertNewline", ""));
+        let cx = gpui::TestAppContext::single();
+        cx.read(|cx| {
+            for (action, key) in tmux_preset("ctrl-b") {
+                assert!(
+                    keystroke_is_valid(&key),
+                    "tmux preset keystroke for {action} does not parse: {key:?}"
+                );
+                assert!(
+                    make_binding(&action, &key, cx).is_some(),
+                    "tmux preset action {action} has no make_binding arm"
+                );
+            }
+        })
     }
 
     #[test]
     fn shift_enter_prefix_binding_still_waits_for_its_second_key() {
-        let mut effective = default_bindings()
-            .into_iter()
-            .map(|(action, key)| (action.to_string(), key.to_string()))
-            .collect::<Vec<_>>();
-        effective
-            .iter_mut()
-            .find(|(action, _)| action == "OpenSettings")
-            .unwrap()
-            .1 = "shift-enter x".to_string();
+        let cx = gpui::TestAppContext::single();
+        cx.read(|cx| {
+            let mut effective = default_bindings()
+                .into_iter()
+                .map(|(action, key)| (action.to_string(), key.to_string()))
+                .collect::<Vec<_>>();
+            effective
+                .iter_mut()
+                .find(|(action, _)| action == "OpenSettings")
+                .unwrap()
+                .1 = "shift-enter x".to_string();
 
-        let mut keymap = gpui::Keymap::default();
-        keymap.add_bindings(action_bindings(&effective));
-        let input = [gpui::Keystroke::parse("shift-enter").unwrap()];
-        let context = [gpui::KeyContext::parse("Terminal").unwrap()];
-        let (_, pending) = keymap.bindings_for_input(&input, &context);
+            let mut keymap = gpui::Keymap::default();
+            keymap.add_bindings(action_bindings(&effective, cx));
+            let input = [parse_keystroke("shift-enter").unwrap()];
+            let context = [gpui::KeyContext::parse("Terminal").unwrap()];
+            let (_, pending) = keymap.bindings_for_input(&input, &context);
 
-        assert!(pending, "the keymap must wait for the second key");
+            assert!(pending, "the keymap must wait for the second key");
 
-        let input = [
-            gpui::Keystroke::parse("shift-enter").unwrap(),
-            gpui::Keystroke::parse("x").unwrap(),
-        ];
-        let (matched, pending) = keymap.bindings_for_input(&input, &context);
-        assert!(!pending);
-        assert!(
-            matched
-                .first()
-                .is_some_and(|binding| binding.action().partial_eq(&OpenSettings))
-        );
+            let input = [
+                parse_keystroke("shift-enter").unwrap(),
+                parse_keystroke("x").unwrap(),
+            ];
+            let (matched, pending) = keymap.bindings_for_input(&input, &context);
+            assert!(!pending);
+            assert!(
+                matched
+                    .first()
+                    .is_some_and(|binding| binding.action().partial_eq(&OpenSettings))
+            );
+        })
     }
 
     #[test]
@@ -2362,106 +1825,30 @@ mod tests {
     }
 
     #[test]
-    fn rebinding_insert_newline_retires_both_default_chords() {
-        let effective = vec![("InsertNewline".to_string(), "ctrl-o".to_string())];
-        assert!(extra_keystrokes(&effective).is_empty());
-        assert_eq!(
-            dispatched(&effective, "ctrl-o", "Terminal"),
-            vec![InsertNewline::name_for_type()],
-            "the chord the config asks for is the one the keymap dispatches"
-        );
-        for retired in ["shift-enter", "alt-enter"] {
-            assert!(
-                dispatched(&effective, retired, "Terminal").is_empty(),
-                "{retired} is off the action now and must dispatch nothing"
-            );
-        }
-
-        let unbound = vec![("InsertNewline".to_string(), String::new())];
-        assert!(extra_keystrokes(&unbound).is_empty());
-        assert!(action_bindings(&unbound).is_empty());
-    }
-
-    #[test]
-    fn each_binding_lands_in_the_context_its_action_is_scoped_to() {
-        let effective = vec![
-            ("InsertNewline".to_string(), "shift-enter".to_string()),
-            ("NewTab".to_string(), "secondary-t".to_string()),
-        ];
-        // The newline is a terminal chord, and its default ships the fallback
-        // beside it; both are scoped, so neither reaches the rest of the app.
-        let mut newline = dispatched(&effective, "shift-enter", "Terminal");
-        newline.sort_unstable();
-        assert_eq!(
-            newline,
-            vec![
-                InsertNewline::name_for_type(),
-                InsertNewlineFallback::name_for_type(),
-            ]
-        );
-        assert!(dispatched(&effective, "shift-enter", "Workspace").is_empty());
-        assert_eq!(
-            dispatched(&effective, "alt-enter", "Terminal"),
-            vec![InsertNewline::name_for_type()],
-            "the extra chord follows its action's scope"
-        );
-        // A window action has no context: it has to work from a terminal too.
-        for context in ["Terminal", "Workspace"] {
-            assert_eq!(
-                dispatched(&effective, "secondary-t", context),
-                vec![NewTab::name_for_type()],
-                "NewTab must not be scoped to {context}"
-            );
-        }
-    }
-
-    #[test]
     fn action_context_matches_the_scope_make_binding_installs() {
-        let extra_actions = extra_keystrokes(
-            &default_bindings()
-                .into_iter()
-                .map(|(a, k)| (a.to_string(), k.to_string()))
-                .collect::<Vec<_>>(),
-        );
-        let actions = default_bindings()
-            .into_iter()
-            .map(|(a, _)| a)
-            .chain(extra_actions.into_iter().map(|(a, _)| a));
-        for action in actions {
-            let binding =
-                make_binding(action, "f13").unwrap_or_else(|| panic!("no arm for {action}"));
-            let installed = binding.predicate().map(|p| p.to_string());
-            assert_eq!(
-                installed.as_deref(),
-                action_context(action),
-                "{action} is installed in a different context than `action_context` reports"
+        let cx = gpui::TestAppContext::single();
+        cx.read(|cx| {
+            let extra_actions = extra_keystrokes(
+                &default_bindings()
+                    .into_iter()
+                    .map(|(a, k)| (a.to_string(), k.to_string()))
+                    .collect::<Vec<_>>(),
             );
-        }
-    }
-
-    #[test]
-    fn secondary_enter_chords_are_distinct_from_insert_newline() {
-        let defaults = default_bindings();
-        let key_of = |action: &str| {
-            defaults
-                .iter()
-                .find(|(a, _)| *a == action)
-                .map(|(_, k)| *k)
-                .unwrap()
-        };
-        assert_eq!(
-            key_of("ToggleFullscreen"),
-            per_platform("secondary-enter", "f11")
-        );
-        assert_eq!(key_of("ToggleMaximizePane"), "secondary-shift-enter");
-        for window_chord in ["secondary-enter", "secondary-shift-enter"] {
-            assert_ne!(window_chord, INSERT_NEWLINE_DEFAULT);
-            assert_ne!(window_chord, INSERT_NEWLINE_ALT_DEFAULT);
-        }
-        for chord in [INSERT_NEWLINE_DEFAULT, INSERT_NEWLINE_ALT_DEFAULT] {
-            assert_ne!(chord, "shift-alt-enter");
-            assert_ne!(chord, "alt-shift-enter");
-        }
+            let actions = default_bindings()
+                .into_iter()
+                .map(|(a, _)| a)
+                .chain(extra_actions.into_iter().map(|(a, _)| a));
+            for action in actions {
+                let binding = make_binding(action, "f13", cx)
+                    .unwrap_or_else(|| panic!("no arm for {action}"));
+                let installed = binding.predicate().map(|p| p.to_string());
+                assert_eq!(
+                    installed.as_deref(),
+                    action_context(action),
+                    "{action} is installed in a different context than `action_context` reports"
+                );
+            }
+        })
     }
 
     #[test]
@@ -2478,7 +1865,7 @@ mod tests {
             let folded = folded_spec(spec);
             for spelling in [Some(spec), folded.as_deref()].into_iter().flatten() {
                 for chord in spelling.split_whitespace() {
-                    Keystroke::parse(chord).expect("default chords parse");
+                    parse_keystroke(chord).expect("default chords parse");
                     assert!(
                         !steals_a_control_code(chord)
                             || control_code_binding_allowed(action, chord),
@@ -2515,8 +1902,13 @@ mod tests {
         let mut bound = Vec::new();
         for (action, spec) in default_bindings() {
             for chord in spec.split_whitespace() {
-                let ks = Keystroke::parse(chord).expect("default chords parse");
-                if crate::terminal::input::is_function_key(&ks.key) {
+                let ks = parse_keystroke(chord).expect("default chords parse");
+                if ks
+                    .key
+                    .strip_prefix('f')
+                    .and_then(|n| n.parse::<u8>().ok())
+                    .is_some_and(|n| (1..=24).contains(&n))
+                {
                     bound.push((action, chord));
                 }
             }
@@ -2541,57 +1933,12 @@ mod tests {
     }
 
     #[test]
-    fn the_control_code_rule_knows_what_the_shell_needs() {
-        // The keys with a C0 byte behind them, and the modifier shape that
-        // reaches it: Ctrl alone. This is the predicate the defaults are held
-        // to above and the one `action_bindings` warns on.
-        for chord in [
-            "ctrl-d",
-            "ctrl-c",
-            "ctrl-[",
-            "ctrl-2",
-            "ctrl-6",
-            "ctrl-8",
-            "ctrl-/",
-            "ctrl-space",
-        ] {
-            assert!(steals_a_control_code(chord), "{chord} is a control code");
-        }
-        for chord in [
-            "ctrl-shift-v",
-            "ctrl-alt-v",
-            "secondary-shift-t",
-            "ctrl-1",
-            "ctrl-9",
-            "ctrl--",
-            "ctrl-f3",
-            "alt-enter",
-        ] {
-            assert!(
-                !steals_a_control_code(chord),
-                "{chord} carries no control code"
-            );
-        }
-        // Ctrl+V is allowed to anyone off macOS — it is how the default paste
-        // reaches the chord, and how a user moves the full-screen paste onto
-        // it — while Ctrl+D stays refused whoever asks.
-        assert_eq!(
-            control_code_binding_allowed("PasteText", "ctrl-v"),
-            cfg!(not(target_os = "macos"))
-        );
-        assert!(!control_code_binding_allowed("PasteText", "ctrl-d"));
-        assert!(control_code_binding_allowed("EditorSave", "secondary-s"));
-        assert!(control_code_binding_allowed("EditorGoToLine", "ctrl-g"));
-    }
-
-    #[test]
     fn every_default_chord_is_claimed_by_exactly_one_action() {
         // Per context, not globally: gpui resolves a keystroke by walking the
         // focus chain outwards, so a chord bound inside a narrow context and
         // again with no context is not a clash — the narrow one wins while
         // that element has focus and the global one applies everywhere else.
-        // `ScmCommit` and `ToggleFullscreen` both take secondary-enter on that
-        // basis. Two bindings sharing a chord *and* a context is still a bug,
+        // Two bindings sharing a chord *and* a context is still a bug,
         // because then which one fires is arbitrary.
         // `same_chord`, not string equality: `secondary-shift-]` and
         // `secondary-}` are two spellings of one keystroke and both install it.
@@ -2620,9 +1967,9 @@ mod tests {
             "ctrl-shift-tab",
             "secondary--",
         ] {
-            let ks = Keystroke::parse(spec).unwrap();
+            let ks = parse_keystroke(spec).unwrap();
             let round = spec_from_keystroke(&ks).expect("real key produces a spec");
-            let reparsed = Keystroke::parse(&round).unwrap();
+            let reparsed = parse_keystroke(&round).unwrap();
             assert_eq!(
                 (reparsed.modifiers, reparsed.key),
                 (ks.modifiers, ks.key),
@@ -2792,52 +2139,52 @@ mod tests {
 
     #[test]
     fn spec_from_keystroke_ignores_a_lone_modifier() {
-        let ks = Keystroke::parse("secondary").unwrap();
+        let ks = parse_keystroke("secondary").unwrap();
         assert_eq!(spec_from_keystroke(&ks), None);
     }
 
     #[test]
     fn new_agent_tab_ships_a_chord_only_where_one_is_free() {
-        let mut effective: Vec<(String, String)> = default_bindings()
-            .into_iter()
-            .map(|(a, k)| (a.to_string(), k.to_string()))
-            .collect();
-        let default = effective
-            .iter()
-            .find(|(action, _)| action == "NewAgentTab")
-            .map(|(_, key)| key.clone())
-            .expect("NewAgentTab has to be listed or it cannot be bound");
-        if cfg!(target_os = "macos") {
-            assert_eq!(default, "secondary-shift-a");
-            assert_eq!(
-                dispatched(&effective, &default, "Terminal"),
-                vec![NewAgentTab::name_for_type()],
-                "{default} must reach NewAgentTab, and nothing else may answer it"
-            );
-        } else {
-            assert_eq!(default, "", "Ctrl+Shift+A is select-all off macOS");
-        }
+        let cx = gpui::TestAppContext::single();
+        cx.read(|cx| {
+            let mut effective: Vec<(String, String)> = default_bindings()
+                .into_iter()
+                .map(|(a, k)| (a.to_string(), k.to_string()))
+                .collect();
+            let default = effective
+                .iter()
+                .find(|(action, _)| action == "NewAgentTab")
+                .map(|(_, key)| key.clone())
+                .expect("NewAgentTab has to be listed or it cannot be bound");
+            if cfg!(target_os = "macos") {
+                assert_eq!(default, "secondary-shift-a");
+                assert_eq!(
+                    dispatched(&effective, &default, "Terminal"),
+                    vec![NewAgentTab::name_for_type()],
+                    "{default} must reach NewAgentTab, and nothing else may answer it"
+                );
+            } else {
+                assert_eq!(default, "", "Ctrl+Shift+A is select-all off macOS");
+            }
 
-        // Each agent's own launch is a slot of its own, and a key bound to it
-        // dispatches that agent.
-        let name = crate::ui::agent_launch::launch_action_name(
-            tty7_core::core::cli_agent::CLIAgent::Codex,
-        );
-        effective
-            .iter_mut()
-            .find(|(action, _)| action == name)
-            .expect("every agent has a keymap slot")
-            .1 = "ctrl-alt-shift-c".to_string();
-        let mut keymap = gpui::Keymap::default();
-        keymap.add_bindings(action_bindings(&effective));
-        let typed = [Keystroke::parse("ctrl-alt-shift-c").unwrap()];
-        let context = [gpui::KeyContext::parse("Terminal").unwrap()];
-        let hits = keymap.bindings_for_input(&typed, &context).0;
-        assert_eq!(hits.len(), 1);
-        assert!(hits[0].action().partial_eq(&LaunchAgent {
-            agent: tty7_core::core::cli_agent::CLIAgent::Codex,
-        }));
-        assert_eq!(action_entry(name).0, CommandGroup::Agents);
+            // Each agent's own launch is a slot of its own, and a key bound to it
+            // dispatches that agent.
+            effective
+                .iter_mut()
+                .find(|(action, _)| action == "LaunchAgent:codex")
+                .expect("every agent has a keymap slot")
+                .1 = "ctrl-alt-shift-c".to_string();
+            let mut keymap = gpui::Keymap::default();
+            keymap.add_bindings(action_bindings(&effective, cx));
+            let typed = [parse_keystroke("ctrl-alt-shift-c").unwrap()];
+            let context = [gpui::KeyContext::parse("Terminal").unwrap()];
+            let hits = keymap.bindings_for_input(&typed, &context).0;
+            assert_eq!(hits.len(), 1);
+            assert!(hits[0].action().partial_eq(&LaunchAgent {
+                agent: tty7_core::core::cli_agent::CLIAgent::Codex,
+            }));
+            assert_eq!(action_entry("LaunchAgent:codex").0, CommandGroup::Agents);
+        })
     }
 }
 
@@ -2850,7 +2197,7 @@ mod gpui_tests {
     #[gpui::test]
     fn init_then_rebind_installs_the_merged_table(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui::component::init(cx);
             cx.set_global(Config::default());
             init(cx);
 
@@ -2873,10 +2220,6 @@ mod gpui_tests {
             };
             assert_eq!(keys_of("NewTab"), ["ctrl-b c", "secondary-shift-n"]);
             assert_eq!(keys_of("SplitRight"), ["ctrl-b %"]);
-            assert_eq!(
-                keys_of("TogglePalette"),
-                [per_platform("secondary-p", "secondary-shift-p")]
-            );
 
             cx.global_mut::<Config>().keybinding_preset = "default".to_string();
             rebind(cx);
@@ -2893,7 +2236,7 @@ mod gpui_tests {
     #[gpui::test]
     fn the_keybinding_triple_only_moves_when_a_binding_does(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui::component::init(cx);
             cx.set_global(Config::default());
             init(cx);
 
@@ -2930,7 +2273,7 @@ mod gpui_tests {
     /// text rather than built in Rust, because the file is the surface #868 is
     /// about: what a hand-written line means is the thing under test.
     fn running_on_json(cx: &mut gpui::App, json: &str) {
-        gpui_component::init(cx);
+        gpui::component::init(cx);
         cx.set_global(Config(
             serde_json::from_str(json).expect("the config parses"),
         ));
@@ -2942,7 +2285,7 @@ mod gpui_tests {
     fn fired(cx: &gpui::App, keys: &str) -> Vec<&'static str> {
         let input: Vec<Keystroke> = keys
             .split(' ')
-            .map(|k| Keystroke::parse(k).expect("the typed keystroke parses"))
+            .map(|k| parse_keystroke(k).expect("the typed keystroke parses"))
             .collect();
         let context = [gpui::KeyContext::parse("Terminal").expect("the context parses")];
         cx.key_bindings()
@@ -2952,60 +2295,6 @@ mod gpui_tests {
             .iter()
             .map(|b| b.action().name())
             .collect()
-    }
-
-    /// The code editor's line commands sit on chords the app also spends —
-    /// ⌘/ is the shortcut sheet, ⌘↵ fullscreen, ⌘⇧↵ maximize, ⌥↑/⌥↓ pane
-    /// focus off macOS. `fixed_bindings` re-adds them on the `CodeEditor`
-    /// context the editor declares beside `Input`, after the app's table, so
-    /// inside the editor they win and everywhere else nothing changes.
-    #[gpui::test]
-    fn the_code_editor_chords_win_inside_the_editor(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            running_on_json(cx, "{}");
-            let first = |keys: &str, stack: &[&str]| {
-                let input: Vec<Keystroke> = keys
-                    .split(' ')
-                    .map(|k| Keystroke::parse(k).expect("the typed keystroke parses"))
-                    .collect();
-                let stack: Vec<gpui::KeyContext> = stack
-                    .iter()
-                    .map(|c| gpui::KeyContext::parse(c).expect("the context parses"))
-                    .collect();
-                cx.key_bindings()
-                    .borrow()
-                    .bindings_for_input(&input, &stack)
-                    .0
-                    .first()
-                    .map(|b| b.action().name())
-            };
-            let editor = ["Workspace", "Input CodeEditor"];
-            let join_lines = cfg!(target_os = "macos").then_some(("ctrl-j", "input::JoinLines"));
-            for (keys, action) in join_lines.into_iter().chain([
-                ("secondary-/", "input::ToggleLineComment"),
-                ("alt-up", "input::MoveLineUp"),
-                ("alt-down", "input::MoveLineDown"),
-                ("alt-shift-up", "input::CopyLineUp"),
-                ("alt-shift-down", "input::CopyLineDown"),
-                ("secondary-shift-k", "input::DeleteLine"),
-                ("secondary-enter", "input::InsertLineBelow"),
-                ("secondary-shift-enter", "input::InsertLineAbove"),
-                ("secondary-l", "input::SelectLine"),
-                ("secondary-shift-\\", "input::MoveToMatchingBracket"),
-            ]) {
-                assert_eq!(first(keys, &editor), Some(action), "{keys} in the editor");
-                assert_ne!(
-                    first(keys, &["Workspace", "Input"]),
-                    Some(action),
-                    "{keys} in a plain text field"
-                );
-                assert_ne!(
-                    first(keys, &["Workspace", "Terminal"]),
-                    Some(action),
-                    "{keys} in a terminal"
-                );
-            }
-        });
     }
 
     #[gpui::test]
@@ -3036,8 +2325,6 @@ mod gpui_tests {
                 fired(cx, "ctrl-alt-[").first(),
                 Some(&PrevTab::name_for_type())
             );
-            // The palette hint and the menus still name the chord the app
-            // ships with.
             assert_eq!(effective_key("NextTab", cx).as_deref(), Some("ctrl-tab"));
         });
     }
@@ -3142,7 +2429,7 @@ mod gpui_tests {
     fn the_badge_hold_follows_the_tab_chord(cx: &mut TestAppContext) {
         cx.update(|cx| {
             running_on_json(cx, "{}");
-            let shipped = Keystroke::parse(per_platform("secondary-1", "alt-1"))
+            let shipped = parse_keystroke(per_platform("secondary-1", "alt-1"))
                 .expect("the shipped chord parses");
             assert_eq!(
                 tab_badge_hold(cx),
@@ -3245,7 +2532,7 @@ mod gpui_tests {
     #[gpui::test]
     fn repeated_rebinds_do_not_grow_the_keymap(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui::component::init(cx);
             cx.set_global(Config::default());
             init(cx);
             let size = cx.key_bindings().borrow().bindings().len();
@@ -3271,11 +2558,11 @@ mod gpui_tests {
             // rebuild replaces the map, so it has to carry them; without this
             // the first rebind left every text field in the app unable to
             // delete a character (#548).
-            gpui_component::init(cx);
+            gpui::component::init(cx);
             cx.set_global(Config::default());
 
             let backspace = |cx: &App| {
-                let typed = [Keystroke::parse("backspace").unwrap()];
+                let typed = [parse_keystroke("backspace").unwrap()];
                 cx.key_bindings()
                     .borrow()
                     .all_bindings_for_input(&typed)
@@ -3294,176 +2581,6 @@ mod gpui_tests {
             assert_eq!(backspace(cx), inherited, "init must not drop them");
             rebind(cx);
             assert_eq!(backspace(cx), inherited, "nor may a rebind");
-        });
-    }
-
-    /// The gutter's next / previous change chords live only in an `Input`:
-    /// the editor gets them, a terminal never loses a function key to them.
-    #[gpui::test]
-    fn editor_change_chords_are_bound_only_in_an_input(cx: &mut TestAppContext) {
-        use gpui::Action as _;
-        cx.update(|cx| {
-            running_on_json(cx, "{}");
-            let hits = |keys: &str, contexts: &[&str]| -> Vec<&'static str> {
-                let input = [Keystroke::parse(keys).expect("the keystroke parses")];
-                let context: Vec<_> = contexts
-                    .iter()
-                    .map(|c| gpui::KeyContext::parse(c).expect("the context parses"))
-                    .collect();
-                cx.key_bindings()
-                    .borrow()
-                    .bindings_for_input(&input, &context)
-                    .0
-                    .iter()
-                    .map(|b| b.action().name())
-                    .collect()
-            };
-            assert_eq!(
-                hits("alt-f5", &["Workspace", "Input"]).first(),
-                Some(&EditorNextChange::name_for_type())
-            );
-            assert_eq!(
-                hits("shift-alt-f5", &["Workspace", "Input"]).first(),
-                Some(&EditorPrevChange::name_for_type())
-            );
-            assert_eq!(
-                hits("alt-f3", &["Workspace", "Input"]).first(),
-                Some(&EditorPeekChange::name_for_type())
-            );
-            assert!(hits("alt-f5", &["Workspace"]).is_empty());
-        });
-    }
-
-    /// The code editor's multi-cursor chords sit on keys tty7 ships for panes
-    /// (⌘D split, ⌘⌥↑/↓ focus). `fixed_bindings` re-adds them after the
-    /// pane table so they rank first inside an `Input`; any other text field
-    /// has no handler for them, and gpui falls through to the pane binding
-    /// listed after. A terminal never sees them.
-    #[gpui::test]
-    fn editor_multi_cursor_chords_outrank_the_pane_bindings(cx: &mut TestAppContext) {
-        use gpui::Action as _;
-        use gpui_component::input::{
-            AddCursorAbove, AddCursorBelow, SelectAllOccurrences, SelectNextOccurrence,
-        };
-        cx.update(|cx| {
-            running_on_json(cx, "{}");
-            let in_input = |keys: &str| -> Vec<&'static str> {
-                let input = [Keystroke::parse(keys).expect("the keystroke parses")];
-                let context = [
-                    gpui::KeyContext::parse("Workspace").expect("the context parses"),
-                    gpui::KeyContext::parse("Input").expect("the context parses"),
-                ];
-                cx.key_bindings()
-                    .borrow()
-                    .bindings_for_input(&input, &context)
-                    .0
-                    .iter()
-                    .map(|b| b.action().name())
-                    .collect()
-            };
-            let cases = [
-                ("secondary-d", SelectNextOccurrence::name_for_type()),
-                ("secondary-shift-l", SelectAllOccurrences::name_for_type()),
-                ("secondary-alt-up", AddCursorAbove::name_for_type()),
-                ("secondary-alt-down", AddCursorBelow::name_for_type()),
-            ];
-            for (keys, editor_action) in cases {
-                let hits = in_input(keys);
-                assert_eq!(hits.first(), Some(&editor_action), "{keys} in the editor");
-            }
-            if cfg!(target_os = "macos") {
-                assert!(in_input("secondary-d").contains(&SplitRight::name_for_type()));
-                assert_eq!(
-                    fired(cx, "secondary-d").first(),
-                    Some(&SplitRight::name_for_type()),
-                    "a terminal still splits on ⌘D"
-                );
-            }
-
-            // ⌘K ⌘D in the code editor skips to the next occurrence, and ⌘K
-            // there waits for the chord's second key.
-            let editor = [
-                gpui::KeyContext::parse("Workspace").expect("the context parses"),
-                gpui::KeyContext::parse("Input CodeEditor").expect("the context parses"),
-            ];
-            let keymap = cx.key_bindings();
-            let keymap = keymap.borrow();
-            let chord = [
-                Keystroke::parse("secondary-k").unwrap(),
-                Keystroke::parse("secondary-d").unwrap(),
-            ];
-            let (hits, _) = keymap.bindings_for_input(&chord, &editor);
-            assert_eq!(
-                hits.first().map(|b| b.action().name()),
-                Some(gpui_component::input::SkipOccurrence::name_for_type())
-            );
-            let (_, pending) =
-                keymap.bindings_for_input(&[Keystroke::parse("secondary-k").unwrap()], &editor);
-            assert!(pending, "⌘K waits for the chord in the code editor");
-            // A plain text field isn't held up.
-            let field = [
-                gpui::KeyContext::parse("Workspace").expect("the context parses"),
-                gpui::KeyContext::parse("Input").expect("the context parses"),
-            ];
-            let (_, pending) =
-                keymap.bindings_for_input(&[Keystroke::parse("secondary-k").unwrap()], &field);
-            assert!(!pending, "⌘K goes straight through in other fields");
-        });
-    }
-
-    /// Go to Symbol and Back/Forward sit on chords the window already uses
-    /// (⌘⇧O is the workspace switcher; off macOS Alt+←/→ move between
-    /// panes). Bound at the text field's depth and after the window's table,
-    /// they rank first inside the editor, and a terminal never sees them.
-    #[gpui::test]
-    fn editor_navigation_chords_outrank_the_window_inside_a_text_field(cx: &mut TestAppContext) {
-        use gpui::Action as _;
-        cx.update(|cx| {
-            running_on_json(cx, "{}");
-            let in_input = |keys: &str| -> Vec<&'static str> {
-                let input = [Keystroke::parse(keys).expect("the keystroke parses")];
-                let context = [
-                    gpui::KeyContext::parse("Workspace").expect("the context parses"),
-                    gpui::KeyContext::parse("Input").expect("the context parses"),
-                ];
-                cx.key_bindings()
-                    .borrow()
-                    .bindings_for_input(&input, &context)
-                    .0
-                    .iter()
-                    .map(|b| b.action().name())
-                    .collect()
-            };
-            let (back, forward) = match cfg!(target_os = "macos") {
-                true => ("ctrl--", "ctrl-shift--"),
-                false => ("alt-left", "alt-right"),
-            };
-            for (keys, action) in [
-                ("secondary-shift-o", EditorGoToSymbol::name_for_type()),
-                (back, EditorNavigateBack::name_for_type()),
-                (forward, EditorNavigateForward::name_for_type()),
-                ("secondary-\\", EditorSplitRight::name_for_type()),
-                (
-                    per_platform("secondary-alt-left", "ctrl-alt-left"),
-                    EditorFocusLeftGroup::name_for_type(),
-                ),
-                (
-                    per_platform("secondary-alt-right", "ctrl-alt-right"),
-                    EditorFocusRightGroup::name_for_type(),
-                ),
-            ] {
-                assert_eq!(
-                    in_input(keys).first(),
-                    Some(&action),
-                    "{keys} in the editor"
-                );
-                assert!(!fired(cx, keys).contains(&action), "{keys} in a terminal");
-            }
-            assert_eq!(
-                fired(cx, "secondary-shift-o").first(),
-                Some(&ToggleSwitcher::name_for_type()),
-                "a terminal still opens the switcher"
-            );
         });
     }
 }

@@ -15,7 +15,7 @@
 //! So the daemon folds the same bytes into this tracker as they pass, and
 //! `replay_state` re-sends what is still on ahead of the ring — the same
 //! treatment cwd, the prompt state and the agent already get. Only what the
-//! ring itself no longer carries, though: see [`TerminalModes::restore_bytes_beyond`].
+//! ring itself no longer carries, though: see [`TerminalModes::replay_prelude`].
 //!
 //! The kitty keyboard flags are tracked alongside, and restored differently:
 //! see [`TerminalModes::replay_prelude`].
@@ -255,7 +255,7 @@ impl TerminalModes {
     /// the ring has dropped from its front, and `replayed` the fold of what it
     /// still holds.
     ///
-    /// The DEC modes are the ones in [`Self::restore_bytes_beyond`]. The kitty
+    /// The DEC modes are those that `replayed` no longer carries. The kitty
     /// keyboard flags cannot be restored that way, as the state they ended in:
     /// they are a stack, and the pushes and pops still in the ring act on it
     /// relative to where it stood when they were written. A program that
@@ -279,25 +279,6 @@ impl TerminalModes {
             .keyboard
             .rebuild_around(dec, missing.contains(&ALT_SCREEN));
         (!bytes.is_empty()).then_some(bytes)
-    }
-
-    /// The same, minus every mode `replayed` switches on by itself.
-    ///
-    /// `replayed` is a fold over the bytes that are about to be sent after
-    /// these, and whatever it carries has to be left to it — a mode sequence in
-    /// a stream does more than set a bit. `?1049h` clears the alternate screen
-    /// and takes the cursor there, and the emulator makes it a *no-op* once the
-    /// mode is already on, so restoring such a mode ahead of a replay that
-    /// still contains it does not harmlessly double up: it paints everything
-    /// the replay wrote before its own `?1049h` into the alternate screen,
-    /// which has no scrollback to hold it, and leaves the primary buffer the
-    /// program's exit returns the client to empty.
-    ///
-    /// What is left over is exactly what the replay can no longer speak for,
-    /// and it is a prefix of `on`: the replay is a suffix of the stream, so any
-    /// mode it sets was set later than one it does not.
-    pub fn restore_bytes_beyond(&self, replayed: &TerminalModes) -> Option<Vec<u8>> {
-        Self::bytes_for(&self.missing_from(replayed))
     }
 
     fn missing_from(&self, replayed: &TerminalModes) -> Vec<u16> {
@@ -570,21 +551,27 @@ mod tests {
         // decides which buffer the bytes around it are painted into.
         let mut whole = TerminalModes::new();
         whole.feed(b"\x1b[?1049h\x1b[?1002h\x1b[?1006h");
-        assert!(modes.restore_bytes_beyond(&whole).is_none());
+        assert!(
+            modes
+                .replay_prelude(&TerminalModes::new(), &whole)
+                .is_none()
+        );
 
         // One that holds only the tail speaks for the tail; the rest comes back
         // ahead of it, in the order the application set it.
         let mut tail = TerminalModes::new();
         tail.feed(b"\x1b[?1006h");
         assert_eq!(
-            modes.restore_bytes_beyond(&tail).unwrap(),
+            modes.replay_prelude(&TerminalModes::new(), &tail).unwrap(),
             b"\x1b[?1049h\x1b[?1002h".to_vec()
         );
 
         // And a ring with nothing left of the prefix is the #774 case: all of
         // it is re-sent.
         assert_eq!(
-            modes.restore_bytes_beyond(&TerminalModes::new()).unwrap(),
+            modes
+                .replay_prelude(&TerminalModes::new(), &TerminalModes::new())
+                .unwrap(),
             modes.restore_bytes().unwrap()
         );
     }
@@ -600,7 +587,9 @@ mod tests {
         let mut replayed = TerminalModes::new();
         replayed.feed(b"049h and the rest of the screen");
         assert_eq!(
-            modes.restore_bytes_beyond(&replayed).unwrap(),
+            modes
+                .replay_prelude(&TerminalModes::new(), &replayed)
+                .unwrap(),
             b"\x1b[?1049h".to_vec()
         );
     }

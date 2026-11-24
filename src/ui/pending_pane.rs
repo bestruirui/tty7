@@ -1,11 +1,11 @@
 use std::time::Duration;
 
+use gpui::component::button::{Button, ButtonVariants as _};
+use gpui::component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui::{
     Animation, AnimationExt as _, Context, EventEmitter, FocusHandle, Focusable, SharedString,
     Window, div, prelude::*, px,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 
 use crate::daemon::protocol::ShellSpec;
 use crate::terminal::PaneWorkspace;

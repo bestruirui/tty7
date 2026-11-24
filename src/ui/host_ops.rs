@@ -2,16 +2,13 @@ use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
+use gpui::component::WindowExt as _;
 use gpui::{App, Context, Window};
-use gpui_component::WindowExt as _;
 
 use crate::ui::i18n::L10nKey;
-use gpui_component::notification::Notification;
+use gpui::component::notification::Notification;
 
-#[allow(unused_imports)]
-pub use tty7_core::host::{
-    Entry, Host, HostId, MTime, Meta, Output, SearchHit, SharedHost, WatchSub,
-};
+pub use tty7_core::host::{Host, HostId, SharedHost};
 
 mod blocking {
     use std::collections::VecDeque;
@@ -234,49 +231,6 @@ impl HostOps {
         .detach();
     }
 
-    pub fn run_in<T, E, F, L>(host: SharedHost, window: &Window, cx: &mut Context<E>, f: F, land: L)
-    where
-        E: 'static,
-        T: Send + 'static,
-        F: FnOnce(&dyn Host) -> T + Send + 'static,
-        L: FnOnce(&mut E, T, &mut Window, &mut Context<E>) + 'static,
-    {
-        tty7_core::host::register_ui_thread();
-        cx.spawn_in(window, async move |this, cx| {
-            let Some(out) = off_thread(move || f(&*host)).await else {
-                return;
-            };
-            let _ = this.update_in(cx, |view, window, cx| land(view, out, window, cx));
-        })
-        .detach();
-    }
-
-    pub fn run_or_notify<T, E, F, L>(
-        host: SharedHost,
-        window: &Window,
-        cx: &mut Context<E>,
-        context: impl Into<String>,
-        f: F,
-        land: L,
-    ) where
-        E: 'static,
-        T: Send + 'static,
-        F: FnOnce(&dyn Host) -> std::io::Result<T> + Send + 'static,
-        L: FnOnce(&mut E, T, &mut Window, &mut Context<E>) + 'static,
-    {
-        let context = context.into();
-        Self::run_in(
-            host,
-            window,
-            cx,
-            f,
-            move |view, result, window, cx| match result {
-                Ok(value) => land(view, value, window, cx),
-                Err(e) => HostOps::notify_err(window, cx, &context, &e),
-            },
-        );
-    }
-
     /// Every context handed here is already a sentence about what failed —
     /// "Could not delete a.txt" — so it is the toast's title, and the reason
     /// sits under it. Run together as `{context}: {error}` on one plain line
@@ -356,18 +310,6 @@ impl<K: Eq + Hash + Clone> InFlight<K> {
         }
     }
 
-    pub fn invalidate_all(&mut self) {
-        self.stale.extend(self.in_flight.iter().cloned());
-    }
-
-    /// Drop every key the predicate rejects — bookkeeping for work that will
-    /// never land (a host cleared away under an in-flight job). If the job
-    /// does land after all, its `finish` is a no-op rather than a poison.
-    pub fn retain(&mut self, keep: impl Fn(&K) -> bool) {
-        self.in_flight.retain(|k| keep(k));
-        self.stale.retain(|k| keep(k));
-    }
-
     pub fn finish(&mut self, key: &K) -> bool {
         self.in_flight.remove(key);
         !self.stale.remove(key)
@@ -375,18 +317,6 @@ impl<K: Eq + Hash + Clone> InFlight<K> {
 
     pub fn is_pending(&self, key: &K) -> bool {
         self.in_flight.contains(key)
-    }
-
-    pub fn pending_keys(&self) -> impl Iterator<Item = &K> {
-        self.in_flight.iter()
-    }
-
-    pub fn len(&self) -> usize {
-        self.in_flight.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.in_flight.is_empty()
     }
 }
 
@@ -413,36 +343,6 @@ impl<K: Eq + Hash, V> ByHost<K, V> {
 
     pub fn insert(&mut self, host: HostId, key: K, value: V) -> Option<V> {
         self.map.entry(host).or_default().insert(key, value)
-    }
-
-    pub fn remove<Q>(&mut self, host: HostId, key: &Q) -> Option<V>
-    where
-        K: Borrow<Q>,
-        Q: Eq + Hash + ?Sized,
-    {
-        self.map.get_mut(&host)?.remove(key)
-    }
-
-    pub fn keys(&self) -> impl Iterator<Item = (HostId, &K)> {
-        self.map
-            .iter()
-            .flat_map(|(host, inner)| inner.keys().map(move |k| (*host, k)))
-    }
-
-    pub fn clear_host(&mut self, host: HostId) {
-        self.map.remove(&host);
-    }
-
-    pub fn clear(&mut self) {
-        self.map.clear();
-    }
-
-    pub fn len(&self) -> usize {
-        self.map.values().map(HashMap::len).sum()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.map.values().all(HashMap::is_empty)
     }
 }
 
@@ -485,11 +385,9 @@ mod tests {
         assert!(loads.begin(a.clone()), "first request spawns");
         assert!(!loads.begin(a.clone()), "a repeat frame does not");
         assert!(loads.is_pending(&a));
-        assert_eq!(loads.len(), 1);
 
         assert!(loads.finish(&a));
         assert!(!loads.is_pending(&a));
-        assert!(loads.is_empty());
 
         assert!(loads.begin(a.clone()));
         loads.invalidate(&a);
@@ -503,20 +401,6 @@ mod tests {
     }
 
     #[test]
-    fn invalidate_all_covers_everything_in_flight() {
-        let mut loads: InFlight<u32> = InFlight::default();
-        loads.begin(1);
-        loads.begin(2);
-        loads.invalidate_all();
-        assert!(!loads.finish(&1));
-        assert!(!loads.finish(&2));
-        assert!(loads.is_empty());
-
-        loads.begin(3);
-        assert!(loads.finish(&3));
-    }
-
-    #[test]
     fn by_host_keys_by_machine_as_well_as_path() {
         let remote = HostId::from_connection_key("ssh-direct:me@box:22");
         let mut cache: ByHost<PathBuf, &str> = ByHost::default();
@@ -526,14 +410,6 @@ mod tests {
         cache.insert(remote, p.clone(), "remote listing");
         assert_eq!(cache.get(HostId::LOCAL, &p), Some(&"local listing"));
         assert_eq!(cache.get(remote, &p), Some(&"remote listing"));
-        assert_eq!(cache.len(), 2);
-
-        cache.clear_host(remote);
-        assert_eq!(cache.get(remote, &p), None);
-        assert_eq!(cache.get(HostId::LOCAL, &p), Some(&"local listing"));
-
-        cache.remove(HostId::LOCAL, &p);
-        assert!(cache.is_empty());
     }
 
     #[test]
@@ -541,8 +417,6 @@ mod tests {
         let mut cache: ByHost<PathBuf, u32> = ByHost::default();
         cache.insert(HostId::LOCAL, PathBuf::from("/a/b"), 1);
         assert_eq!(cache.get(HostId::LOCAL, Path::new("/a/b")), Some(&1));
-        assert_eq!(cache.remove(HostId::LOCAL, Path::new("/a/b")), Some(1));
-        assert!(cache.is_empty());
     }
 }
 

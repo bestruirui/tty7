@@ -507,11 +507,6 @@ fn pane_environment(
     if let Some(dir) = config_dir_env() {
         env.push((TTY7_CONFIG_DIR_ENV.to_string(), dir));
     }
-    // Names the pane's own history file; the integration snippet is what
-    // decides to use it, once the user's rc has said where their history was.
-    if let Some((key, value)) = crate::daemon::history::env_for(pane, shell) {
-        env.push((key, value));
-    }
     // Windows is deliberately left out. `SHELL` is not a native concept there —
     // neither cmd nor PowerShell reads it — and the tools that do read it are
     // the POSIX emulations: MSYS/Git Bash, Cygwin, and WSL, which take `WSLENV`
@@ -881,7 +876,6 @@ fn interrupts(agent: Option<crate::core::cli_agent::CLIAgent>, bytes: &[u8]) -> 
     }
 }
 
-/// 识别完整输入中的中断按键，包括 ConPTY 的 ESC 按下与松开事件。
 fn interrupt_key(bytes: &[u8]) -> Option<InterruptKey> {
     match bytes {
         b"\x1b" | b"\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_" => {
@@ -3035,12 +3029,6 @@ impl Drop for DaemonPane {
                 let _ = std::fs::remove_dir_all(&dir);
             }
         }
-        // The pane is over — by a kill, by the shell exiting, or by the daemon
-        // shutting down — so whatever it typed goes back to the history file it
-        // was seeded from. A handoff does not come through here: nothing is
-        // dropped across an `exec`, which is exactly right, because the pane on
-        // the other side is the same pane and still owns its file.
-        crate::daemon::history::retire(self.id);
     }
 }
 
@@ -8240,10 +8228,10 @@ mod tests {
         assert!(matches!(sub_rx.try_recv(), Ok(DaemonMsg::Output(b)) if b == b"mid"));
         match sub_rx.try_recv() {
             Ok(DaemonMsg::Image(frame)) => {
-                let img = Image::decode_frame(&frame).expect("decodable image frame");
+                let img = Image::decode_frame_owned(frame).expect("decodable image frame");
                 assert_eq!(img.id, 1);
                 assert_eq!((img.width, img.height), (1, 1));
-                assert_eq!(img.to_rgba8().unwrap(), pixel);
+                assert_eq!(img.clone().take_rgba8().unwrap(), pixel);
             }
             other => panic!("expected Image frame, got {other:?}"),
         }

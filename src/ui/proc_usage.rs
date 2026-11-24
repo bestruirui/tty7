@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use gpui::component::{ActiveTheme as _, h_flex};
 use gpui::{App, IntoElement, ParentElement as _, SharedString, Styled as _, div, px, rems};
-use gpui_component::{ActiveTheme as _, h_flex};
 
 use crate::daemon::procstat::compact_bytes;
 use crate::daemon::protocol::ProcEntry;

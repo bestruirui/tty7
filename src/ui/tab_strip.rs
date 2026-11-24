@@ -1,33 +1,32 @@
-use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Axis, Bounds, Context, Edges, FontWeight,
-    MouseButton, Pixels, SharedString, Window, canvas, deferred, div, ease_out_quint,
-    linear_color_stop, linear_gradient, prelude::*, px,
-};
-use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
-use gpui_component::input::Input;
-use gpui_component::kbd::Kbd;
-use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_component::tooltip::Tooltip;
-use gpui_component::{
+use gpui::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
+use gpui::component::input::Input;
+use gpui::component::kbd::Kbd;
+use gpui::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui::component::tooltip::Tooltip;
+use gpui::component::{
     ActiveTheme as _, Icon, IconName, Selectable as _, Side, Sizable as _, h_flex,
+};
+use gpui::{
+    Animation, AnimationExt as _, App, Axis, Bounds, Context, Edges, FontWeight, MouseButton,
+    Pixels, SharedString, Window, canvas, deferred, div, ease_out_quint, linear_color_stop,
+    linear_gradient, prelude::*, px,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::core::actions::{
     CloseActiveTab, CloseOtherTabs, CloseTabsToTheRight, CopyAgentSessionId, CopyWorkingDirectory,
-    ForkAgentSession, HibernateTab, MarkTabUnread, NewWorktreeTab, RenameTab, SelectWorkspace1,
-    SelectWorkspace2, SelectWorkspace3, SelectWorkspace4, SelectWorkspace5, SelectWorkspace6,
-    SelectWorkspace7, SelectWorkspace8, SelectWorkspace9, SplitDown, SplitRight,
+    ForkAgentSession, HibernateTab, MarkTabUnread, RenameTab, SelectWorkspace1, SelectWorkspace2,
+    SelectWorkspace3, SelectWorkspace4, SelectWorkspace5, SelectWorkspace6, SelectWorkspace7,
+    SelectWorkspace8, SelectWorkspace9, SplitDown, SplitRight,
 };
 use crate::core::cli_agent::CLIAgent;
-use crate::core::config::{Config, RightPanelTab};
+use crate::core::config::Config;
 use crate::core::shells::DetectedShell;
 use crate::daemon::protocol::ShellSpec;
 use crate::ui::app::{SpawnWhere, TILE_GLYPH, TILE_SIZE, Tab, Tty7App, tile_trailing_inset};
 use crate::ui::hints::tab_badge_label;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 use crate::ui::reorder::{self, Reorder, Surface};
-use crate::ui::search::SearchTab;
 
 /// One duration and one curve for every transition the app runs, so a fade and
 /// a slide read as the same hand. Long enough to be seen as movement, short
@@ -472,38 +471,6 @@ pub(crate) fn elide_label(
     }
 }
 
-/// Keeps the longest head of `text` that fits before a trailing ellipsis —
-/// the plain cut a reader expects, for a string read left to right like a
-/// branch name.
-pub(crate) fn elide_end_clusters(
-    text_system: &gpui::WindowTextSystem,
-    font: &gpui::Font,
-    size: f32,
-    text: &str,
-    max_width: f32,
-) -> SharedString {
-    if measure_text(text_system, font, size, text) <= max_width {
-        return SharedString::from(text.to_string());
-    }
-    let budget = max_width - measure_text(text_system, font, size, "…");
-    if budget <= 0. {
-        return SharedString::from("…");
-    }
-    let cells = clusters(text);
-    let (mut lo, mut hi) = (0usize, cells.len());
-    while lo < hi {
-        let mid = (lo + hi + 1) / 2;
-        if measure_text(text_system, font, size, &cells[..mid].concat()) <= budget {
-            lo = mid;
-        } else {
-            hi = mid - 1;
-        }
-    }
-    let mut out = cells[..lo].concat();
-    out.push('…');
-    SharedString::from(out)
-}
-
 /// Keeps the longest tail of `text` that fits after a bare ellipsis. Shared
 /// by the path and token elisions as their last resort.
 pub(crate) fn elide_tail_clusters(
@@ -553,18 +520,6 @@ impl Render for DragTab {
     }
 }
 
-/// What a chrome tile says on hover: what it does, then the chord that does it.
-/// The tile's own name is no use as a tooltip — the workspace head already
-/// wears it as its label.
-///
-/// This used to be `chord_hint`, which pasted the two together into one string
-/// — `"Hide sidebar  \u{2318}B"` — and handed that to `Button::tooltip`. Inside the
-/// card the chord then wore the label's own size and colour, so the tooltip
-/// read as one odd sentence rather than as a name with a shortcut beside it.
-/// `Tooltip` has a `key_binding` slot that already renders a chord the way a
-/// chord should look — set apart on the right, a size down, in
-/// `muted_foreground` — and all that was missing was a way to hand `Button` a
-/// built tooltip instead of a string, which is what `tooltip_element` is for.
 pub(crate) fn chord_tooltip(
     what: impl Into<SharedString>,
     action: &str,
@@ -606,11 +561,6 @@ pub(crate) fn chrome_tile_variant_for(selected: bool, cx: &gpui::App) -> ButtonC
 }
 
 pub(crate) const BUTTON_ICON_SCALE: f32 = 0.75;
-
-/// Compact tiles for document headers and overlays: 26px boxes with a 6px
-/// corner and a glyph a notch under the toolbar's. Sidebar navigation uses
-/// the full title-bar size so opening a panel does not resize its controls.
-pub(crate) const RAIL_TILE: f32 = 26.;
 
 /// A sidebar row's trailing status dot, and the box it is centred in (wide
 /// enough for the unread pill that replaces it).
@@ -668,53 +618,6 @@ pub(crate) fn chrome_tile(button: Button, selected: bool, cx: &gpui::App) -> But
     chrome_tile_sized(button, TILE_SIZE, TILE_GLYPH, selected, cx)
 }
 
-/// The right panel's tabs, left to right, by name. Info leads as the default
-/// and the pane's overview; then the project's files, and its version
-/// control, local to remote (Changes, GitHub). GitHub is last so that hiding
-/// it for a repository without a GitHub remote moves nothing. Search is not
-/// among them: the Files tab searches names and contents in one field.
-const RIGHT_PANEL_TABS: [(RightPanelTab, L10nKey); 4] = [
-    (RightPanelTab::Info, L10nKey::PanelInfoTitle),
-    (RightPanelTab::Files, L10nKey::PanelFilesTitle),
-    (RightPanelTab::Scm, L10nKey::PanelChangesTitle),
-    (RightPanelTab::GitHub, L10nKey::PanelGitHubTitle),
-];
-
-fn right_panel_tab_size(window: &Window) -> f32 {
-    window.rem_size().as_f32() * crate::ui::right_panel::TAB_TEXT
-}
-
-fn right_panel_tab_font(cx: &gpui::App) -> gpui::Font {
-    gpui::Font {
-        family: cx.theme().font_family.clone(),
-        features: Default::default(),
-        fallbacks: None,
-        // The current tab's weight, which is the widest any label is drawn at.
-        weight: FontWeight::MEDIUM,
-        style: Default::default(),
-    }
-}
-
-/// What the bare tab labels take, padding included. The panel's floor is
-/// built on it, so the chrome tiles beside them always fit.
-pub(crate) fn right_panel_tab_labels_w(window: &Window, cx: &gpui::App) -> f32 {
-    let size = right_panel_tab_size(window);
-    let font = right_panel_tab_font(cx);
-    RIGHT_PANEL_TABS
-        .iter()
-        .map(|(_, key)| {
-            measure_text(window.text_system(), &font, size, t(*key))
-                + 2. * (TAB_OUTER_PAD + TAB_INNER_PAD)
-        })
-        .sum()
-}
-
-/// Right panel tab geometry: each tab's click target reaches this far past
-/// its pill, so neighbouring pills sit twice this apart.
-pub(crate) const TAB_OUTER_PAD: f32 = 2.;
-/// A label's hover target reaches this far past its word.
-const TAB_INNER_PAD: f32 = 4.;
-
 /// The panel toggle and its trailing inset. The open panel uses this same
 /// reservation so the title bar never budgets for a second, absent control.
 pub(crate) fn trailing_chrome_tiles_w() -> f32 {
@@ -724,16 +627,6 @@ pub(crate) fn trailing_chrome_tiles_w() -> f32 {
         4.
     };
     trailing_pad + crate::ui::app::TILE_SIZE
-}
-
-/// The whole trailing cluster: those tiles and the OS window buttons beyond
-/// them.
-///
-/// Anything else drawn into that end of the title bar has to stop short of it —
-/// which for the hoisted document header means the case where the detail panel
-/// is closed and the document column runs to the window's right edge.
-pub(crate) fn trailing_chrome_w(fullscreen: bool) -> f32 {
-    trailing_chrome_tiles_w() + crate::ui::app::window_controls_w(fullscreen)
 }
 
 pub(crate) fn chrome_tile_sized(
@@ -751,162 +644,12 @@ pub(crate) fn chrome_tile_sized(
         .h(px(tile))
 }
 
-/// How many saved hosts the New Tab menu names.
-///
-/// Sorted by frecency, so the ones actually used are the ones that fit. A menu
-/// is not a search field — past a handful the list stops being scannable, and
-/// the search's Hosts tab already lists every host and can filter. The row that
-/// closes the section is where the rest are.
 const MENU_HOSTS: usize = 6;
-
-/// How many shells the New Tab menu names, the default among them.
-///
-/// The same reasoning as [`MENU_HOSTS`], at a smaller number: a stock macOS box
-/// reports nine shells and almost nobody opens more than one or two of them.
-/// The default always leads — it is the answer to "what do I get if I just
-/// click" — and the rest of the rows go to whatever has actually been opened,
-/// by frecency. Everything else is one row away, in the search.
-const MENU_SHELLS: usize = 3;
-
-/// How many agents the New Tab menu names.
-///
-/// The same cap as [`MENU_SHELLS`], and for the same reason: the agents
-/// someone actually runs are two or three, and a menu is not a search field.
-/// Only agents that have been run are named — there is no "default agent" to
-/// lead the way shells' default does. Everything else is one row away.
-const MENU_AGENTS: usize = 3;
-
-/// The Search Everywhere button in the middle of the title bar: the width of
-/// a field that reads as one, and the 28px of the rail's own search.
-const TITLEBAR_SEARCH_W: f32 = 360.;
-const TITLEBAR_SEARCH_H: f32 = 28.;
-
-/// Air between the search box and the nearest chrome tile when the bar is too
-/// narrow for the box to sit at its full width.
-const TITLEBAR_SEARCH_CLEAR_GAP: f32 = 8.;
-
-/// Where the title-bar search box is centred, as offsets from the tab strip it
-/// is drawn inside.
-///
-/// The strip does not start at the terminal column's left edge. The title bar
-/// leaves a lead before it — `TRAFFIC_LIGHTS_LEAD` on macOS, for the traffic lights, whether or
-/// not the rail is standing in front of them, plus the bar's own inset in
-/// fullscreen; 12 elsewhere — and a box centred on the strip was centred that
-/// much too far right by half: 40pt on macOS then, which is plainly visible with
-/// the rail collapsed and the box standing alone in an empty bar (#1033).
-/// So the band reaches back over the lead, and its left edge is the column's.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct SearchBand {
-    /// `left` for the band, against the strip's left edge: the lead, negated.
-    pub(crate) left: f32,
-    /// `right` for the band, against the strip's right edge.
-    pub(crate) right: f32,
-    /// How much of *each* end of the band the box keeps clear of, so that in
-    /// a narrow bar it shrinks rather than slides under the chrome tiles. The
-    /// same at both ends, because a box clear of only one is no longer
-    /// centred.
-    pub(crate) clear: f32,
-}
-
-/// [`SearchBand`] for a strip that starts `lead` in from the terminal column's
-/// left edge.
-///
-/// `docked_right` is what is docked to the right of the terminal — the detail
-/// panel and a document column. Off macOS the bar spans those too, so the band
-/// stops at the terminal column: the strip already stops short of the window
-/// controls, so they come off the columns' share. On macOS the bar is inside
-/// the terminal column already and the strip runs to its end.
-///
-/// `leading_w` is the collapsed rail's group at the strip's left end, measured
-/// from the strip's left edge; `trailing_w` the chrome tiles at the band's
-/// right end, when they are there rather than off over a docked column.
-pub(crate) fn search_band(
-    macos: bool,
-    lead: f32,
-    docked_right: f32,
-    controls_w: f32,
-    leading_w: Option<f32>,
-    trailing_w: Option<f32>,
-) -> SearchBand {
-    let right = match !macos && docked_right > 0. {
-        true => (docked_right - controls_w).max(0.),
-        false => 0.,
-    };
-    let leading = leading_w.map_or(0., |w| lead + w + TITLEBAR_SEARCH_CLEAR_GAP);
-    let trailing = trailing_w.map_or(0., |w| w + TITLEBAR_SEARCH_CLEAR_GAP);
-    SearchBand {
-        left: -lead,
-        right,
-        clear: leading.max(trailing),
-    }
-}
-
-/// How far the title bar's lead reaches before the tab strip starts: the room
-/// we have `TitleBar` leave for the traffic lights on macOS, and the bar's own inset
-/// that gpui-component adds to it in fullscreen, where the lights are gone but
-/// the room is not; `TITLE_BAR_LEAD` elsewhere, in both of the rows the strip
-/// can sit in.
-fn title_bar_strip_lead(fullscreen: bool, rem: f32) -> f32 {
-    match cfg!(target_os = "macos") && fullscreen {
-        // `pl_3` on the bar inside `TitleBar`.
-        true => crate::ui::app::TITLE_BAR_LEAD + 0.75 * rem,
-        false => crate::ui::app::TITLE_BAR_LEAD,
-    }
-}
-
-/// How wide the collapsed rail's group at the start of the strip is: the
-/// window mark where there is one, then New Tab and Show Sidebar. Mirrors the
-/// `left_group` built in `tab_strip`, `ml` included.
-fn collapsed_rail_group_w() -> f32 {
-    use crate::ui::app::{CONTENT_INSET, TILE_SIZE, WINDOW_MARK_SIZE, tile_trailing_inset};
-    let mark = match cfg!(target_os = "macos") {
-        true => 0.,
-        false => (CONTENT_INSET - tile_trailing_inset()) + WINDOW_MARK_SIZE + 4. + 2.,
-    };
-    crate::ui::app::title_bar_hug_offset() + mark + TILE_SIZE + 2. + TILE_SIZE
-}
 
 /// How wide the New Tab menu is allowed to get.
 const MENU_W: Pixels = px(360.);
 
-/// How tall, before it starts scrolling.
-///
-/// The lists are capped — [`MENU_SHELLS`] shells, [`MENU_AGENTS`] agents and
-/// [`MENU_HOSTS`] hosts — so the menu's full hand is a fixed number of rows:
-/// those, the three headings, the row closing each section, the separators and
-/// the modifier hint, at the 26px a row occupies. The Agents section is absent
-/// when nothing is offered, and this still leaves room above the full hand for
-/// a seam row or two more, so it always arrives whole and never scrolls on its
-/// own. It is capped again against the window in [`NewTabMenu::build`], since
-/// a menu taller than what it hangs off is worse than one that scrolls.
 const MENU_H: Pixels = px(720.);
-
-/// What the row closing the Local section types into the search's Terminals
-/// tab for you.
-///
-/// This is where filtering lives, and the reason the menu does not do any.
-/// A search field inside a [`PopupMenu`] is not possible — the menu holds the
-/// keyboard for its own navigation — and the branch that tried it had to
-/// become a popover carrying the palette's own list, which read as far too
-/// heavy hanging off a button in the chrome. The menu names the few worth
-/// naming; the search, which already filters better than a menu could, holds
-/// the rest. The rows closing each section are the seam between the two, and
-/// they only work if they land *already filtered*: a row that says "other
-/// shells" and opens every terminal has made the reader ask twice.
-///
-/// The Terminals tab holds open tabs as well as ways to open one, so the
-/// shells are narrowed to by word: every one is titled `Shell: {label}`
-/// ([`L10nKey::AppCmdShellTitle`], the same word in every language we ship),
-/// so this lands on exactly the shells, default first and then by frecency.
-const SEARCH_SHELL_QUERY: &str = "shell";
-
-/// What the row closing the Agents section types into the search's Terminals
-/// tab.
-///
-/// The same seam as [`SEARCH_SHELL_QUERY`]. Every quick-launch row is titled
-/// `Agent: {name}` ([`L10nKey::AppCmdAgentLaunchTitle`], the same word in every
-/// language), so this lands on exactly the agents.
-const SEARCH_AGENT_QUERY: &str = "agent";
 
 /// How this platform spells the key that turns a New Tab row into a split.
 fn split_modifier() -> &'static str {
@@ -917,31 +660,12 @@ fn split_modifier() -> &'static str {
     }
 }
 
-/// What the New Tab menu offers, read off the app when the menu is opened.
-///
-/// The builder runs on the popup's own entity, so what a row needs to name
-/// itself is taken here and carried in. Taken on open rather than on render:
-/// the strip redraws on every frame a terminal paints, and the host list is
-/// worth sorting once per menu, not once per frame — and a host saved while
-/// the window sat still is in the list the next time the `+` is pressed.
 struct NewTabMenu {
     app: gpui::WeakEntity<Tty7App>,
-    /// The shells the menu names, by label — at most [`MENU_SHELLS`].
     shells: Vec<SharedString>,
     default_shell: SharedString,
-    /// The inventory holds shells the menu does not name, so the section
-    /// closes with a row into the palette.
-    more_shells: bool,
-    /// Saved host, its display name, and the `user@host:port` beside it —
-    /// empty when the name already says it.
     hosts: Vec<(uuid::Uuid, SharedString, SharedString)>,
-    /// Agents the menu names — at most [`MENU_AGENTS`], and only ones that
-    /// have actually been run.
     agents: Vec<CLIAgent>,
-    /// The window can offer agents the menu does not name, so the section
-    /// closes with a row into the palette. Also the reason the section exists
-    /// when nothing has been run yet: the installed agents are all in there.
-    more_agents: bool,
 }
 
 impl NewTabMenu {
@@ -964,9 +688,6 @@ impl NewTabMenu {
             // host with a descriptive name and a long `user@host` drags every
             // other row out with it and the menu stops looking like chrome.
             .max_w(MENU_W)
-            // Both lists are capped, but a short window is not. Past the height
-            // of the window an un-scrollable menu simply loses its last rows —
-            // and the last rows here are the SSH section.
             .scrollable(true)
             // Our own ceiling rather than `PopupMenu`'s built-in 450px, so the
             // one that applies is the one [`MENU_H`] reasons about.
@@ -1003,23 +724,6 @@ impl NewTabMenu {
                 },
             ));
         }
-        // The rest of the inventory is in the search, already filtered to
-        // it — the same seam the SSH section closes with. Absent when the
-        // rows above are the whole inventory: a row into a list of nothing
-        // new would be one more thing to read for no gain.
-        if self.more_shells {
-            let app = self.app.clone();
-            menu = menu.item(PopupMenuItem::new(t(L10nKey::TabMenuOtherShells)).on_click(
-                move |_, window, cx| {
-                    if let Some(app) = app.upgrade() {
-                        app.update(cx, |this, cx| {
-                            this.open_search(SearchTab::Terminals, SEARCH_SHELL_QUERY, window, cx)
-                        });
-                    }
-                },
-            ));
-        }
-
         menu = menu
             .item(PopupMenuItem::separator())
             .item(PopupMenuItem::label(t(L10nKey::CmdGroupSsh)));
@@ -1059,17 +763,17 @@ impl NewTabMenu {
                     if empty {
                         this.open_new_ssh_host(window, cx);
                     } else {
-                        this.open_search(SearchTab::Hosts, "", window, cx);
+                        this.open_settings_section(
+                            crate::ui::settings::SettingsSection::Ssh,
+                            window,
+                            cx,
+                        );
                     }
                 });
             }
         }));
 
-        // A peer of Local and SSH, and absent when this machine has no agent
-        // to offer — an empty heading would be a section about nothing. The
-        // rows are the ones actually run; the seam holds the rest, already
-        // filtered, the way Other Shells does.
-        if !self.agents.is_empty() || self.more_agents {
+        if !self.agents.is_empty() {
             menu = menu
                 .item(PopupMenuItem::separator())
                 .item(PopupMenuItem::label(t(L10nKey::CmdGroupAgents)));
@@ -1080,23 +784,6 @@ impl NewTabMenu {
                         let at = SpawnWhere::from_modifiers(window.modifiers());
                         if let Some(app) = app.upgrade() {
                             app.update(cx, |this, cx| this.launch_agent(agent, at, window, cx));
-                        }
-                    },
-                ));
-            }
-            if self.more_agents {
-                let app = self.app.clone();
-                menu = menu.item(PopupMenuItem::new(t(L10nKey::TabMenuOtherAgents)).on_click(
-                    move |_, window, cx| {
-                        if let Some(app) = app.upgrade() {
-                            app.update(cx, |this, cx| {
-                                this.open_search(
-                                    SearchTab::Terminals,
-                                    SEARCH_AGENT_QUERY,
-                                    window,
-                                    cx,
-                                )
-                            });
                         }
                     },
                 ));
@@ -1114,10 +801,6 @@ impl NewTabMenu {
     }
 }
 
-/// Every shell in the inventory, most likely first: the default, then whatever
-/// has been opened often and recently, then the rest in the inventory's own
-/// order. Shared by the palette and the New Tab menu so the same shell leads
-/// both lists.
 pub(crate) fn shells_by_frecency<'a>(
     shells: &'a [DetectedShell],
     default: &str,
@@ -1137,51 +820,6 @@ pub(crate) fn shells_by_frecency<'a>(
             })
     });
     sorted
-}
-
-/// The shells the menu names, off the front of [`shells_by_frecency`]'s list:
-/// its head — the default, whenever the inventory has it — and then only
-/// shells that have actually been opened, [`MENU_SHELLS`] rows in all.
-///
-/// A shell nobody has opened is not named just because there is room: a menu
-/// that filled its spare rows with `csh` and `tcsh` would be the nine-row list
-/// again, only shorter.
-fn menu_shells<'a>(
-    sorted: &[&'a DetectedShell],
-    default: &str,
-    usage: &std::collections::HashMap<String, crate::core::config::ProfileUsage>,
-    now: u64,
-) -> Vec<&'a DetectedShell> {
-    sorted
-        .iter()
-        .take(MENU_SHELLS)
-        .enumerate()
-        .filter(|(i, s)| {
-            *i == 0 || s.label == default || usage.get(&s.label).is_some_and(|u| u.score(now) > 0.0)
-        })
-        .map(|(_, s)| *s)
-        .collect()
-}
-
-/// The agents the menu names, off the front of the frecency-ordered list
-/// quick launch already built: only those that have actually been run, at
-/// most [`MENU_AGENTS`].
-///
-/// An agent nobody has run is not named just because it is installed and
-/// there is room. A zero count is not a use either — launching stamps
-/// recency before the pane reports the agent, and the count is what says it
-/// really ran. `offered` is already most-used-first; this does not reorder.
-fn menu_agents(
-    offered: &[CLIAgent],
-    usage: &std::collections::HashMap<String, crate::core::config::ProfileUsage>,
-    now: u64,
-) -> Vec<CLIAgent> {
-    offered
-        .iter()
-        .copied()
-        .filter(|agent| usage.get(agent.slug()).is_some_and(|u| u.score(now) > 0.0))
-        .take(MENU_AGENTS)
-        .collect()
 }
 
 /// The hosts the menu names, in the order they were handed over — frecency,
@@ -1411,12 +1049,12 @@ impl Tty7App {
                     // switcher's own rows point, so the tile that opens them
                     // does too.
                     .cursor_pointer()
-                    .accessible_label(t(L10nKey::HomeSwitchWorkspace))
-                    .tooltip_element(chord_tooltip(
+                    .accessibility_label(t(L10nKey::HomeSwitchWorkspace))
+                    .tooltip_with_action(
                         t(L10nKey::HomeSwitchWorkspace),
-                        "ToggleSwitcher",
-                        cx,
-                    ))
+                        &crate::core::actions::ToggleSwitcher,
+                        None,
+                    )
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.toggle_switcher(window, cx);
                     })),
@@ -1433,7 +1071,7 @@ impl Tty7App {
         // Opening the panel moves this control to the panel's header on
         // macOS. Reuse the same tile and inset there: a different hit target
         // moves the centred glyph even when the icon itself keeps its size.
-        let panel_open = self.right_panel_open(cx);
+        let panel_open = self.right_panel_open();
         h_flex()
             .flex_shrink_0()
             .items_center()
@@ -1452,18 +1090,18 @@ impl Tty7App {
                         cx,
                     )
                     .rounded_lg()
-                    .accessible_label(match panel_open {
+                    .accessibility_label(match panel_open {
                         true => t(L10nKey::TabTooltipHideDetailPanel),
                         false => t(L10nKey::TabTooltipShowDetailPanel),
                     })
-                    .tooltip_element(chord_tooltip(
+                    .tooltip_with_action(
                         match panel_open {
                             true => t(L10nKey::TabTooltipHideDetailPanel),
                             false => t(L10nKey::TabTooltipShowDetailPanel),
                         },
-                        "ToggleRightPanel",
-                        cx,
-                    ))
+                        &crate::core::actions::ToggleRightPanel,
+                        None,
+                    )
                     // On macOS this tile is drawn inside the panel's own
                     // titlebar while the panel is open, so closing from it
                     // destroys the element holding the focus — and a keymap
@@ -1471,7 +1109,7 @@ impl Tty7App {
                     // ⌘J that would undo this doing nothing. Hand the terminal
                     // back what it lost.
                     .on_click(cx.listener(|this, _, window, cx| {
-                        let closing = this.right_panel_open(cx);
+                        let closing = this.right_panel_open();
                         this.toggle_right_panel(cx);
                         if closing {
                             this.focus_active(window, cx);
@@ -1479,63 +1117,6 @@ impl Tty7App {
                     })),
                 ),
             )
-    }
-
-    /// The right panel's tabs: words, the current one in body ink and medium
-    /// weight on a pill (ink and weight alone read as no selection at all).
-    /// Four names fit the panel's resting width once Search folded into Files.
-    pub(crate) fn right_panel_tabs(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let active_tab = self.right_panel_tab;
-        let body_ink = cx.theme().foreground;
-        let muted = cx.theme().muted_foreground;
-        RIGHT_PANEL_TABS
-            .into_iter()
-            .map(|(tab, label_key)| {
-                let current = active_tab == tab;
-                let ink = match current {
-                    true => body_ink,
-                    false => muted,
-                };
-                div()
-                    .id(("right-panel-tab", tab as usize))
-                    .role(gpui::Role::Tab)
-                    .aria_label(t(label_key))
-                    .aria_selected(current)
-                    // The press must not start a window drag from the title bar
-                    // the tabs sit in.
-                    .occlude()
-                    .flex_shrink_0()
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .px(px(TAB_OUTER_PAD))
-                    .cursor_pointer()
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .px(px(TAB_INNER_PAD))
-                            .py_0p5()
-                            .rounded_md()
-                            .when(current, |s| s.bg(cx.theme().secondary))
-                            .text_size(gpui::rems(crate::ui::right_panel::TAB_TEXT))
-                            .font_weight(match current {
-                                true => FontWeight::MEDIUM,
-                                false => FontWeight::NORMAL,
-                            })
-                            .text_color(ink)
-                            .hover(move |s| s.text_color(body_ink))
-                            .child(t(label_key)),
-                    )
-                    // The current one does nothing: only ⌘J and the title-bar
-                    // panel tile put the panel away.
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.right_panel_tab != tab {
-                            this.set_right_panel_tab(tab, cx);
-                        }
-                    }))
-                    .into_any_element()
-            })
-            .collect()
     }
 
     /// Working and Done differ only in hue (blue vs green), and Waiting vs Done
@@ -1705,7 +1286,7 @@ impl Tty7App {
     ) -> gpui::AnyElement {
         avatar_disc(
             id,
-            crate::ui::search::Avatar {
+            Avatar {
                 agent,
                 status,
                 unread,
@@ -1754,9 +1335,6 @@ impl Tty7App {
             .size(px(16.))
             .text_color(cx.theme().muted_foreground)
             .child(Icon::new(IconName::Maximize).size(px(11.)))
-            // Not a `Button`, so this one goes through gpui's own `tooltip`
-            // rather than `tooltip_element` — but it is the same builder, and
-            // the chord lands in the same slot the chrome tiles use.
             .tooltip(move |window, cx| tip(window, cx).into())
             .into_any_element()
     }
@@ -1876,8 +1454,12 @@ impl Tty7App {
         // come through here were the ones left silent. The chord is worth
         // more here than anywhere else in the row: it is the way back to
         // opening a tab without reading a menu first.
-        .accessible_label(t(L10nKey::AppMenuNewTab))
-        .tooltip_element(chord_tooltip(t(L10nKey::AppMenuNewTab), "NewTab", cx))
+        .accessibility_label(t(L10nKey::AppMenuNewTab))
+        .tooltip_with_action(
+            t(L10nKey::AppMenuNewTab),
+            &crate::core::actions::NewTab,
+            None,
+        )
         // Built when the menu opens, not when the strip draws: this
         // closure runs once per press, and again after each dismissal.
         .dropdown_menu(move |menu, window, cx| {
@@ -1896,27 +1478,18 @@ impl Tty7App {
         let default_shell = self.default_shell_label(cx);
         let usage = &cx.global::<Config>().shell_frecency;
         let now = crate::core::config::unix_now();
-        let sorted = shells_by_frecency(&self.shells.shells, &default_shell, usage, now);
-        let shells = menu_shells(&sorted, &default_shell, usage, now);
-        let offered = self.offered_agents(cx);
-        let agents = menu_agents(&offered, &cx.global::<Config>().agent_frecency, now);
         NewTabMenu {
             app,
-            more_shells: shells.len() < sorted.len(),
-            shells: shells
+            shells: shells_by_frecency(&self.shells.shells, &default_shell, usage, now)
                 .into_iter()
                 .map(|s| SharedString::from(s.label.clone()))
                 .collect(),
             default_shell: SharedString::from(default_shell),
             hosts: menu_hosts(crate::ui::ssh_connect::ssh_profiles_by_frecency(cx)),
-            more_agents: agents.len() < offered.len(),
-            agents,
+            agents: self.offered_agents(cx),
         }
     }
 
-    /// Open the inventory's shell by the label it is listed under, wherever
-    /// `at` says — the New Tab menu's rows and the palette's `Shell:` commands
-    /// both land here, so both count toward the frecency that orders them.
     pub(crate) fn open_listed_shell(
         &mut self,
         label: &str,
@@ -2102,28 +1675,11 @@ impl Tty7App {
         // Read again: the submenu above needed `cx` mutably.
         let this = entity.read(cx);
 
-        let in_repo = this.tab_is_in_repo(index, window, cx);
-        if in_repo {
-            menu = menu.separator().item(
-                PopupMenuItem::new(t(L10nKey::AppMenuNewWorktreeTab))
-                    .action(Box::new(NewWorktreeTab))
-                    .on_click({
-                        let app = app.clone();
-                        move |_, window, cx| {
-                            let _ =
-                                app.update(cx, |this, cx| this.new_worktree_tab(index, window, cx));
-                        }
-                    }),
-            );
-        }
-
         let agent_session = this.tab_agent_session(index, window, cx);
         if let Some((source, session)) = &agent_session
             && let Some(label) = session.fork_label
         {
-            if !in_repo {
-                menu = menu.separator();
-            }
+            menu = menu.separator();
             let forkable = session.forkable();
             menu = menu.item(
                 PopupMenuItem::new(label)
@@ -2148,23 +1704,26 @@ impl Tty7App {
             );
         }
 
-        // The connection this tab is on, editable from the tab itself. A
-        // hostname or password typed wrong used to be fixable only by finding
-        // the same host again in Settings, and right-clicking the connection —
-        // the gesture that asks "change this" — offered nothing (#438). The row
-        // is the switcher machine menu's, word for word: the saved host when
-        // there is one, an offer to keep the address when it was dialled by
-        // hand, and nothing at all for a tab with no host form behind it.
-        if let Some((form, label)) = this.tab_ssh_host_form(index, window, cx) {
-            menu = menu.separator().item(PopupMenuItem::new(label).on_click({
-                let app = app.clone();
-                move |_, window, cx| {
-                    let form = form.clone();
-                    let _ = app.update(cx, |this, cx| {
-                        this.open_tab_ssh_host_form(&form, window, cx)
-                    });
-                }
-            }));
+        if let Some(id) = this.tabs.get(index).and_then(|tab| {
+            let leaf = tab.pane.focused_or_first(window, cx)?;
+            let spec = leaf.read(cx).ssh_spec()?;
+            let id = uuid::Uuid::parse_str(spec.profile_id.as_deref()?).ok()?;
+            cx.global::<Config>()
+                .ssh_profiles
+                .iter()
+                .any(|profile| profile.id == id)
+                .then_some(id)
+        }) {
+            menu =
+                menu.separator()
+                    .item(PopupMenuItem::new(t(L10nKey::SwitcherEditHost)).on_click({
+                        let app = app.clone();
+                        move |_, window, cx| {
+                            let _ = app.update(cx, |this, cx| {
+                                this.open_ssh_profile_in_settings(id, window, cx)
+                            });
+                        }
+                    }));
         }
 
         menu = menu
@@ -2273,7 +1832,7 @@ impl Tty7App {
         // so the strip stops at the panel's edge rather than running the width
         // of the window. Sizing it to the whole viewport made it overrun that
         // edge, and what got pushed out past it was the New Tab button.
-        let panel_w = match cfg!(target_os = "macos") && self.right_panel_open(cx) {
+        let panel_w = match cfg!(target_os = "macos") && self.right_panel_open() {
             true => self.right_panel_px(window, cx),
             false => 0.,
         };
@@ -2286,14 +1845,13 @@ impl Tty7App {
         // is drawn over its trailing end, so the width is reserved as a corner
         // instead: that header carries no fill of its own, and a chip left
         // under it showed through the file name while staying clickable.
-        let document_w = self.document_dock_px(window, cx).unwrap_or(0.);
         let controls_w = crate::ui::app::window_controls_w(window.is_fullscreen());
-        let pad = gpui_component::window_paddings(window);
+        let pad = gpui::component::window_paddings(window);
         let strip_w = if cfg!(target_os = "macos") {
             strip_width(
                 window.viewport_size().width,
                 pad,
-                crate::ui::app::TITLE_BAR_LEAD + panel_w + document_w,
+                crate::ui::app::TITLE_BAR_LEAD + panel_w,
                 160.,
             )
         } else {
@@ -2304,28 +1862,17 @@ impl Tty7App {
                 140.,
             )
         };
-        let chrome_band_w = (!cfg!(target_os = "macos") && self.right_panel_open(cx))
+        let chrome_band_w = (!cfg!(target_os = "macos") && self.right_panel_open())
             .then(|| (self.right_panel_px(window, cx) - controls_w - 1.).max(0.));
         // `corner_w` reserves the trailing window chrome. With the panel open on
         // macOS that chrome belongs to the panel's own header, which the strip
         // now stops short of, so reserving for it here would charge the chips
         // for it twice.
-        // On macOS the trailing tiles sit at the end of the terminal column's
-        // strip only while nothing stands to the right of it. A docked document
-        // takes the window's right edge the way the panel does, so the tiles
-        // give way to it instead of hanging in the middle of the window beside
-        // the document's own header. ⌘J and the palette still reach both.
-        let strip_chrome = !cfg!(target_os = "macos") || (panel_w <= 0. && document_w <= 0.);
+        let strip_chrome = !cfg!(target_os = "macos") || panel_w <= 0.;
         let corner_w = if !strip_chrome || panel_w > 0. {
             0.
         } else {
             chrome_band_w.unwrap_or_else(trailing_chrome_tiles_w)
-        } + if cfg!(target_os = "macos") {
-            // Already taken out of `strip_w` above; charging it here too would
-            // narrow the chips by a column's width twice over.
-            0.
-        } else {
-            document_w
         };
         let fixed_w = 3. * CHIP_GAP + crate::ui::app::TILE_SIZE + corner_w;
         let chips_avail = (strip_w - px(fixed_w + GRAB_HANDLE_W)).max(px(80.));
@@ -2404,7 +1951,7 @@ impl Tty7App {
                     .when(is_active, |d| d.font_weight(FontWeight::MEDIUM))
                     .when_some(full_title, |d, title| {
                         d.tooltip(move |window, cx| {
-                            gpui_component::tooltip::Tooltip::new(title.clone()).build(window, cx)
+                            gpui::component::tooltip::Tooltip::new(title.clone()).build(window, cx)
                         })
                     })
                     .child(label)
@@ -2652,18 +2199,43 @@ impl Tty7App {
                     )
                     .child(
                         chrome_tile(
+                            Button::new("titlebar-settings")
+                                .icon(Icon::empty().path("icons/setting.svg")),
+                            false,
+                            cx,
+                        )
+                        .rounded_lg()
+                        .accessibility_label(t(L10nKey::SettingsWindowTitle))
+                        .tooltip_with_action(
+                            t(L10nKey::SettingsWindowTitle),
+                            &crate::core::actions::OpenSettings,
+                            None,
+                        )
+                        .on_click(|_, window, cx| {
+                            window
+                                .dispatch_action(Box::new(crate::core::actions::OpenSettings), cx);
+                        }),
+                    ),
+                )
+                .child(
+                    crate::ui::app::resting_chrome(
+                        div().occlude().flex_shrink_0(),
+                        strip_chrome_shown,
+                    )
+                    .child(
+                        chrome_tile(
                             Button::new("titlebar-expand-sidebar")
                                 .icon(Icon::empty().path("icons/panel-left-collapsed.svg")),
                             false,
                             cx,
                         )
                         .rounded_lg()
-                        .accessible_label(t(L10nKey::TabTooltipShowSidebar))
-                        .tooltip_element(chord_tooltip(
+                        .accessibility_label(t(L10nKey::TabTooltipShowSidebar))
+                        .tooltip_with_action(
                             t(L10nKey::TabTooltipShowSidebar),
-                            "ToggleLeftPanel",
-                            cx,
-                        ))
+                            &crate::core::actions::ToggleLeftPanel,
+                            None,
+                        )
                         .on_click(cx.listener(|this, _, _window, cx| this.toggle_left_panel(cx))),
                     ),
                 )
@@ -2676,99 +2248,10 @@ impl Tty7App {
         // beside the panel's own tab row — which is painted whenever the panel
         // is, so a band that grew a button on hover read as a glitch next to
         // it. Once the panel is open they belong to its chrome, and stay.
-        let right_chrome_shown = strip_chrome_shown || self.right_panel_open(cx);
+        let right_chrome_shown = strip_chrome_shown || self.right_panel_open();
         let right_chrome = strip_chrome.then(|| {
             crate::ui::app::resting_chrome(div().flex_shrink_0(), right_chrome_shown)
                 .child(self.window_chrome(cx))
-        });
-
-        // With the tabs in the rail, the middle of the bar over the terminal
-        // is the way into Search Everywhere: a field-shaped button, centred,
-        // that opens the search where it stands. The rail beside it already
-        // names every tab, so the bar has no title of its own to repeat. The
-        // box alone takes the pointer; the rest of the bar still drags.
-        //
-        // Centred over the terminal column, not the bar: see `search_band`.
-        // Off macOS the bar spans the workspace while a document or the detail
-        // panel is docked, and centred on all of it the box landed under the
-        // document's hoisted header, which has no fill to hide it.
-        let docked_right = document_w
-            + match self.right_panel_open(cx) {
-                true => self.right_panel_px(window, cx),
-                false => 0.,
-            };
-        let band = search_band(
-            cfg!(target_os = "macos"),
-            title_bar_strip_lead(window.is_fullscreen(), window.rem_size().as_f32()),
-            docked_right,
-            controls_w,
-            rail_collapsed.then(collapsed_rail_group_w),
-            (strip_chrome && docked_right <= 0.).then(trailing_chrome_tiles_w),
-        );
-        let centre_search = (!show_chips).then(|| {
-            // The chord as text, not caps: a cap's fill is this box's own
-            // grey, so on it a cap is only a gap between two letters.
-            let chord = crate::ui::keymap::effective_key("TogglePalette", cx)
-                .map(|spec| crate::ui::keymap::key_tokens(&spec).join(""));
-            // Two equal springs either side keep the box centred; each stops
-            // at the band's `clear`, and past that it is the box that gives.
-            let spring = || div().flex_1().min_w(px(band.clear));
-            div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .left(px(band.left))
-                .right(px(band.right))
-                .flex()
-                .items_center()
-                .child(spring())
-                .child(
-                    h_flex()
-                        .id("titlebar-search")
-                        .occlude()
-                        .w(px(TITLEBAR_SEARCH_W))
-                        .min_w_0()
-                        // Enough of the bar that the label and its chord still
-                        // fit with a document docked beside the terminal; at a
-                        // half it read `Search Everywhe…` in exactly the
-                        // layout people search from most.
-                        .max_w(gpui::relative(0.6))
-                        .h(px(TITLEBAR_SEARCH_H))
-                        .items_center()
-                        .gap(px(7.))
-                        .pl(px(10.))
-                        .pr(px(10.))
-                        .rounded(px(7.))
-                        // The left rail's fill (`Surfaces::rail`, #f5f5f3 /
-                        // #1e1e20 on the default pair) — not `sidebar`, which
-                        // is the window's own fill and vanished into the bar.
-                        .bg(gpui::rgb(
-                            cx.global::<crate::ui::presets::Surfaces>().rail.base,
-                        ))
-                        .cursor_pointer()
-                        .text_size(window.rem_size() * 0.8125)
-                        .text_color(cx.theme().muted_foreground)
-                        .hover(|s| s.text_color(cx.theme().foreground))
-                        .child(Icon::new(IconName::Search).size(px(12.)).flex_shrink_0())
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .child(t(L10nKey::AppMenuSearchEverywhere)),
-                        )
-                        .when_some(chord, |row, chord| {
-                            row.child(div().flex_shrink_0().child(chord))
-                        })
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(
-                            cx.listener(|this, _, window, cx| match this.search.is_some() {
-                                true => this.close_search(window, cx),
-                                false => this.open_search(SearchTab::All, "", window, cx),
-                            }),
-                        ),
-                )
-                .child(spring())
         });
 
         h_flex()
@@ -2780,7 +2263,6 @@ impl Tty7App {
             .when(!show_chips, |this| this.w_full())
             .pl_0()
             .min_w_0()
-            .when_some(centre_search, |this, search| this.child(search))
             .when_some(left_group, |this, g| this.child(g))
             .child(chips)
             .when(show_chips, move |this| this.child(add_button))
@@ -2805,34 +2287,22 @@ impl Tty7App {
     }
 }
 
-/// The tab menu's SSH row, against real tabs in a real window.
-///
-/// `PopupMenu` keeps its items to itself — nothing outside `gpui_component` can
-/// read back what a built menu says — so these drive the predicate the menu
-/// branches on instead, which is where every decision about the row is made.
-///
-/// Ungated: `test_window::harness` and `quiet_test_pane` both run on Windows,
-/// and a `unix` gate here would skip the one platform this was written on.
-/// A tab's avatar — agent disc and status dot, or the terminal glyph — for
-/// surfaces that draw a tab without owning the strip. It does not blink: a
-/// working agent's dot holds steady outside the strip's own clock.
-pub(crate) fn avatar(
-    id: impl Into<gpui::ElementId>,
-    avatar: crate::ui::search::Avatar,
-    size: f32,
-    cx: &App,
-) -> gpui::AnyElement {
-    avatar_disc(id, avatar, size, true, true, cx)
+#[derive(Clone, Copy)]
+struct Avatar {
+    agent: Option<CLIAgent>,
+    status: Option<crate::core::cli_agent::AgentStatus>,
+    unread: usize,
+    ssh: Option<u32>,
 }
 
 fn avatar_disc(
     id: impl Into<gpui::ElementId>,
-    crate::ui::search::Avatar {
+    Avatar {
         agent,
         status,
         unread,
         ssh,
-    }: crate::ui::search::Avatar,
+    }: Avatar,
     size: f32,
     blink_on: bool,
     badge: bool,
@@ -2902,7 +2372,7 @@ fn avatar_disc(
             )
             .when_some(dot, |b, dot| b.child(dot))
             .tooltip(move |window, cx| {
-                gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                gpui::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
             })
             .into_any_element()
         }
@@ -2930,170 +2400,8 @@ fn avatar_disc(
 }
 
 #[cfg(test)]
-mod ssh_host_row_tests {
-    use crate::core::config::Config;
-    use crate::core::session::RemoteTarget;
-    use crate::core::ssh_profile::SshProfile;
-    use crate::daemon::protocol::SshProxy;
-    use crate::terminal::view::{
-        quiet_test_pane, quiet_test_ssh_pane, quiet_test_ssh_pane_of, quiet_test_ssh_pane_with,
-    };
-    use crate::ui::app::{Tab, test_window::harness};
-    use crate::ui::i18n::{L10nKey, set_locale, t};
-    use crate::ui::pane::{Pane, PaneSlot};
-    use crate::ui::ssh_connect::TabHostForm;
-    use gpui::TestAppContext;
-
-    #[gpui::test]
-    fn only_a_tab_on_an_ssh_host_is_offered_the_host_form(cx: &mut TestAppContext) {
-        set_locale("en");
-        let (app, mut vcx) = harness(cx);
-        let saved = uuid::Uuid::new_v4();
-
-        // Held for the life of the test: dropping the daemon end of a pane's
-        // transport tears the pane down under the assertions.
-        let _ends = app.update_in(&mut vcx, |app, window, cx| {
-            let mut cfg = cx.global::<Config>().clone();
-            let mut profile = SshProfile::new("build-box");
-            profile.id = saved;
-            profile.user = "me".to_string();
-            profile.host = "build-box".to_string();
-            cfg.ssh_profiles = vec![profile];
-            cx.set_global(cfg);
-
-            let (local, a) = quiet_test_pane(1, window, cx);
-            let (dialled, b) = quiet_test_ssh_pane(2, window, cx);
-            let (from_host, c) = quiet_test_ssh_pane_of(3, Some(saved), window, cx);
-            for view in [local, dialled, from_host] {
-                app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view))));
-            }
-            app.active = 0;
-            cx.notify();
-            (a, b, c)
-        });
-        vcx.background_executor.run_until_parked();
-
-        app.update_in(&mut vcx, |app, window, cx| {
-            // A local shell has no connection to edit, so the menu it opens is
-            // the one it always was.
-            assert_eq!(
-                app.tab_ssh_host_form(0, window, cx),
-                None,
-                "a local tab was offered an SSH host form"
-            );
-
-            // An address typed by hand is worth keeping, not editing: there is
-            // no saved host behind it yet, so the live session itself is what
-            // the form opens on.
-            let (form, label) = app
-                .tab_ssh_host_form(1, window, cx)
-                .expect("a tab dialled by hand offers to save the host");
-            let TabHostForm::Unsaved(spec) = form else {
-                panic!("a hand-dialled tab must offer its own session, not a bare address");
-            };
-            assert_eq!(
-                (spec.user.as_str(), spec.host.as_str(), spec.port),
-                ("me", "build-box", 22)
-            );
-            assert_eq!(label, t(L10nKey::SwitcherSaveAsHost));
-
-            // One opened from a saved host edits that host — by its id, so the
-            // form lands on the record the connection actually came from.
-            let (form, label) = app
-                .tab_ssh_host_form(2, window, cx)
-                .expect("a tab on a saved host offers to edit it");
-            assert_eq!(
-                form,
-                TabHostForm::Saved(RemoteTarget::Profile { id: saved })
-            );
-            assert_eq!(label, t(L10nKey::SwitcherEditHost));
-        });
-    }
-
-    #[gpui::test]
-    fn a_host_deleted_under_a_live_tab_is_offered_back_as_a_new_one(cx: &mut TestAppContext) {
-        // The id a pane carries is the one it was spawned with, and a quick
-        // connection is handed a fresh uuid on its way to the daemon. Trusting
-        // the id alone would open the form on a host that is not there.
-        set_locale("en");
-        let (app, mut vcx) = harness(cx);
-        let _end = app.update_in(&mut vcx, |app, window, cx| {
-            let (view, end) = quiet_test_ssh_pane_of(1, Some(uuid::Uuid::new_v4()), window, cx);
-            app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view))));
-            app.active = 0;
-            cx.notify();
-            end
-        });
-        vcx.background_executor.run_until_parked();
-
-        app.update_in(&mut vcx, |app, window, cx| {
-            let (form, label) = app
-                .tab_ssh_host_form(0, window, cx)
-                .expect("an unresolvable profile id still names a host worth keeping");
-            let TabHostForm::Unsaved(spec) = form else {
-                panic!("a dangling profile id must not open a form on a host that is gone");
-            };
-            assert_eq!(
-                (spec.user.as_str(), spec.host.as_str(), spec.port),
-                ("me", "build-box", 22)
-            );
-            assert_eq!(label, t(L10nKey::SwitcherSaveAsHost));
-        });
-    }
-
-    /// The row says "Save as SSH Host", and a host saved without the proxy it
-    /// was reached through is a host that will not connect. What the session
-    /// was dialled with has to reach the form whole — an address is only the
-    /// part of it that fits in `user@host:port`.
-    #[gpui::test]
-    fn saving_a_hand_dialled_tab_keeps_what_it_was_dialled_with(cx: &mut TestAppContext) {
-        set_locale("en");
-        let (app, mut vcx) = harness(cx);
-        let _end = app.update_in(&mut vcx, |app, window, cx| {
-            let mut spec: crate::daemon::protocol::NativeSshSpec = serde_json::from_str(
-                r#"{"host":"build-box","port":2222,"user":"me","auth_mode":"auto"}"#,
-            )
-            .expect("a minimal NativeSshSpec decodes");
-            spec.proxy = SshProxy::Socks {
-                host: "127.0.0.1".to_string(),
-                port: 1080,
-            };
-            spec.identity_files = vec!["/keys/id_ed25519".to_string()];
-            spec.login_script = vec!["tmux attach".to_string()];
-            let (view, end) = quiet_test_ssh_pane_with(1, spec, window, cx);
-            app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view))));
-            app.active = 0;
-            cx.notify();
-            end
-        });
-        vcx.background_executor.run_until_parked();
-
-        app.update_in(&mut vcx, |app, window, cx| {
-            let (form, _) = app
-                .tab_ssh_host_form(0, window, cx)
-                .expect("a hand-dialled tab offers to save the host");
-            let TabHostForm::Unsaved(spec) = form else {
-                panic!("nothing here is saved, so nothing here is an edit");
-            };
-            assert_eq!(
-                spec.proxy,
-                SshProxy::Socks {
-                    host: "127.0.0.1".to_string(),
-                    port: 1080,
-                },
-                "the proxy the session was reached through was dropped on the way to the form"
-            );
-            assert_eq!(spec.identity_files, vec!["/keys/id_ed25519".to_string()]);
-            assert_eq!(spec.login_script, vec!["tmux attach".to_string()]);
-            assert_eq!(spec.port, 2222, "a non-default port is part of the address");
-        });
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::theme::TRAFFIC_LIGHTS_LEAD;
     use gpui::TestAppContext;
     use std::path::Path;
     use unicode_segmentation::UnicodeSegmentation;
@@ -3115,75 +2423,6 @@ mod tests {
         // maximized/tiled CSD window): the strip keeps the width it always had.
         let bare = strip_width(px(1200.), Edges::all(px(0.)), lead + controls, 140.);
         assert_eq!(bare, px(1200. - lead - controls));
-    }
-
-    /// Where a band lands in the terminal column, for a strip that starts
-    /// `lead` in and ends `strip_end` from the column's left edge.
-    fn band_in_column(band: SearchBand, lead: f32, strip_end: f32) -> (f32, f32) {
-        (lead + band.left, strip_end - band.right)
-    }
-
-    /// #1033, with the reporter's window: 1946pt wide, the rail collapsed.
-    /// The strip started 80pt in, after the traffic lights, and centred on it
-    /// the box sat at 1013 — 40pt right of the window's middle at 973.
-    #[test]
-    fn with_the_rail_collapsed_on_macos_the_search_box_centres_on_the_window() {
-        let (w, lead) = (1946., TRAFFIC_LIGHTS_LEAD);
-        let band = search_band(true, lead, 0., 0., Some(58.), Some(49.));
-        let (l, r) = band_in_column(band, lead, w);
-        assert_eq!((l, r), (0., w));
-        assert_eq!((l + r) / 2., 973.);
-        // Clear of the traffic lights and the two tiles after them, at both
-        // ends so that clearing them does not pull the box off centre.
-        assert_eq!(band.clear, lead + 58. + TITLEBAR_SEARCH_CLEAR_GAP);
-    }
-
-    /// With the rail open, the title bar sits in the terminal column but
-    /// still leaves the traffic lights' lead before the strip, over nothing
-    /// — the lights are over the rail. The band reaches back over that too,
-    /// and centres on the column.
-    #[test]
-    fn with_the_rail_open_on_macos_the_search_box_centres_on_the_terminal_column() {
-        let (column, lead) = (1200., TRAFFIC_LIGHTS_LEAD);
-        let band = search_band(true, lead, 0., 0., None, Some(49.));
-        assert_eq!(band_in_column(band, lead, column), (0., column));
-        assert_eq!(band.clear, 49. + TITLEBAR_SEARCH_CLEAR_GAP);
-
-        // A docked panel on macOS is beside the column, not under its bar:
-        // nothing to subtract from the strip's end.
-        let docked = search_band(true, lead, 360., 0., None, None);
-        assert_eq!(band_in_column(docked, lead, column), (0., column));
-        assert_eq!(docked.clear, 0.);
-    }
-
-    /// Fullscreen keeps the traffic lights' lead and adds the bar's own inset.
-    #[test]
-    fn fullscreen_on_macos_reaches_back_over_the_bars_extra_inset_as_well() {
-        let lead = TRAFFIC_LIGHTS_LEAD + 12.;
-        let band = search_band(true, lead, 0., 0., Some(58.), Some(49.));
-        assert_eq!(band_in_column(band, lead, 1440.), (0., 1440.));
-    }
-
-    /// Off macOS the bar spans the docked columns and stops short of the
-    /// window buttons; the band ends where the terminal column does, as it
-    /// always has, and now starts where it does too.
-    #[test]
-    fn off_macos_the_band_is_the_terminal_column_beside_a_docked_panel() {
-        let (w, lead, controls, panel) = (1600., 12., 102., 360.);
-        let strip_end = w - controls;
-        let band = search_band(false, lead, panel, controls, None, None);
-        assert_eq!(band.right, panel - controls);
-        assert_eq!(band_in_column(band, lead, strip_end), (0., w - panel));
-
-        // Nothing docked: the band runs to the end of the strip, short of
-        // the window buttons, and keeps clear of the tiles standing there.
-        let bare = search_band(false, lead, 0., controls, None, Some(38.));
-        assert_eq!(band_in_column(bare, lead, strip_end), (0., strip_end));
-        assert_eq!(bare.clear, 38. + TITLEBAR_SEARCH_CLEAR_GAP);
-
-        // A panel narrower than the buttons leaves no room to take off.
-        let thin = search_band(false, lead, 80., controls, None, None);
-        assert_eq!(thin.right, 0.);
     }
 
     /// Most of these tests are about where a title is *cut*, not about what
@@ -3250,7 +2489,11 @@ mod tests {
         // One modifier means one thing. Every other one a hand might be
         // resting on leaves the row doing what it says it does.
         assert_eq!(
-            SpawnWhere::from_modifiers(Modifiers::secondary_key()),
+            SpawnWhere::from_modifiers(if cfg!(target_os = "macos") {
+                Modifiers::command()
+            } else {
+                Modifiers::control()
+            }),
             SpawnWhere::NewTab
         );
         assert_eq!(
@@ -3473,19 +2716,6 @@ mod tests {
         assert!(out.contains('…'));
         assert!(measure_text(&ts, &font, size, &out) <= max);
         assert!(out.chars().count() < branch.chars().count());
-    }
-
-    #[gpui::test]
-    fn elide_end_keeps_the_head_of_a_branch(cx: &mut TestAppContext) {
-        let (ts, font, size) = elide_setup(cx);
-        let branch = "fix/rpc-proxy-and-error-classification";
-        let max = 140.;
-        let out = elide_end_clusters(&ts, &font, size, branch, max);
-        assert!(out.starts_with("fix/rpc-"), "head survives: {out}");
-        assert!(out.ends_with('…') && out.matches('…').count() == 1, "{out}");
-        assert!(measure_text(&ts, &font, size, &out) <= max);
-        let fits = measure_text(&ts, &font, size, branch);
-        assert_eq!(elide_end_clusters(&ts, &font, size, branch, fits), branch);
     }
 
     #[gpui::test]
@@ -4044,178 +3274,5 @@ mod tests {
         root.cwd = Some("/".into());
         assert_eq!(label_of(&root, 0, Some(home())), "/");
         assert_eq!(tooltip_of(&root, 0, Some(home())), None);
-    }
-
-    fn inventory(labels: &[&str]) -> Vec<DetectedShell> {
-        labels
-            .iter()
-            .map(|l| DetectedShell {
-                label: l.to_string(),
-                program: format!("/bin/{l}"),
-                args: Vec::new(),
-                args_are_tty7_defaults: true,
-                user_authored: false,
-            })
-            .collect()
-    }
-
-    fn used(
-        entries: &[(&str, u32, u64)],
-    ) -> std::collections::HashMap<String, crate::core::config::ProfileUsage> {
-        entries
-            .iter()
-            .map(|(l, count, last_used)| {
-                (
-                    l.to_string(),
-                    crate::core::config::ProfileUsage {
-                        count: *count,
-                        last_used: *last_used,
-                    },
-                )
-            })
-            .collect()
-    }
-
-    fn labels(shells: &[&DetectedShell]) -> Vec<String> {
-        shells.iter().map(|s| s.label.clone()).collect()
-    }
-
-    const STOCK_MAC: &[&str] = &["zsh", "bash", "sh", "csh", "tcsh", "ksh", "dash"];
-
-    #[test]
-    fn the_new_tab_menu_names_the_default_and_what_has_been_opened_by_frecency() {
-        let now = 100_000_000u64;
-        let day = 86_400u64;
-        let shells = inventory(STOCK_MAC);
-        // `bash` used often and lately; `dash` used more but a year ago;
-        // `ksh` once, two months back; and the default opened too.
-        let usage = used(&[
-            ("zsh", 50, now),
-            ("ksh", 1, now - 60 * day),
-            ("bash", 9, now - day),
-            ("dash", 20, now - 365 * day),
-        ]);
-        let sorted = shells_by_frecency(&shells, "zsh", &usage, now);
-        assert_eq!(
-            labels(&sorted),
-            ["zsh", "bash", "dash", "ksh", "sh", "csh", "tcsh"],
-            "default first, then by frecency, then the inventory's own order"
-        );
-        let menu = menu_shells(&sorted, "zsh", &usage, now);
-        assert_eq!(menu.len(), MENU_SHELLS);
-        assert_eq!(labels(&menu), ["zsh", "bash", "dash"]);
-    }
-
-    #[test]
-    fn the_default_shell_leads_the_menu_even_when_it_has_never_been_opened() {
-        let now = 100_000_000u64;
-        let shells = inventory(STOCK_MAC);
-        let usage = used(&[("tcsh", 3, now), ("sh", 7, now), ("ksh", 5, now)]);
-        let sorted = shells_by_frecency(&shells, "bash", &usage, now);
-        let menu = menu_shells(&sorted, "bash", &usage, now);
-        assert_eq!(labels(&menu), ["bash", "sh", "ksh"]);
-    }
-
-    #[test]
-    fn a_shell_nobody_has_opened_is_not_named_just_because_there_is_room() {
-        // A fresh install: nothing has been opened, so the menu names the
-        // default alone and leaves the rest to the palette.
-        let now = 100_000_000u64;
-        let shells = inventory(STOCK_MAC);
-        let none = used(&[]);
-        let sorted = shells_by_frecency(&shells, "zsh", &none, now);
-        assert_eq!(labels(&menu_shells(&sorted, "zsh", &none, now)), ["zsh"]);
-
-        // A usage record at zero counts as never opened.
-        let zeroed = used(&[("bash", 0, now)]);
-        let sorted = shells_by_frecency(&shells, "zsh", &zeroed, now);
-        assert_eq!(labels(&menu_shells(&sorted, "zsh", &zeroed, now)), ["zsh"]);
-
-        // An inventory that does not list the default still offers its head,
-        // which is the shell a new tab opens with.
-        let sorted = shells_by_frecency(&shells, "fish", &none, now);
-        assert_eq!(labels(&menu_shells(&sorted, "fish", &none, now)), ["zsh"]);
-    }
-
-    #[test]
-    fn other_shells_is_offered_only_when_the_inventory_holds_more_than_the_menu_names() {
-        let now = 100_000_000u64;
-        let more = |inv: &[&str], usage: &[(&str, u32, u64)]| {
-            let shells = inventory(inv);
-            let usage = used(usage);
-            let default = inv.first().copied().unwrap_or("");
-            let sorted = shells_by_frecency(&shells, default, &usage, now);
-            menu_shells(&sorted, default, &usage, now).len() < sorted.len()
-        };
-        assert!(more(STOCK_MAC, &[]), "a stock box names one of seven");
-        assert!(
-            !more(&["pwsh"], &[]),
-            "the default alone is the whole inventory"
-        );
-        assert!(
-            !more(&["zsh", "bash"], &[("bash", 1, now)]),
-            "every shell is already a row"
-        );
-        assert!(
-            !more(
-                &["zsh", "bash", "fish"],
-                &[("bash", 1, now), ("fish", 2, now)]
-            ),
-            "three shells, all named"
-        );
-        assert!(
-            more(&["zsh", "bash", "fish"], &[("bash", 1, now)]),
-            "`fish` has never been opened, so it is left to the palette"
-        );
-        assert!(
-            !more(&[], &[]),
-            "no inventory: the fallback row, nothing more"
-        );
-    }
-
-    #[test]
-    fn the_new_tab_menu_names_agents_that_have_actually_been_run() {
-        use crate::core::cli_agent::CLIAgent;
-        let now = 100_000_000u64;
-        let day = 86_400u64;
-        // Already most-used-first, the way `offered_agents` hands them over,
-        // except Amp has never been run and sits between two that have — the
-        // filter has to skip it rather than stop.
-        let offered = [
-            CLIAgent::Claude,
-            CLIAgent::Amp,
-            CLIAgent::Codex,
-            CLIAgent::Gemini,
-            CLIAgent::Aider,
-        ];
-        let usage = used(&[
-            ("claude", 12, now - 2 * day),
-            ("codex", 3, now - day),
-            ("gemini", 1, now - 30 * day),
-            ("aider", 0, now),
-        ]);
-        let named = menu_agents(&offered, &usage, now);
-        assert_eq!(
-            named,
-            vec![CLIAgent::Claude, CLIAgent::Codex, CLIAgent::Gemini],
-            "three that have run fill the cap; a zero count is not a use, and a gap is skipped"
-        );
-        assert!(named.len() < offered.len(), "the rest are the seam row's");
-
-        let none = used(&[]);
-        let named = menu_agents(&offered, &none, now);
-        assert!(named.is_empty(), "installed but never run is not named");
-        assert!(
-            named.len() < offered.len(),
-            "so the section is only the seam"
-        );
-        assert!(menu_agents(&[], &usage, now).is_empty());
-
-        // Every offered agent has been run and they fit: no seam row.
-        let few = [CLIAgent::Claude, CLIAgent::Codex];
-        let two = used(&[("claude", 4, now), ("codex", 1, now)]);
-        let named = menu_agents(&few, &two, now);
-        assert_eq!(named, vec![CLIAgent::Claude, CLIAgent::Codex]);
-        assert_eq!(named.len(), few.len());
     }
 }

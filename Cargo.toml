@@ -3,7 +3,7 @@ name = "tty7"
 version.workspace = true
 edition = "2024"
 description = "A terminal workbench: shells, persistent sessions, SSH, coding agents — GPU-rendered on Zed's gpui, pure Rust"
-repository = "https://github.com/l0ng-ai/tty7"
+repository = "https://github.com/bestruirui/tty7"
 license = "Apache-2.0"
 readme = "README.md"
 publish = false
@@ -32,9 +32,7 @@ required-features = ["updater"]
 # (decision D5). The server binary is the thing being downloaded, so it can
 # never take that path; the GUI, which is the client that pushes it, can.
 #
-# `github` is the right panel's GitHub tab: the same HTTPS client, pointed at
-# api.github.com.
-tty7-core = { path = "crates/tty7-core", features = ["gssapi", "remote-install", "github"] }
+tty7-core = { path = "crates/tty7-core", features = ["gssapi", "remote-install"] }
 # The mobile gateway, run by the local daemon while mobile access is on
 # (`core::mobile`). Lives in the GUI binary only: tty7-server is the lean static
 # binary pushed to remote machines, and must not grow iroh.
@@ -42,10 +40,7 @@ tty7-gateway = { path = "crates/tty7-gateway" }
 # Draws the pairing code in Settings → Mobile.
 qrcode = { version = "0.14", default-features = false }
 
-gpui = { workspace = true }
-gpui_platform = { workspace = true }
-gpui-component = { workspace = true }
-gpui-component-assets = { workspace = true }
+gpui-kit = { workspace = true }
 
 anyhow.workspace = true
 log.workspace = true
@@ -64,11 +59,10 @@ memchr = "2"
 # emoji, and half a flag renders as a bare letter. Already in the tree via
 # gpui, so this pins no new code.
 unicode-segmentation = "1"
-# Column widths for the input bar (`terminal::view`). The bar has to lay text
-# out the way the terminal grid will, and the grid gets its widths from this
-# same crate by way of `alacritty_terminal` — a hand-rolled code-point table
-# drifts from it the moment Unicode adds a block. Already in the tree via
-# `tty7-cli`, so this pins no new code.
+# Column widths for terminal rendering and copied grid rows. The grid gets
+# its widths from this same crate by way of `alacritty_terminal` — a hand-rolled
+# code-point table drifts from it the moment Unicode adds a block. Already in
+# the tree via `tty7-cli`, so this pins no new code.
 unicode-width = "0.2"
 smol.workspace = true
 smallvec.workspace = true
@@ -82,20 +76,8 @@ tempfile = "3"
 # userinfo and man-page names back out.
 url = "2"
 percent-encoding = "2"
-# The code editor's language-server client (`ui::lsp`). The same version
-# gpui-component's LSP hooks take their types from.
-lsp-types = { version = "0.97.0", features = ["proposed"] }
-
-# The code editor's file loading and saving (`ui::editor_text`). `encoding_rs`
-# decodes legacy-encoded text (GB18030, Windows-1252) and writes it back in the
-# same encoding, and `globset` matches `.editorconfig` section globs. Both are
-# already in the tree (via gpui's HTTP stack and its `ignore` walker), so they
-# pin no new code.
-encoding_rs = "0.8.35"
-globset = "0.4.20"
-
 # SSH profile ids in the connection manager UI (`ui::ssh_connect`,
-# `ui::settings`, the command palette). The profiles themselves — and the
+# `ui::settings`). The profiles themselves — and the
 # secret-free `CredentialRef` they carry — live in `tty7-core`, which `Config`
 # needs to parse `config.json` without gpui.
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -128,14 +110,12 @@ plist = "1"
 # gpui's own clipboard code, so pinning it here adds no new native code.
 image = "0.25"
 
-# HTTP client for the startup update check (`core::update`): one GET to the
-# GitHub releases API to see if a newer version has shipped. `reqwest_client`
-# wraps Zed's `zed-reqwest` fork behind gpui's `http_client` trait (re-exported
-# as `gpui::http_client`) and manages its own tokio runtime. That reqwest+rustls
-# stack is *already* compiled into the tree via `gpui-component-assets`, so this
-# pins no new native code — it only exposes what we're already building. Pinned
-# to gpui's rev so the shared `http_client`/`zed-reqwest` versions stay aligned.
-reqwest_client = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }
+# HTTP client for the startup update check (`core::update`) and the remote-server
+# installer (`daemon::install::download`): one workspace pin, so both fetch over
+# the same rustls stack. Blocking, because both callers work off the main thread
+# rather than on the GUI executor, and `rustls` keeps OpenSSL out of the build.
+# Already in the tree via `iroh`, so pinning it here adds no new native code.
+reqwest.workspace = true
 
 # See `[workspace.dependencies]`: the pin is shared with tty7-cli, which parses
 # `capture` output through the same grid.
@@ -147,16 +127,14 @@ alacritty_terminal.workspace = true
 notify-rust = "4"
 
 # Filesystem watcher for live config reload: watches `config.json` and reloads
-# `Config` + re-applies the theme without a restart. The code panel (file tree /
-# editor, `ui::code`) reuses it to refresh the tree and detect external edits.
+# `Config` + re-applies the theme without a restart.
 notify = "8"
 
 # System tray / menu bar status item (`ui::tray`). Rasterizes the bundled SVG
 # logo into the tray bitmap at runtime — gpui's own SVG path only yields a
-# tinted alpha mask, not raw RGBA. The gpui and gpui-component forks both pin
-# the same 0.47, so the whole tree shares a single resvg/usvg/tiny-skia stack;
+# tinted alpha mask, not raw RGBA.
 # default features off drops the text/font machinery our icon SVGs don't use.
-resvg = { version = "0.47", default-features = false }
+resvg = { version = "0.46", default-features = false }
 
 # The tray icon itself, macOS + Windows: tauri's `tray-icon` (NSStatusItem /
 # Shell_NotifyIcon via objc2 / windows-sys, both already in the tree). Linux is
@@ -166,9 +144,7 @@ resvg = { version = "0.47", default-features = false }
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 tray-icon = "0.24"
 
-# The pty-size ioctl in `terminal::generator` is the only libc user left in the
-# GUI (the daemon's own libc calls went to tty7-core), and it is Unix-only — so
-# the dep is Unix-only too.
+# Unix process liveness and parent checks in the standalone updater.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
@@ -177,8 +153,10 @@ libc = "0.2"
 # PATH comes back mangled. 0.61 is already in the tree (tray-icon pulls it), so
 # this pins no new code.
 [target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Storage_FileSystem",
     # ConvertStringSecurityDescriptorToSecurityDescriptorW + SECURITY_ATTRIBUTES:
     # the elevated updater's %ProgramData% staging directory gets an explicit
@@ -192,6 +170,7 @@ windows-sys = { version = "0.61", features = [
     # but the Win32 metadata files it under Diagnostics::Debug, so that is the
     # module the binding needs — nothing here pulls in dbghelp.
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
@@ -241,8 +220,7 @@ winresource = "0.1"
 # so the native traffic-light buttons render in the right light/dark style.
 [target.'cfg(target_os = "macos")'.dependencies]
 # CFStringTokenizer FFI for dictionary-based CJK word segmentation on
-# double-click (`terminal::smart_select`). Already in the tree transitively,
-# and it makes jieba unnecessary here — see the non-macos section below.
+# double-click (`terminal::smart_select`). Already in the tree transitively.
 core-foundation = "0.10"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSAppearance", "NSGraphics", "NSImage"] }
@@ -250,26 +228,9 @@ objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "
 # `set_dock_icon_for_bare_binary` in main.rs.
 # NSUserNotification is the click-to-reveal notification path — see
 # `terminal::remote::macos_notify` for why it is driven directly.
-# NSUserDefaults (with NSDictionary for the domain it returns) is how a test
-# checks that `font_thicken: false` leaves `AppleFontSmoothing` alone — see
-# `apply_font_thicken` in main.rs.
-objc2-foundation = { version = "0.3", features = ["NSData", "NSDictionary", "NSString", "NSUserDefaults", "NSUserNotification"] }
+objc2-foundation = { version = "0.3", features = ["NSData", "NSString", "NSUserNotification"] }
 
-# Dictionary-based Chinese word segmentation for double-click selection
-# (`terminal::smart_select`), as a *fallback* where the OS has no tokenizer of
-# its own. macOS is excluded on purpose: CFStringTokenizer segments Chinese
-# about as well (and Japanese/Korean far better) at zero cost, while jieba's
-# table costs ~55 MB resident once built and ~2 MB of binary for the embedded
-# dictionary. Keeping the dep off macOS means that dictionary isn't even
-# linked into the build that can't use it.
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-jieba-rs = "0.10"
-
-# x11/wayland are the Linux windowing backends; only pull them on Linux. The
-# Windows backend (`gpui_windows`) and macOS backend are selected by gpui_platform
-# itself via `cfg`, so no feature is needed for them.
 [target.'cfg(target_os = "linux")'.dependencies]
-gpui_platform = { workspace = true, features = ["x11", "wayland"] }
 # Linux tray (`ui::tray`): pure-Rust StatusNotifierItem over DBus (zbus — already
 # in the tree). `blocking` + `async-io` gives a synchronous handle without
 # requiring the app to own a tokio runtime; ksni runs its own service thread. On
@@ -281,7 +242,7 @@ ksni = { version = "0.3.6", default-features = false, features = ["blocking", "a
 # App/Window harness the view/event tests run on. Dev-only: the feature merges
 # into test builds and never reaches a release binary.
 [dev-dependencies]
-gpui = { workspace = true, features = ["test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }
 # tests/edns_z_flag.rs drives iroh's resolver, so the simple-dns patch below is
 # checked by the default `cargo test` CI runs, which skips tty7-gateway.
 iroh = "1.2"
@@ -294,10 +255,9 @@ workspace = true
 default = []
 updater = ["dep:async_zip"]
 
-# ---- Standalone workspace mirroring gpui-component's pins so the git/source
-# ---- caches are shared and versions stay aligned. ----
 [workspace]
 members = ["crates/*"]
+exclude = ["vendor/alacritty"]
 # The root `tty7` package is a member implicitly; naming every crate here is
 # what makes a bare `cargo build` / `cargo test` at the root cover the whole
 # workspace, which is how CI invokes them.
@@ -311,28 +271,11 @@ edition = "2024"
 # they must never drift apart. This is the line a release bump edits (and the
 # one nightly's `awk '/^version = /'` stamps: it is the first such line in the
 # file, since the package entries above are all `version.workspace = true`).
-version = "26.10.0"
+version = "26.10.1"
 
 [workspace.dependencies]
-# Our fork's `tty7` branch carries the local customizations tty7 relies on:
-# `PopupMenu::with_size`, the 1px hairline menu separator, and the custom-button
-# label color the chrome tiles need. The exact commit is still pinned by
-# Cargo.lock. For co-developing the UI crate, point these back at a sibling
-# checkout: `path = "../gpui-component/crates/{ui,assets}"` — but never commit
-# that, since a path dependency can't resolve on CI.
-#
-# `tree-sitter-languages` compiles the grammars the code editor highlights with.
-gpui-component = { git = "https://github.com/l0ng-ai/gpui-component", branch = "tty7", version = "0.5.2", features = [
-    "tree-sitter-languages",
-] }
-gpui-component-assets = { git = "https://github.com/l0ng-ai/gpui-component", branch = "tty7", version = "0.5.1" }
-
-gpui = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }
-# Base features are cross-platform (`font-kit`, `runtime_shaders` only map to the
-# macOS backend; they're no-ops elsewhere). The Linux-only `x11`/`wayland`
-# backends are added by the `cfg(target_os = "linux")` dependency entry in the
-# package manifest, so they never reach the Windows/macOS builds.
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe", features = ["font-kit", "runtime_shaders"] }
+gpui-kit = "=0.10.0"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "http2", "rustls", "socks", "system-proxy"] }
 
 # Our fork of Zed's alacritty_terminal fork: the VT parser + grid
 # (`Term`/`ansi::Processor`). Two packages read it and they must agree, hence
@@ -372,7 +315,7 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "1d217ee3
 # `emoji_presentation_sequences_reserve_two_columns`,
 # `a_prompt_forgets_kitty_flags_a_killed_program_left_on_either_screen`); drop
 # this fork once they land upstream and #415 has another home.
-alacritty_terminal = { git = "https://github.com/l0ng-ai/alacritty", rev = "fe249ca805b4813940fbaee3974357b7e73df30a" }
+alacritty_terminal = { path = "vendor/alacritty/alacritty_terminal" }
 
 anyhow = "1"
 log = "0.4"
@@ -382,15 +325,6 @@ smallvec = "1"
 smol = "2"
 
 [patch.crates-io]
-# Our fork (l0ng-ai/russh, branch `tty7`): ayamir's gssapi-with-mic client auth
-# (0d1d073) plus Eugeny/russh 58886f4d + 24e2c374, which stop zlib from
-# truncating packets that inflate past 2x — without them a host with
-# `Compression yes` connects and never prints a byte (#997). GSSAPI has since
-# landed upstream (#738, in 0.62.7 / 0.63), but 0.62.7 lacks 24e2c374 and 0.63
-# changes `check_server_key`; drop this patch when moving to 0.63.2+. Pinned
-# to an exact rev (never a branch): russh is the SSH protocol layer handling
-# user credentials, and `cargo update` must not change what it builds.
-russh = { git = "https://github.com/l0ng-ai/russh", rev = "34f73e68d875b6fc2529654102ee65bafc691c59" }
 # simple-dns 0.12.0 with the EDNS OPT TTL read at RFC 6891's offsets: upstream
 # takes the extended RCODE from the low byte, where the DO/Z flags live, so a
 # resolver that sets a Z bit (Clash-style fake-IP DNS does) turns every answer
@@ -403,9 +337,7 @@ todo = "deny"
 type_complexity = "allow"
 
 [profile.dev]
-codegen-units = 16
-debug = "limited"
-split-debuginfo = "unpacked"
+debug = 0
 
 [profile.dev.package]
 resvg = { opt-level = 3 }
@@ -413,9 +345,9 @@ rustybuzz = { opt-level = 3 }
 taffy = { opt-level = 3 }
 ttf-parser = { opt-level = 3 }
 smol = { opt-level = 3 }
-gpui = { opt-level = 3 }
-gpui_platform = { opt-level = 3 }
-gpui_macros = { opt-level = 3 }
+gpui-pre = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+gpui-pre-macros = { opt-level = 3 }
 # The VT parser + grid run on every PTY byte; at opt-level 0 a `cat bigfile`
 # crawls under `cargo dev`.
 alacritty_terminal = { opt-level = 3 }
@@ -427,69 +359,3 @@ alacritty_terminal = { opt-level = 3 }
 lto = "thin"
 codegen-units = 1
 
-# ---- gpui fork ------------------------------------------------------------
-# Our `tty7` branch (cut from the pinned upstream rev) carries:
-#
-# 1. `prefers_ime_for_printable_keys` takes the keystroke, so an input handler can
-#    answer per key instead of per view. tty7 needs it for Option-as-Meta — macOS
-#    routes ⌥-chords to the IME whenever a CJK input source is active, and without
-#    the keystroke there is no way to decline just those chords (see
-#    `terminal::input::prefers_ime_for_printable_keys`, issue #177).
-#
-# 2. gpui's Windows backend rasterizes a font-fallback run with the face
-#    DirectWrite actually shaped it with, instead of re-deriving one from the
-#    face's family/weight/style. The round trip mapped DirectWrite's italic to
-#    oblique, so italic CJK — which every pane reaches through the fallback chain,
-#    Hack having no CJK — drew a *different* face's outlines at the shaped glyph
-#    indices. Every character rendered as an unrelated character, one for one,
-#    which reads as mojibake rather than as a font bug.
-#
-# 3. resvg/usvg bumped 0.45 → 0.47 so gpui's SVG stack unifies with the resvg
-#    tty7 pins directly above (follow-up to the #227 dependabot bump).
-#
-# 4. `ListState::with_size_hint`. A list counts an item it has not laid out yet
-#    as zero tall, so a long document reports itself as about one viewport and
-#    a scrollbar reading that height drags one viewport and stops — the diff
-#    overlay scrolls a whole working tree through one of these. The hint counts
-#    the unmeasured items at an estimate instead, which `measure_all` would
-#    settle exactly at the price of laying out the whole document on the first
-#    frame (see `ui::diff_overlay::DIFF_LINE_H`).
-#
-# 5. A text layout remembers the width it was truncated to, and a size measured
-#    under truncation no longer answers a later measure that asks for the whole
-#    text. A flex item is measured against a squeezed width first and for its
-#    content size after; answering the second from the first laid every
-#    truncating name out as just its ellipsis (see the switcher's
-#    `a_truncating_name_beside_its_number_takes_the_room_it_has`).
-#
-# 6. `enter` and `tab` map to their native key equivalents in macOS menus.
-#    Without them NSMenuItem got the literal string "enter" and took its first
-#    character, so a `secondary-enter` item (ToggleFullscreen) read as ⌘E.
-#
-# 7. A right- or center-aligned line paints into a layer that covers where its
-#    glyphs land. The layer was sized from the unaligned origin, so an opaque
-#    quad painted over the glyphs later got no higher draw order than them, and
-#    the text showed through — the Changes panel's flush-right directory drew
-#    through the hover action buttons.
-#
-# 8. `gpui_platform::set_glyph_dilation` turns off the stroke thickening macOS
-#    font smoothing applies to light glyphs, for gpui's rasterizer alone. The
-#    only other lever is `AppleFontSmoothing`, which AppKit reads too, so
-#    `font_thicken: false` used to thin the native menus and alerts while the
-#    terminal's dark text — never dilated to begin with — looked the same
-#    (issue #1119).
-#
-# Patching by source rather than editing the `gpui`/`gpui_platform` pins above is
-# deliberate: `gpui-component` declares its own `gpui` from the upstream URL, and
-# a plain pin swap would put two incompatible copies of gpui in the tree. `[patch]`
-# rewrites the source for every dependent at once, so the fork's sibling crates
-# (`gpui_macos`, `gpui_web`, …) come along through their in-repo path deps.
-#
-# When bumping the upstream rev: rebase the fork's `tty7` branch onto the new rev,
-# push, then update the `rev` pins above — the branch here follows automatically.
-[patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }
-gpui_platform = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }
-gpui_macros = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }
-gpui_web = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }
-reqwest_client = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }

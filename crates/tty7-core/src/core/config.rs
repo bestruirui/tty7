@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -210,12 +210,6 @@ pub struct Config {
     pub custom_shells: Vec<CustomShell>,
 
     pub link_url: bool,
-    /// What a clicked file link opens in. `None` means the key predates this
-    /// setting; [`Config::sanitize`] resolves it, and every reader should go
-    /// through [`Config::file_open_mode`] rather than read it raw.
-    #[serde(default, deserialize_with = "de_lenient")]
-    pub link_file_open: Option<LinkFileOpen>,
-    pub link_file_command: Option<String>,
     pub ssh_loopback_forward: bool,
     pub cursor_blink: bool,
     pub scrollback_limit: usize,
@@ -231,60 +225,6 @@ pub struct Config {
     pub right_panel_visible: bool,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
-    #[serde(default, deserialize_with = "de_lenient")]
-    pub right_panel_tab: RightPanelTab,
-    /// Global, not per-overlay — the same call VS Code's
-    /// `diffEditor.renderSideBySide` makes.
-    #[serde(default, deserialize_with = "de_lenient")]
-    pub diff_view: DiffViewMode,
-    /// How the code / diff surface shares the window with the terminal — for a
-    /// tab that has not been told otherwise. The choice itself is per tab, made
-    /// on the document header's context menu; this is the value a fresh tab
-    /// starts from, and therefore the one every untold tab is still reading,
-    /// which is why the menu never writes it.
-    #[serde(default, deserialize_with = "de_lenient")]
-    pub document_layout: DocumentLayout,
-    /// The share of the terminal column — the flex area between the sidebar and
-    /// the right panel — the document column takes when docked. The named
-    /// widths land on a third, a half and two thirds; a drag leaves whatever it
-    /// leaves, held to [`DOCUMENT_RATIO_MIN`]..=[`DOCUMENT_RATIO_MAX`]. Live
-    /// layout narrows it further when the terminal's floor needs the width.
-    #[serde(default = "default_document_ratio")]
-    pub document_ratio: f32,
-    /// The source control panel's history section starts collapsed: a graph
-    /// unfurling the first time someone opens the panel is a worse first
-    /// impression than one they asked for.
-    #[serde(default)]
-    pub scm_graph_expanded: bool,
-    /// Whether the source control panel lists changed files as a directory
-    /// tree rather than one flat run per group. Off by default: the flat list
-    /// is what a handful of changes reads best as, and the tree is for the
-    /// agent run that touched sixty files across a dozen modules.
-    #[serde(default)]
-    pub scm_changes_tree: bool,
-    /// Whether a file opens in the code panel with soft wrap on. Not a
-    /// setting anyone picks up front: it is whatever the status bar's Wrap
-    /// toggle (or `ToggleDocumentWrap`) was last left at, so the next file
-    /// opens the way the last one was being read.
-    #[serde(default)]
-    pub editor_soft_wrap: bool,
-    /// Whether a Markdown file opens rendered rather than as source — the last
-    /// state of the Preview / Edit toggle, remembered the same way as
-    /// [`Self::editor_soft_wrap`]. Files that are not Markdown ignore it.
-    #[serde(default)]
-    pub editor_markdown_preview: bool,
-    /// Whether the code editor starts language servers (rust-analyzer,
-    /// typescript-language-server, …) for the files it opens, for
-    /// diagnostics, completion, hover and go to definition. On by default;
-    /// a language whose server is not installed simply goes without.
-    #[serde(default = "default_true")]
-    pub editor_lsp: bool,
-    /// Whether the code editor marks lines that differ from the file's
-    /// staged (index) version in its gutter. On by default; flipped by the
-    /// `ToggleEditorGitGutter` command and remembered like
-    /// [`Self::editor_soft_wrap`].
-    #[serde(default = "default_true")]
-    pub editor_git_gutter: bool,
     /// Whether the sidebar files tabs nobody pinned into groups of its own —
     /// by repository, and by host for an SSH pane. Off, those tabs sit in one
     /// flat list below the pinned groups, which are the user's and show
@@ -335,27 +275,9 @@ pub struct Config {
     pub show_tray_icon: bool,
     #[serde(default, deserialize_with = "de_lenient")]
     pub bell: BellMode,
-    /// Whether tty7 edits the shell prompt itself. On by default: the inline
-    /// editor is what gives a prompt selection, undo, a completion menu and the
-    /// fuzzy history — none of which a shell's own line editor offers.
-    ///
-    /// Off hands every keystroke at the prompt straight to the PTY, so zsh's
-    /// ZLE / readline / fish own editing again and the keybindings written in a
-    /// dotfile work exactly as they do outside tty7. Shell integration itself
-    /// stays on: prompt boundaries, cwd, exit status and notifications are
-    /// unaffected. `tab_completion` and `history_search` are tty7's own menus,
-    /// so both are moot while this is off.
-    #[serde(default = "default_true")]
-    pub prompt_editor: bool,
-    #[serde(default = "default_true")]
-    pub tab_completion: bool,
-    #[serde(default = "default_true")]
-    pub history_search: bool,
-
     #[serde(default, deserialize_with = "de_lenient")]
     pub cursor_style: CursorStyle,
-    /// The caret's shape while the shell waits at a prompt, whether tty7's
-    /// inline editor or the shell's own line editor draws it. `follow` keeps
+    /// The caret's shape while the shell waits at a prompt. `follow` keeps
     /// `cursor_style` everywhere; any other value leaves `cursor_style` to the
     /// programs the shell runs, which is how kitty and ghostty put a bar at
     /// the prompt and a block inside a TUI that never sets a shape itself.
@@ -381,6 +303,8 @@ pub struct Config {
     /// still zoom; this only opts the wheel in.
     #[serde(default, deserialize_with = "de_lenient")]
     pub mouse_zoom_modifier: MouseZoomModifier,
+    #[serde(default, deserialize_with = "de_lenient")]
+    pub mouse_right_click: MouseRightClick,
     pub clipboard_trim_trailing_spaces: bool,
     /// In a Claude Code pane, copy joins the rows Claude wrapped itself, so a
     /// paragraph pastes as one line. ⌘⌥C and Copy Raw copy the rows as is.
@@ -427,15 +351,8 @@ pub struct Config {
     /// beside them.
     #[serde(default, skip_serializing)]
     pub ssh_profile_frecency: HashMap<uuid::Uuid, ProfileUsage>,
-    /// How often and how lately each shell was opened from the New Tab menu
-    /// or its palette command, keyed by the label the inventory shows it
-    /// under. Orders the menu's short list of shells the way
-    /// `ssh_profile_frecency` orders its hosts.
     #[serde(default)]
     pub shell_frecency: HashMap<String, ProfileUsage>,
-
-    #[serde(default)]
-    pub command_frecency: HashMap<String, ProfileUsage>,
 
     #[serde(default)]
     pub agent_commands: HashMap<String, String>,
@@ -450,27 +367,8 @@ pub struct Config {
     /// "New Agent Tab" opens.
     #[serde(default)]
     pub agent_frecency: HashMap<String, ProfileUsage>,
-    /// Approved `.tty7/setup` scripts: repo (`worktree::setup::trust_key`) to
-    /// the sha256 of the content approved. A changed script asks again.
-    #[serde(default)]
-    pub worktree_setup_trust: HashMap<String, String>,
-    /// Past agent sessions taken out of the search's Sessions tab, as
-    /// `<agent slug>:<session id>`. Only the listing forgets them; the
-    /// agent's own history is not touched.
-    #[serde(default)]
-    pub hidden_agent_sessions: BTreeSet<String>,
     #[serde(default = "default_true")]
     pub restore_agent_sessions: bool,
-    /// Give each pane its own shell history instead of one file every pane
-    /// appends to and reads back.
-    ///
-    /// Seeded from the shell's real history file, so a new pane is not blank,
-    /// and merged back into it when the pane closes, so nothing typed is lost.
-    /// Off by default because shared history is what a terminal has always
-    /// done, and someone who has not asked for the change would experience it
-    /// as their history mysteriously forgetting the other window.
-    #[serde(default)]
-    pub per_pane_history: bool,
 
     /// This instance is the stand-in for a file that could not be read or
     /// parsed: `load` kept a copy aside and handed back defaults. Never
@@ -693,6 +591,14 @@ pub enum MouseZoomModifier {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MouseRightClick {
+    #[default]
+    Menu,
+    CopyPaste,
+}
+
 /// When closing a tab or a pane asks first (#1021).
 ///
 /// `WhenBusy` is the question tty7 has always asked, and the default: only
@@ -812,8 +718,6 @@ impl Default for Config {
             shell: None,
             custom_shells: Vec::new(),
             link_url: true,
-            link_file_open: Some(LinkFileOpen::Internal),
-            link_file_command: None,
             ssh_loopback_forward: true,
             cursor_blink: true,
             scrollback_limit: 10_000,
@@ -823,16 +727,6 @@ impl Default for Config {
             sidebar_collapsed: false,
             right_panel_visible: false,
             right_panel_width: default_right_panel_width(),
-            right_panel_tab: RightPanelTab::Info,
-            diff_view: DiffViewMode::Split,
-            document_layout: DocumentLayout::default(),
-            document_ratio: default_document_ratio(),
-            scm_graph_expanded: false,
-            scm_changes_tree: false,
-            editor_soft_wrap: false,
-            editor_markdown_preview: false,
-            editor_lsp: true,
-            editor_git_gutter: true,
             sidebar_auto_grouping: true,
             notify_on_command_finish: NotifyMode::Unfocused,
             check_for_updates: true,
@@ -846,9 +740,6 @@ impl Default for Config {
             confirm_close: ConfirmClose::WhenBusy,
             show_tray_icon: true,
             bell: BellMode::Visual,
-            prompt_editor: true,
-            tab_completion: true,
-            history_search: true,
             cursor_style: CursorStyle::Block,
             prompt_cursor_style: PromptCursorStyle::Follow,
             macos_option_as_alt: false,
@@ -858,6 +749,7 @@ impl Default for Config {
             smooth_scroll: true,
             mouse_reporting: true,
             mouse_zoom_modifier: MouseZoomModifier::default(),
+            mouse_right_click: MouseRightClick::Menu,
             clipboard_trim_trailing_spaces: false,
             copy_join_wrapped: false,
             copy_on_select: false,
@@ -873,14 +765,10 @@ impl Default for Config {
             ssh_warn_on_close: false,
             ssh_profile_frecency: HashMap::new(),
             shell_frecency: HashMap::new(),
-            command_frecency: HashMap::new(),
             agent_commands: HashMap::new(),
             agent_launch: HashMap::new(),
             agent_frecency: HashMap::new(),
-            worktree_setup_trust: HashMap::new(),
-            hidden_agent_sessions: BTreeSet::new(),
             restore_agent_sessions: true,
-            per_pane_history: false,
             quarantined: false,
             servers_unreadable: false,
         }
@@ -1072,12 +960,6 @@ impl Config {
         }
     }
 
-    /// What a clicked file link should open in, with the pre-setting default
-    /// filled in for a `Config` that never went through [`Self::sanitize`].
-    pub fn file_open_mode(&self) -> LinkFileOpen {
-        self.link_file_open.unwrap_or_default()
-    }
-
     fn sanitize(&mut self) {
         if !self.font_size.is_finite() || self.font_size <= 0.0 {
             self.font_size = Config::default().font_size;
@@ -1117,28 +999,6 @@ impl Config {
             self.right_panel_width = default_right_panel_width();
         }
         self.right_panel_width = self.right_panel_width.clamp(100.0, 2000.0);
-        if !self.document_ratio.is_finite() || self.document_ratio <= 0.0 {
-            self.document_ratio = default_document_ratio();
-        }
-        self.document_ratio = self
-            .document_ratio
-            .clamp(DOCUMENT_RATIO_MIN, DOCUMENT_RATIO_MAX);
-        if let Some(command) = &self.link_file_command
-            && command.trim().is_empty()
-        {
-            self.link_file_command = None;
-        }
-        // Absent means a config written before file links could open in the
-        // built-in editor. Anyone who had already pointed `link_file_command`
-        // at their own editor asked for that and keeps it; everyone else, who
-        // was silently getting the OS file association, gets the editor. A
-        // fresh `link_file_open` in a `Default` config would have taken the
-        // first group's editor away on upgrade.
-        self.link_file_open
-            .get_or_insert(match self.link_file_command {
-                Some(_) => LinkFileOpen::Command,
-                None => LinkFileOpen::Internal,
-            });
         // Normalise here so every reader can take the field as-is instead of
         // repeating a trim-and-drop-if-blank dance.
         self.http_proxy = self
@@ -1355,8 +1215,8 @@ pub fn strip_bom(text: &str) -> &str {
 /// caller can fall back to defaults without silently destroying what was there.
 pub(crate) fn quarantine(path: &std::path::Path) {
     // A broken file is read again and again — `Config::load` alone runs on
-    // every pane spawn and every palette command — so this is reached over
-    // and over for the same contents. A sibling already holding those bytes
+    // every pane spawn — so this is reached over and over for the same
+    // contents. A sibling already holding those bytes
     // *is* the copy this call would make; without the check, opening a
     // couple of tabs on a broken config.json fills the config directory with
     // eight identical `.corrupt` files and then overwrites the first one.
@@ -1563,99 +1423,9 @@ fn default_prefix() -> String {
     "ctrl-b".to_string()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RightPanelTab {
-    #[default]
-    Info,
-    /// The source control panel. Renamed from `Changes` in place rather than
-    /// added alongside it: `rename` works in both directions, so a config
-    /// written by this version still says `"changes"` and an older build reads
-    /// it back unchanged.
-    #[serde(rename = "changes", alias = "scm", alias = "git")]
-    Scm,
-    Files,
-    /// Project-wide content search. Added as a tab of its own, which costs a
-    /// rolled-back build one thing: it does not know `"search"`, falls through
-    /// `de_lenient` to `Info`, and opens there. Nothing else is lost.
-    Search,
-    /// The bound GitHub repository's issues and pull requests. Same rollback
-    /// cost as `Search`.
-    #[serde(rename = "github")]
-    GitHub,
-}
-
-/// What opens when a file link in the grid is clicked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkFileOpen {
-    /// tty7's own editor. The default, and the only one of the three that can
-    /// honour a `:line:column` suffix or open a file on a remote host.
-    #[default]
-    Internal,
-    /// Whatever the OS has the file associated with.
-    System,
-    /// [`Config::link_file_command`], for people who want their own editor.
-    Command,
-}
-
-/// How the diff overlay lays a file out. Side-by-side is the default because
-/// that is what everyone already sees.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DiffViewMode {
-    #[default]
-    Split,
-    Unified,
-}
-
-/// The detail panel's resting width: the v4 design's 280px column, which is
-/// what its insets (12px lists, 20px text) and the tab row were drawn against.
 fn default_right_panel_width() -> f32 {
     280.
 }
-
-/// Where the code / diff surface is drawn.
-///
-/// It used to be one thing — a full-workspace overlay — so there was nothing to
-/// name. Docking it beside the terminal is the default now: opening a file to
-/// read it while an agent talks underneath was the reason the built-in editor
-/// exists, and an overlay covers the agent. `Fill` is that overlay, kept for
-/// anyone who wants the whole window for the file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DocumentLayout {
-    #[default]
-    Dock,
-    Fill,
-}
-
-fn default_document_ratio() -> f32 {
-    0.5
-}
-
-/// The band `document_ratio` is held to — in the file *and* at the divider.
-///
-/// One shared pair rather than two, for the reason `FONT_SIZE_MIN` and its
-/// stepper are one pair (#550): a GUI that clamps somewhere the file does not
-/// writes a value `sanitize` then moves, and the user finds the thing they
-/// dropped somewhere else on the next launch. The divider clamps in *pixels*
-/// against the terminal's floor as well, which is the tighter limit on a narrow
-/// window; on a wide one this band is, and both ends of it have to be reachable
-/// and keepable.
-pub const DOCUMENT_RATIO_MIN: f32 = 0.2;
-pub const DOCUMENT_RATIO_MAX: f32 = 0.8;
-
-/// The named shares of the terminal column a document column can be snapped to,
-/// in the order the segmented control and the divider's double-click cycle use.
-pub const DOCUMENT_RATIO_THIRD: f32 = 1. / 3.;
-pub const DOCUMENT_RATIO_HALF: f32 = 0.5;
-pub const DOCUMENT_RATIO_TWO_THIRDS: f32 = 2. / 3.;
-pub const DOCUMENT_RATIO_STOPS: [f32; 3] = [
-    DOCUMENT_RATIO_THIRD,
-    DOCUMENT_RATIO_HALF,
-    DOCUMENT_RATIO_TWO_THIRDS,
-];
 
 /// The rem the chrome has always been laid out against — gpui's own default,
 /// which is what `text_sm()` and `text_xs()` resolve 14px and 12px from. Left
@@ -1863,59 +1633,6 @@ mod tests {
         let (back, _) = Config::load_from(&config);
         assert!(back.ssh_warn_on_close);
         assert_eq!(back.ssh_profile_frecency.get(&id).unwrap().count, 4);
-    }
-
-    /// The upgrade path, which is the whole reason `link_file_open` is an
-    /// `Option`: whichever way a config written before this key existed is
-    /// read, it has to keep doing what it did yesterday.
-    #[test]
-    fn link_file_open_takes_its_default_from_the_config_it_upgrades() {
-        let mut had_a_command: Config =
-            serde_json::from_str(r#"{"link_file_command":"code --goto {path}"}"#).unwrap();
-        had_a_command.sanitize();
-        assert_eq!(
-            had_a_command.file_open_mode(),
-            LinkFileOpen::Command,
-            "someone who pointed this at their own editor asked for it and keeps it"
-        );
-        assert_eq!(
-            had_a_command.link_file_command.as_deref(),
-            Some("code --goto {path}")
-        );
-
-        let mut had_none: Config = serde_json::from_str(r#"{"font_size": 15.0}"#).unwrap();
-        had_none.sanitize();
-        assert_eq!(
-            had_none.file_open_mode(),
-            LinkFileOpen::Internal,
-            "everyone else was silently getting the OS file association"
-        );
-
-        // A command that only ever held whitespace is no command at all —
-        // `sanitize` drops it, and the mode must not be decided on the corpse.
-        let mut blank: Config = serde_json::from_str(r#"{"link_file_command":"   "}"#).unwrap();
-        blank.sanitize();
-        assert_eq!(blank.link_file_command, None);
-        assert_eq!(blank.file_open_mode(), LinkFileOpen::Internal);
-
-        let mut chosen: Config =
-            serde_json::from_str(r#"{"link_file_open":"system","link_file_command":"code"}"#)
-                .unwrap();
-        chosen.sanitize();
-        assert_eq!(
-            chosen.file_open_mode(),
-            LinkFileOpen::System,
-            "an explicit choice outranks whatever the command box holds"
-        );
-
-        let json = serde_json::to_string(&chosen).unwrap();
-        assert!(json.contains("\"link_file_open\":\"system\""), "persisted");
-        let back: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.file_open_mode(), LinkFileOpen::System);
-
-        // Unknown values fall back rather than refusing the whole file.
-        let garbage: Config = serde_json::from_str(r#"{"link_file_open":"emacs"}"#).unwrap();
-        assert_eq!(garbage.file_open_mode(), LinkFileOpen::Internal);
     }
 
     #[test]
@@ -2326,37 +2043,6 @@ mod tests {
         assert_eq!(clamp(0.01), 0.1);
     }
 
-    /// A width the user dropped the divider at has to come back where they left
-    /// it. `sanitize` holds `document_ratio` to a band; the divider clamps to
-    /// the same one, through these constants, so nothing it can write is
-    /// something the next launch moves. The regression this pins: the drag used
-    /// to clamp in pixels alone, so a column pushed against either edge of a
-    /// wide window was saved outside the band and reopened hundreds of points
-    /// from where it was dropped.
-    #[test]
-    fn sanitize_holds_document_ratio_to_the_band_the_divider_clamps_to() {
-        let clamp = |r: f32| {
-            let mut cfg = Config {
-                document_ratio: r,
-                ..Config::default()
-            };
-            cfg.sanitize();
-            cfg.document_ratio
-        };
-        // Both edges are legal, so a divider dropped on one has somewhere to
-        // stop rather than a value that keeps being rewritten.
-        assert_eq!(clamp(DOCUMENT_RATIO_MIN), DOCUMENT_RATIO_MIN);
-        assert_eq!(clamp(DOCUMENT_RATIO_MAX), DOCUMENT_RATIO_MAX);
-        for stop in DOCUMENT_RATIO_STOPS {
-            assert_eq!(clamp(stop), stop, "a named width must survive the file");
-        }
-        assert_eq!(clamp(0.05), DOCUMENT_RATIO_MIN);
-        assert_eq!(clamp(0.95), DOCUMENT_RATIO_MAX);
-        assert_eq!(clamp(0.0), default_document_ratio());
-        assert_eq!(clamp(-1.0), default_document_ratio());
-        assert_eq!(clamp(f32::NAN), default_document_ratio());
-    }
-
     #[test]
     fn sanitize_clamps_window_opacity_override() {
         let clamp = |o: Option<f32>| {
@@ -2417,27 +2103,14 @@ mod tests {
         let cfg = Config::default();
         assert!(cfg.restore_session);
         assert!(cfg.mouse_reporting);
-        assert!(cfg.prompt_editor);
-        assert!(cfg.tab_completion);
-        assert!(cfg.history_search);
         assert_eq!(cfg.notify_threshold_secs, 10);
         assert_eq!(cfg.bell, BellMode::Visual);
 
         let cfg: Config = serde_json::from_str(r#"{"font_size": 15.0}"#).unwrap();
         assert!(cfg.restore_session);
         assert!(cfg.mouse_reporting);
-        assert!(cfg.prompt_editor);
-        assert!(cfg.tab_completion);
-        assert!(cfg.history_search);
         assert_eq!(cfg.notify_threshold_secs, 10);
         assert_eq!(cfg.bell, BellMode::Visual);
-
-        let cfg: Config = serde_json::from_str(r#"{"tab_completion": false}"#).unwrap();
-        assert!(!cfg.tab_completion);
-        let cfg: Config = serde_json::from_str(r#"{"history_search": false}"#).unwrap();
-        assert!(!cfg.history_search);
-        let cfg: Config = serde_json::from_str(r#"{"prompt_editor": false}"#).unwrap();
-        assert!(!cfg.prompt_editor);
 
         let cfg: Config = serde_json::from_str(
             r#"{"restore_session": false, "mouse_reporting": false, "bell": "audible"}"#,
@@ -2749,8 +2422,8 @@ mod tests {
         clear_quarantines(&path);
         std::fs::write(&path, "{ not json").unwrap();
 
-        // `Config::load` runs on every pane spawn and every palette command,
-        // so a file left broken is read dozens of times a session. Each read
+        // `Config::load` runs on every pane spawn, so a file left broken
+        // is read dozens of times a session. Each read
         // used to leave another copy, filling the config directory and then
         // overwriting the oldest one.
         for _ in 0..12 {

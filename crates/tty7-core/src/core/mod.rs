@@ -1,4 +1,3 @@
-pub mod agent_history;
 pub mod agent_hooks;
 pub mod cli_agent;
 pub mod clipboard;
@@ -6,8 +5,6 @@ pub mod codename;
 pub mod config;
 pub mod crash;
 pub mod git;
-pub mod github;
-pub mod gitignore;
 pub mod group_key;
 #[allow(dead_code)]
 pub mod keychain;
@@ -27,4 +24,3 @@ pub mod tab_view;
 pub mod term_modes;
 pub mod threads;
 pub mod window_state;
-pub mod worktree;

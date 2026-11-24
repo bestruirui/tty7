@@ -61,10 +61,6 @@ if [[ "$PACKAGE_UPDATE_ZIP" != "0" ]]; then
     chmod +x "$APP/Contents/MacOS/tty7-updater"
 fi
 cp assets/tty7.icns "$APP/Contents/Resources/tty7.icns"
-# Completion signatures are loaded at runtime (not embedded), resolved relative
-# to the executable as ../Resources/completions — see terminal::signature.
-mkdir -p "$APP/Contents/Resources/completions"
-cp assets/completions/*.json "$APP/Contents/Resources/completions/"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 if [[ -n "${TTY7_LOCAL_BUILD_ID:-}" ]]; then
     # A local install's build id, which a running app can watch to offer a restart.
@@ -385,9 +381,9 @@ rm -rf "$STAGE"
 mkdir "$STAGE"
 # `mv`, not `cp -R`: this is the peak, and a second full copy of the bundle is
 # the most expensive thing on the volume that nobody needs. Nothing reads
-# dist/tty7.app after this point — the zip above is what the updater ships and
-# what nightly.yml verifies (it extracts that, not this), and release.yml only
-# knows about tty7.app as an intermediate to keep out of the upload globs.
+# dist/tty7.app after this point — the zip above is what the updater ships, and
+# release.yml only knows about tty7.app as an intermediate to keep out of the
+# upload globs.
 mv "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 # Size the image explicitly. Left to itself, `-srcfolder` measures the bytes it

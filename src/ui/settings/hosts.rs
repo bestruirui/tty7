@@ -223,9 +223,7 @@ impl Tty7App {
         let mut list = v_flex()
             .id("ssh-host-list-rows")
             .px(px(10.))
-            .when(bounded, |l| {
-                l.on_scroll_wheel(nested_list_wheel(scroll.clone()))
-            });
+            .when(bounded, |l| l.on_scroll(nested_list_wheel(scroll.clone())));
         if let Some(id) = adding {
             list = list.child(self.render_host_row(None, id, cx));
         }

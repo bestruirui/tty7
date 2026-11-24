@@ -646,13 +646,13 @@ fn payload_data(command: &[u8]) -> &[u8] {
 /// A reassembled image transmission, base64-decoded but *not yet* inflated.
 ///
 /// The daemon does only the base64 decode (cheap, and it strips the 33% text
-/// inflation) and forwards this over the socket; the client calls [`to_rgba8`]
+/// inflation) and forwards this over the socket; the client calls [`take_rgba8`]
 /// to inflate and normalize to RGBA8. Keeping [`data`] compressed on the wire is
 /// what makes a *remote* pane viable — inflating daemon-side would push tens of
 /// MB per frame back through the SSH tunnel.
 ///
 /// [`data`]: Image::data
-/// [`to_rgba8`]: Image::to_rgba8
+/// [`take_rgba8`]: Image::take_rgba8
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Image {
     pub id: u32,
@@ -681,6 +681,7 @@ impl Image {
     /// (whose decode needs the `image` crate the GUI owns, not this core) or on
     /// a malformed payload; PNG callers should decode [`data`](Image::data)
     /// themselves after checking [`format`](Image::format).
+    /// The pixel buffer is moved out of the image.
     ///
     /// The inflate is bounded by what `width`/`height` claim the pixels are:
     /// deflate expands ~1000:1 in the limit, so an unbounded `decompress_to_vec`
@@ -689,52 +690,13 @@ impl Image {
     /// it would take every pane down, not just the one that received the escape.
     /// The caller checks the inflated length against `width*height*4` anyway, so
     /// capping it up front costs nothing.
-    pub fn to_rgba8(&self) -> Option<Vec<u8>> {
-        if self.format == WireFormat::Png {
-            return None;
-        }
-        let raw = if self.compressed {
-            // Bound the inflate by the pixels the sender *claims* to be sending
-            // (`width * height` at this format's bytes-per-pixel). Without a cap,
-            // a high-ratio deflate payload well inside `MAX_TRANSMISSION_BASE64`
-            // (which bounds only the *compressed* bytes) inflates to tens of GB
-            // and OOMs the whole GUI process. A payload that decompresses past
-            // its own declared dimensions is malformed, so we drop it.
-            //
-            // The declared size is itself attacker-chosen, so clamp it too:
-            // `s=65535,v=65535` alone works out to 17 GB, which would hand the
-            // bomb right back its allocation. No real frame comes near
-            // `MAX_IMAGE_BYTES`, which is what the wire can carry anyway.
-            let limit = self.decoded_len()?.min(MAX_IMAGE_BYTES);
-            miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&self.data, limit).ok()?
-        } else {
-            self.data.clone()
-        };
-        Some(match self.format {
-            WireFormat::Rgb => rgb_to_rgba(&raw),
-            _ => raw, // Rgba
-        })
-    }
-
-    /// Like [`to_rgba8`](Image::to_rgba8) but *moves* the pixel buffer out of the
-    /// image on the uncompressed fast path instead of cloning it, leaving
-    /// [`data`](Image::data) empty. This is the client hot path: a full-window
-    /// browser frame is ~26 MiB of RGBA, and the uncompressed shm/file transport
-    /// hands it to us already in the final `f=32` layout — so the clone
-    /// [`to_rgba8`] does there is pure waste at video frame rates. Only the pixel
-    /// buffer moves; the caller's `cols`/`rows`/`id`/`placement` metadata is
-    /// untouched. The compressed inflate and the PNG guard are identical to
-    /// [`to_rgba8`]; `f=24` still repacks (RGB→RGBA changes the length).
-    ///
-    /// [`to_rgba8`]: Image::to_rgba8
     pub fn take_rgba8(&mut self) -> Option<Vec<u8>> {
         if self.format == WireFormat::Png {
             return None;
         }
         let data = std::mem::take(&mut self.data);
         if self.compressed {
-            // Same bounded inflate as `to_rgba8` — see that method for why the
-            // limit is clamped to `MAX_IMAGE_BYTES` as well as the declared size.
+            // Clamp the inflate to both the declared size and `MAX_IMAGE_BYTES`.
             let limit = self.decoded_len()?.min(MAX_IMAGE_BYTES);
             let raw = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&data, limit).ok()?;
             return Some(match self.format {
@@ -767,7 +729,7 @@ impl Image {
     /// frame: a fixed 30-byte header carrying the metadata, then the raw `data`
     /// bytes appended verbatim. A JSON envelope would base64-inflate the pixel
     /// payload ~1.33×; this keeps it byte-for-byte, which matters at video frame
-    /// rates. See [`decode_frame`](Image::decode_frame).
+    /// rates. See [`decode_frame_owned`](Image::decode_frame_owned).
     pub fn encode_frame(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(HEADER_LEN + self.data.len());
         out.extend_from_slice(&self.id.to_le_bytes());
@@ -787,38 +749,7 @@ impl Image {
         out
     }
 
-    /// Reconstruct from an [`encode_frame`](Image::encode_frame) payload.
-    pub fn decode_frame(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() < HEADER_LEN {
-            return None;
-        }
-        let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-        let format = match bytes[28] {
-            24 => WireFormat::Rgb,
-            100 => WireFormat::Png,
-            _ => WireFormat::Rgba,
-        };
-        Some(Image {
-            id: u32_at(0),
-            number: u32_at(4),
-            placement: u32_at(8),
-            width: u32_at(12),
-            height: u32_at(16),
-            cols: u32_at(20),
-            rows: u32_at(24),
-            format,
-            compressed: bytes[29] != 0,
-            data: bytes[HEADER_LEN..].to_vec(),
-        })
-    }
-
-    /// Like [`decode_frame`](Image::decode_frame) but consumes the frame buffer,
-    /// reusing its allocation for the pixel payload instead of copying the tail
-    /// into a fresh `Vec`. The client owns the frame `Vec` straight off the
-    /// socket, and the pixels are the overwhelming majority of it (a ~26 MiB
-    /// RGBA frame behind a 30-byte header), so draining the header in place turns
-    /// a full-frame copy into a cheap front shift. Behaviourally identical to
-    /// `decode_frame` — same header parse, same fields.
+    /// Decode an owned wire frame, reusing its allocation for the pixel payload.
     pub fn decode_frame_owned(mut frame: Vec<u8>) -> Option<Self> {
         if frame.len() < HEADER_LEN {
             return None;
@@ -1290,7 +1221,7 @@ impl GraphicsParser {
             }));
         }
 
-        // Direct: inflation is deferred to the client (`to_rgba8`) so the
+        // Direct: inflation is deferred to the client (`take_rgba8`) so the
         // payload rides the socket — and any SSH tunnel — compressed.
         Some(Event::Image(Image {
             id: control.id,
@@ -1656,7 +1587,7 @@ mod tests {
         };
         let img = t.resolve().expect("resolve temp file");
         assert_eq!(img.data, rgba);
-        assert_eq!(img.to_rgba8().unwrap(), rgba);
+        assert_eq!(img.clone().take_rgba8().unwrap(), rgba);
         assert!(!path.exists(), "temp file should be removed after read");
     }
 
@@ -1786,7 +1717,7 @@ mod tests {
             "the compressed payload must stay small: {}",
             img.data.len()
         );
-        assert_eq!(img.to_rgba8(), None, "the clamp has to reject it");
+        assert_eq!(img.clone().take_rgba8(), None, "the clamp has to reject it");
     }
 
     #[test]
@@ -1885,7 +1816,7 @@ mod tests {
                 assert_eq!(img.id, 7);
                 assert_eq!((img.width, img.height), (1, 1));
                 assert!(!img.compressed);
-                assert_eq!(img.to_rgba8().unwrap(), pixel);
+                assert_eq!(img.clone().take_rgba8().unwrap(), pixel);
                 assert_eq!(img.format, WireFormat::Rgba);
             }
             _ => panic!("expected image"),
@@ -1913,7 +1844,7 @@ mod tests {
                 assert!(img.compressed);
                 // Wire payload stays compressed; the client inflates.
                 assert_eq!(img.data, z);
-                assert_eq!(img.to_rgba8().unwrap(), rgba);
+                assert_eq!(img.clone().take_rgba8().unwrap(), rgba);
             }
             _ => panic!("expected image"),
         }
@@ -1927,7 +1858,7 @@ mod tests {
         let mut p = GraphicsParser::new();
         match p.feed(cmd.as_bytes()).unwrap() {
             Event::Image(img) => {
-                assert_eq!(img.to_rgba8().unwrap(), [0x10, 0x20, 0x30, 0xff])
+                assert_eq!(img.clone().take_rgba8().unwrap(), [0x10, 0x20, 0x30, 0xff])
             }
             _ => panic!("expected image"),
         }
@@ -1974,15 +1905,17 @@ mod tests {
         let frame = img.encode_frame();
         // Header + payload, payload byte-identical (no base64 inflation).
         assert_eq!(&frame[HEADER_LEN..], &img.data[..]);
-        assert_eq!(Image::decode_frame(&frame), Some(img));
+        assert_eq!(Image::decode_frame_owned(frame.clone()), Some(img));
         // A truncated frame is rejected, not panicked on.
-        assert_eq!(Image::decode_frame(&frame[..HEADER_LEN - 1]), None);
+        assert_eq!(
+            Image::decode_frame_owned(frame[..HEADER_LEN - 1].to_vec()),
+            None
+        );
     }
 
     #[test]
-    fn decode_frame_owned_matches_decode_frame() {
-        // The consuming variant reuses the frame's allocation for the pixel
-        // buffer; it must reconstruct the exact same `Image` as the borrowing one.
+    fn decode_frame_owned_preserves_metadata() {
+        // Decoding must preserve every field in the encoded image.
         let img = Image {
             id: 42,
             number: 3,
@@ -2005,9 +1938,8 @@ mod tests {
     }
 
     #[test]
-    fn take_rgba8_moves_the_uncompressed_buffer_and_matches_to_rgba8() {
-        // Uncompressed RGBA: `take_rgba8` returns the exact bytes `to_rgba8`
-        // clones, but empties `data` (the buffer was moved, not copied).
+    fn take_rgba8_moves_the_uncompressed_buffer() {
+        // Uncompressed RGBA moves out of `data` without copying the pixels.
         let pixels = vec![0x10u8, 0x20, 0x30, 0x40];
         let mut img = Image {
             id: 0,
@@ -2021,8 +1953,6 @@ mod tests {
             format: WireFormat::Rgba,
             compressed: false,
         };
-        let borrowed = img.to_rgba8().unwrap();
-        assert_eq!(borrowed, pixels);
         let moved = img.take_rgba8().unwrap();
         assert_eq!(moved, pixels);
         assert!(
@@ -2033,8 +1963,7 @@ mod tests {
 
     #[test]
     fn take_rgba8_still_expands_rgb_and_bounds_the_bomb() {
-        // f=24 repacks to RGBA (length changes, so it can't move) — same result
-        // as `to_rgba8`.
+        // f=24 repacks to RGBA because the pixel length changes.
         let mut rgb = Image {
             id: 0,
             number: 0,
@@ -2072,7 +2001,7 @@ mod tests {
     }
 
     #[test]
-    fn to_rgba8_bounds_the_inflate_by_declared_dimensions() {
+    fn take_rgba8_bounds_the_inflate_by_declared_dimensions() {
         // A hostile payload: a tiny compressed blob that inflates far past the
         // 1x1 image it claims to be. Without a cap this would balloon into a
         // multi-MB (in the wild, multi-GB) allocation; bounded by the declared
@@ -2092,12 +2021,16 @@ mod tests {
             format: WireFormat::Rgba,
             compressed: true,
         };
-        assert_eq!(img.to_rgba8(), None, "an over-budget inflate is dropped");
+        assert_eq!(
+            img.clone().take_rgba8(),
+            None,
+            "an over-budget inflate is dropped"
+        );
 
         // A payload that inflates to exactly its declared size still decodes.
         let pixels = vec![0xabu8; 4]; // 1x1 RGBA
         let z = miniz_oxide::deflate::compress_to_vec_zlib(&pixels, 9);
         let ok = Image { data: z, ..img };
-        assert_eq!(ok.to_rgba8().as_deref(), Some(&pixels[..]));
+        assert_eq!(ok.clone().take_rgba8().as_deref(), Some(&pixels[..]));
     }
 }

@@ -7,7 +7,6 @@ pub mod duplex;
 /// There the daemon still stops and starts, and `scrollback` softens it.
 #[cfg(unix)]
 pub mod handoff;
-pub mod history;
 pub mod install;
 pub mod mobile;
 pub mod pane;

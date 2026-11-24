@@ -3864,11 +3864,8 @@ mod tests {
         fn separator(&self) -> char {
             '/'
         }
-        fn is_absolute(&self, p: &Path) -> bool {
-            p.to_string_lossy().starts_with('/')
-        }
-        fn read_dir(&self, dir: &Path, root: Option<&Path>) -> io::Result<Vec<crate::host::Entry>> {
-            self.0.read_dir(dir, root)
+        fn read_dir(&self, dir: &Path) -> io::Result<Vec<crate::host::Entry>> {
+            self.0.read_dir(dir)
         }
         fn stat(&self, p: &Path) -> io::Result<crate::host::Meta> {
             self.0.stat(p)
@@ -3879,50 +3876,23 @@ mod tests {
         fn canonicalize(&self, p: &Path) -> io::Result<PathBuf> {
             self.0.canonicalize(p)
         }
-        fn search(
-            &self,
-            roots: &[PathBuf],
-            query: &str,
-            limit: usize,
-            max_dirs: usize,
-            show_hidden: bool,
-        ) -> io::Result<Vec<crate::host::SearchHit>> {
-            self.0.search(roots, query, limit, max_dirs, show_hidden)
-        }
-        fn search_content(
-            &self,
-            roots: &[PathBuf],
-            query: &crate::host::ContentQuery,
-            limits: &crate::host::ContentLimits,
-        ) -> io::Result<crate::host::ContentResults> {
-            self.0.search_content(roots, query, limits)
+        fn git(&self, cwd: &Path, args: &[&str]) -> io::Result<crate::host::Output> {
+            self.0.git(cwd, args)
         }
         fn write_file(&self, p: &Path, bytes: &[u8]) -> io::Result<crate::host::Meta> {
             self.0.write_file(p, bytes)
         }
-        fn create_file_new(&self, p: &Path) -> io::Result<()> {
-            self.0.create_file_new(p)
-        }
+
         fn create_dir(&self, p: &Path, recursive: bool) -> io::Result<()> {
             self.0.create_dir(p, recursive)
         }
-        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-            self.0.rename(from, to)
-        }
+
         fn remove(&self, p: &Path, recursive: bool) -> io::Result<()> {
             self.0.remove(p, recursive)
         }
-        fn repo_root(&self, p: &Path) -> io::Result<Option<PathBuf>> {
-            self.0.repo_root(p)
-        }
-        fn git(&self, cwd: &Path, args: &[&str]) -> io::Result<crate::host::Output> {
-            self.0.git(cwd, args)
-        }
+
         fn shells(&self) -> io::Result<crate::host::ShellInventory> {
             self.0.shells()
-        }
-        fn watch(&self, dirs: &[PathBuf]) -> io::Result<crate::host::WatchSub> {
-            self.0.watch(dirs)
         }
     }
 

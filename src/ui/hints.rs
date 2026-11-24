@@ -17,7 +17,7 @@ impl Tty7App {
     ) {
         let m = &ev.modifiers;
         self.switcher_hold_changed(m, window, cx);
-        self.set_link_modifier(m.secondary(), cx);
+        self.set_link_modifier(m.secondary(cx), cx);
 
         // The numbers drawn on the tabs are `ActivateTab1`…`ActivateTab9`, so
         // the hold that raises them is the one those chords are on — Alt off
@@ -85,7 +85,7 @@ mod gpui_tests {
     fn harness(cx: &mut TestAppContext) -> (WindowHandle<Tty7App>, VisualTestContext) {
         cx.executor().allow_parking();
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui::component::init(cx);
             cx.set_global(Config::default());
         });
         let window = cx.add_window(|window, cx| {

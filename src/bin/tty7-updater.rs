@@ -1400,12 +1400,11 @@ mod windows {
     // rejected on extraction, and everything in it is moved aside and replaced
     // during an in-place portable update. A file the package ships but this
     // list omits would survive forever at its installed version.
-    const PORTABLE_MANAGED_ROOTS: [&str; 11] = [
+    const PORTABLE_MANAGED_ROOTS: [&str; 10] = [
         "tty7-app.exe",
         "tty7.exe",
         "tty7-updater.exe",
         PORTABLE_MARKER,
-        "completions",
         "server",
         "LICENSE.txt",
         "README.md",
@@ -2940,13 +2939,6 @@ mod windows {
                 ));
             }
         }
-        let completions = payload.join("completions");
-        if !completions.is_dir() {
-            return Err(format!(
-                "the portable ZIP is missing the required directory {}",
-                completions.display()
-            ));
-        }
         let marker = fs::read(payload.join(PORTABLE_MARKER))
             .map_err(|error| format!("reading the portable marker: {error}"))?;
         if marker != PORTABLE_MARKER_CONTENT {
@@ -3856,7 +3848,6 @@ mod windows {
                     ("tty7.exe", executable.clone()),
                     ("tty7-updater.exe", executable),
                     (PORTABLE_MARKER, PORTABLE_MARKER_CONTENT.to_vec()),
-                    ("completions/powershell.json", b"{}".to_vec()),
                     ("LICENSE.txt", b"license".to_vec()),
                     ("README.md", b"readme".to_vec()),
                     ("conpty.dll", b"conpty".to_vec()),
@@ -3878,7 +3869,6 @@ mod windows {
                 fs::read(payload.join(PORTABLE_MARKER)).unwrap(),
                 PORTABLE_MARKER_CONTENT
             );
-            assert!(payload.join("completions/powershell.json").is_file());
             // The bundled ConPTY has to arrive with the rest: a portable update
             // that dropped it would leave the pane host it replaced behind.
             assert!(payload.join("conpty.dll").is_file());
@@ -3924,20 +3914,8 @@ mod windows {
             let install = tempfile::tempdir().unwrap();
             let payload = tempfile::tempdir().unwrap();
             fs::write(install.path().join("tty7-app.exe"), b"old app").unwrap();
-            fs::create_dir(install.path().join("completions")).unwrap();
-            fs::write(
-                install.path().join("completions/old.json"),
-                b"old completion",
-            )
-            .unwrap();
             fs::write(install.path().join("my-script.ps1"), b"user file").unwrap();
             fs::write(payload.path().join("tty7-app.exe"), b"new app").unwrap();
-            fs::create_dir(payload.path().join("completions")).unwrap();
-            fs::write(
-                payload.path().join("completions/new.json"),
-                b"new completion",
-            )
-            .unwrap();
 
             replace_portable_and_relaunch(
                 install.path(),
@@ -3958,8 +3936,6 @@ mod windows {
                 fs::read(install.path().join("tty7-app.exe")).unwrap(),
                 b"new app"
             );
-            assert!(install.path().join("completions/new.json").is_file());
-            assert!(!install.path().join("completions/old.json").exists());
             assert_eq!(
                 fs::read(install.path().join("my-script.ps1")).unwrap(),
                 b"user file"

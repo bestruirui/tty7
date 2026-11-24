@@ -161,6 +161,11 @@ impl server::Handler for Sshd {
             session.exit_status_request(channel, 0)?;
             session.eof(channel)?;
             session.close(channel)?;
+            // russh retires a locally closed channel before the peer's reply,
+            // so that reply does not reach channel_close.
+            if self.channels.remove(&channel).is_some() {
+                self.counts.closed.fetch_add(1, Ordering::SeqCst);
+            }
         }
         Ok(())
     }
@@ -177,10 +182,12 @@ impl server::Handler for Sshd {
 
     async fn channel_close(
         &mut self,
-        _channel: ChannelId,
+        channel: ChannelId,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
-        self.counts.closed.fetch_add(1, Ordering::SeqCst);
+        if self.channels.remove(&channel).is_some() {
+            self.counts.closed.fetch_add(1, Ordering::SeqCst);
+        }
         Ok(())
     }
 }
@@ -278,7 +285,7 @@ impl FakeSshd {
         self.counts.opened.load(Ordering::SeqCst)
     }
 
-    /// CHANNEL_CLOSEs the server received.
+    /// Channels retired after either peer closes them.
     pub(crate) fn closed(&self) -> usize {
         self.counts.closed.load(Ordering::SeqCst)
     }
@@ -288,7 +295,7 @@ impl FakeSshd {
         self.counts.refused.load(Ordering::SeqCst)
     }
 
-    /// Waits for the server to have received `n` closes. A close sent on
+    /// Waits for the server to have retired `n` channels. A close sent on
     /// drop is queued for the client's session task, so it reaches the server
     /// a moment after the holder is gone, never before.
     pub(crate) async fn wait_for_closed(&self, n: usize) {
@@ -296,7 +303,7 @@ impl FakeSshd {
         while self.closed() < n {
             assert!(
                 Instant::now() < deadline,
-                "the server received {} of {n} closes",
+                "the server retired {} of {n} channels",
                 self.closed()
             );
             tokio::time::sleep(Duration::from_millis(5)).await;

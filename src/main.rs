@@ -3,6 +3,8 @@
     windows_subsystem = "windows"
 )]
 
+extern crate gpui_kit as gpui;
+
 mod core;
 mod daemon;
 mod terminal;
@@ -130,7 +132,7 @@ fn apply_reloaded_config(
     *announced = false;
     // The keymap is rebuilt only when a binding actually moved. This watcher
     // fires for every write under the config dir — including the app's own
-    // `save()`, which a sidebar drag or a palette open triggers — so reloading
+    // `save()`, which a sidebar drag triggers — so reloading
     // bindings on each tick would rebuild the whole keymap for nothing, and
     // (before `rebind` cleared first) leak a full table per tick (#548).
     // Read past the early return above: a load that failed leaves the global
@@ -200,7 +202,7 @@ fn notify_config_load_failed(
 ) {
     use crate::core::config::LoadOutcome;
     use crate::ui::i18n::L10nKey;
-    use gpui_component::WindowExt as _;
+    use gpui::component::WindowExt as _;
 
     // Only an unparseable file leaves a copy behind; an unreadable one had
     // nothing to copy, so it must not send the user after a `.corrupt` file
@@ -528,23 +530,6 @@ fn set_dock_icon_for_bare_binary() {
     }
 }
 
-/// Turns gpui's stroke thickening off for tty7's text when `font_thicken` is
-/// off; with it on, whatever the system (or a hand-written `defaults write`)
-/// says stands.
-///
-/// The switch lives in gpui's rasterizer and nowhere else. Pinning
-/// `AppleFontSmoothing` to `0` for the process (which is how this used to be
-/// done) reached AppKit as well: the menus, alerts and every other natively
-/// drawn string lost their smoothing, while the terminal's dark-on-light text,
-/// which gpui never thickens, looked no different (#1119).
-///
-/// Applied once at launch, before any text is drawn; a change made in Settings
-/// waits for the next one.
-#[cfg(target_os = "macos")]
-fn apply_font_thicken(thicken: bool) {
-    gpui_platform::set_glyph_dilation(thicken);
-}
-
 /// Delivers Finder document opens and LaunchServices URL opens after gpui has
 /// created the application. The native callback queues requests; UI state is
 /// then changed on gpui's application loop.
@@ -717,8 +702,6 @@ fn main() {
 
     let (config, config_outcome) = crate::core::config::Config::load_with_outcome();
     let gui_language = config.gui_language.clone();
-    #[cfg(target_os = "macos")]
-    apply_font_thicken(config.font_thicken);
 
     // After the PATH enrichment above, which is what makes the candidate scan
     // see the user's real PATH rather than the stub a Finder launch inherits —
@@ -758,7 +741,7 @@ fn main() {
     // `Application`, not the in-loop `App`, owns the native delegate. Register
     // before `run` so macOS can deliver Finder and URL events from launch.
     let (external_open_tx, external_open_rx) = smol::channel::unbounded();
-    let application = gpui_platform::application()
+    let application = gpui::platform::application()
         .with_assets(Assets)
         // The window-close path decides whether this process survives: with
         // the tray icon on, closing the last window retires to the tray, and
@@ -797,7 +780,7 @@ fn main() {
             }
         })
         .detach();
-        gpui_component::init(cx);
+        gpui::init(cx);
         register_bundled_fonts(cx);
         crate::ui::prompt::install(cx);
         cx.activate(true);
@@ -814,7 +797,6 @@ fn main() {
         crate::ui::theme::apply_cursor_hide_mode(cx);
         spawn_config_watcher(cx);
         crate::core::update::spawn_check(cx);
-        crate::core::update::install_image_client(cx);
         cx.background_executor()
             .spawn(async {
                 crate::core::agent_hooks::refresh_hooks_at_launch();
@@ -830,31 +812,6 @@ fn main() {
             notify_config_load_failed(cx, config_outcome, true);
         }
     });
-}
-
-#[cfg(all(test, target_os = "macos"))]
-mod font_thicken_tests {
-    use super::apply_font_thicken;
-    use objc2_foundation::{NSArgumentDomain, NSUserDefaults, ns_string};
-
-    /// #1119: turning thickening off must not reach AppKit. `AppleFontSmoothing`
-    /// in any domain this process reads restyles its native menus and alerts,
-    /// so the switch may only ever talk to gpui.
-    #[test]
-    fn turning_thickening_off_leaves_the_smoothing_preference_alone() {
-        let defaults = NSUserDefaults::standardUserDefaults();
-        let key = ns_string!("AppleFontSmoothing");
-        let before = defaults.objectForKey(key);
-
-        apply_font_thicken(false);
-
-        // SAFETY: a Foundation constant, initialized before `main` runs.
-        let arguments = defaults.volatileDomainForName(unsafe { NSArgumentDomain });
-        assert!(arguments.objectForKey(key).is_none());
-        assert_eq!(defaults.objectForKey(key).is_some(), before.is_some());
-
-        apply_font_thicken(true);
-    }
 }
 
 /// The watcher tick, from a reloaded file to the keys the app dispatches on.
@@ -874,7 +831,8 @@ mod config_reload_tests {
     /// What the live keymap — the one gpui dispatches against — does with
     /// `keys` typed in a terminal.
     fn dispatched(cx: &App, keys: &str) -> Vec<&'static str> {
-        let typed = [Keystroke::parse(keys).expect("the typed keystroke parses")];
+        let typed = [Keystroke::parse_with_os(keys, cx.platform_info().os)
+            .expect("the typed keystroke parses")];
         let context = [KeyContext::parse("Terminal").expect("the context parses")];
         cx.key_bindings()
             .borrow()
@@ -892,7 +850,7 @@ mod config_reload_tests {
         std::fs::create_dir_all(&dir).ok();
         crate::core::config::set_config_dir(dir);
 
-        gpui_component::init(cx);
+        gpui::init(cx);
         cx.set_global(config);
         crate::ui::windows::WindowRegistry::init(cx);
         crate::ui::presets::load_registry(cx);

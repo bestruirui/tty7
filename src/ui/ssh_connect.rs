@@ -153,65 +153,6 @@ impl Tty7App {
         self.open_ssh_profile_form(SshProfile::new(String::new()), window, cx);
     }
 
-    /// The connection in the focused pane, when it was dialled by hand rather
-    /// than opened from a saved host. What "Save Connection as Host" acts on,
-    /// and what decides whether the command is offered at all.
-    pub(crate) fn unsaved_ssh_session(
-        &self,
-        window: &gpui::Window,
-        cx: &gpui::App,
-    ) -> Option<Box<NativeSshSpec>> {
-        let spec = self.focused_pane_view(window, cx)?.read(cx).ssh_spec()?;
-        let profiles = &cx.global::<Config>().ssh_profiles;
-        // A transient profile is handed a fresh uuid on its way to the daemon,
-        // so an id alone does not mean a host was saved — only one that still
-        // resolves does.
-        let saved = spec
-            .profile_id
-            .as_deref()
-            .and_then(|s| uuid::Uuid::parse_str(s).ok())
-            .is_some_and(|id| profiles.iter().any(|p| p.id == id));
-        (!saved).then_some(spec)
-    }
-
-    /// Keep the connection in front of you: the form opens on everything the
-    /// live session was dialled with, so a host proved by hand becomes a saved
-    /// one without retyping it (#438).
-    pub(crate) fn save_ssh_session_as_host(
-        &mut self,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let Some(spec) = self.unsaved_ssh_session(window, cx) else {
-            return;
-        };
-        self.save_ssh_spec_as_host(&spec, window, cx);
-    }
-
-    /// The same form, for a connection named by the caller rather than by the
-    /// focus — the tab menu's row offers it for the tab it was opened on.
-    pub(crate) fn save_ssh_spec_as_host(
-        &mut self,
-        spec: &NativeSshSpec,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        let profile = profile_from_live_spec(spec);
-        let jumped = spec.jump.is_some();
-        self.with_settings_edits_resolved(window, cx, move |this, window, cx| {
-            this.open_ssh_profile_form(profile, window, cx);
-            if jumped {
-                use gpui_component::WindowExt as _;
-                // Silently dropping the hop would leave a host that saves fine and
-                // then cannot be reached.
-                window.push_notification(
-                    crate::ui::i18n::t(crate::ui::i18n::L10nKey::SshSaveDroppedJumpHost),
-                    cx,
-                );
-            }
-        });
-    }
-
     /// The host form for a machine you are looking at somewhere else: its own
     /// profile when it has one, otherwise a new profile prefilled from the
     /// address it was reached by. A hostname or password typed wrong used to
@@ -250,52 +191,6 @@ impl Tty7App {
         }
     }
 
-    /// The host form a tab's own context menu offers, and what the row calls
-    /// it — read off the tab the menu was opened on rather than off whichever
-    /// pane happens to be focused, so right-clicking a background tab reaches
-    /// that tab's connection.
-    ///
-    /// `None` for a tab there is no host form to open: a local shell and a
-    /// remote workspace pane were never dialled with an SSH spec of their own,
-    /// and a WSL distro is configured nowhere this form could edit. The label
-    /// comes from the same [`host_form_label`] the switcher's machine menu
-    /// uses, so the two rows cannot drift apart.
-    ///
-    /// [`host_form_label`]: crate::ui::switcher::host_form_label
-    pub(crate) fn tab_ssh_host_form(
-        &self,
-        index: usize,
-        window: &gpui::Window,
-        cx: &gpui::App,
-    ) -> Option<(TabHostForm, &'static str)> {
-        let leaf = self.tabs.get(index)?.pane.focused_or_first(window, cx)?;
-        let spec = leaf.read(cx).ssh_spec()?;
-        let target = ssh_host_target_of_spec(&spec, &cx.global::<Config>().ssh_profiles);
-        let label = crate::ui::switcher::host_form_label(&target)?;
-        let form = match target {
-            crate::core::session::RemoteTarget::Profile { .. } => TabHostForm::Saved(target),
-            _ => TabHostForm::Unsaved(spec),
-        };
-        Some((form, label))
-    }
-
-    /// Open what the row offered. A saved host goes to its own record; an
-    /// unsaved one goes through the same "save this connection" path the
-    /// command already uses, so the proxy, the identity files and the forwards
-    /// the session was dialled with land in the draft rather than being
-    /// thrown away with everything that does not fit in `user@host:port`.
-    pub(crate) fn open_tab_ssh_host_form(
-        &mut self,
-        form: &TabHostForm,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        match form {
-            TabHostForm::Saved(target) => self.edit_ssh_host_of_target(target, window, cx),
-            TabHostForm::Unsaved(spec) => self.save_ssh_spec_as_host(spec, window, cx),
-        }
-    }
-
     fn bump_ssh_frecency(&mut self, profile_id: uuid::Uuid, cx: &mut gpui::Context<Self>) {
         self.update_config(cx, |cfg| {
             let entry = cfg.ssh_profile_frecency.entry(profile_id).or_default();
@@ -305,9 +200,6 @@ impl Tty7App {
     }
 }
 
-/// Saved hosts, most likely first: whatever has been connected to often and
-/// recently, then alphabetically for everything nobody has used yet. Shared by
-/// the palette and the new-tab menu so the same host leads both lists.
 pub(crate) fn ssh_profiles_by_frecency(cx: &gpui::App) -> Vec<SshProfile> {
     let cfg = cx.global::<Config>();
     let now = crate::core::config::unix_now();
@@ -458,123 +350,6 @@ fn build_spec_inner(
             name => name.to_string(),
         }),
         profile_id: Some(profile.id.to_string()),
-    }
-}
-
-/// What a tab's host row opens when it is taken.
-///
-/// The two halves are not the same form. A saved host is already a record, so
-/// it is addressed by the target that names it and nothing about the live
-/// session is needed. An unsaved one is only ever the session, and it goes to
-/// the form whole: an address dialled by hand carries a proxy, a jump host,
-/// identity files and forwards, and a draft built from `user@host:port` alone
-/// would save fine and then not connect.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum TabHostForm {
-    Saved(crate::core::session::RemoteTarget),
-    Unsaved(Box<NativeSshSpec>),
-}
-
-/// Which host form a live connection belongs to: the saved host it was opened
-/// from, or the address it was dialled by.
-///
-/// A transient profile is handed a fresh uuid on its way to the daemon, so an
-/// id alone does not mean a host was saved — only one that still resolves
-/// against the saved list does. Anything else is an address worth keeping.
-///
-/// The `Direct` this hands back is the gate and the label, not the draft:
-/// [`host_form_label`] reads it to decide the row exists and what it says,
-/// while the form itself opens on the whole live spec, which carries far more
-/// than an address does.
-///
-/// [`host_form_label`]: crate::ui::switcher::host_form_label
-pub(crate) fn ssh_host_target_of_spec(
-    spec: &NativeSshSpec,
-    profiles: &[SshProfile],
-) -> crate::core::session::RemoteTarget {
-    use crate::core::session::RemoteTarget;
-    let saved = spec
-        .profile_id
-        .as_deref()
-        .and_then(|s| Uuid::parse_str(s).ok())
-        .filter(|id| profiles.iter().any(|p| p.id == *id));
-    match saved {
-        Some(id) => RemoteTarget::Profile { id },
-        None => RemoteTarget::direct(spec.user.clone(), spec.host.clone(), spec.port),
-    }
-}
-
-/// A live connection read back as a profile someone could keep — the return
-/// leg of [`build_native_ssh_spec`], for a session that was dialled by hand
-/// and turned out to be worth saving.
-///
-/// Secrets are not among the fields: the spec a pane holds has been through
-/// `without_secrets`, and a password belongs in the keychain the form writes
-/// to, not in a draft. Neither is `verify_host_keys`, which the spec carries
-/// already resolved against the global setting — copying it in would pin a
-/// per-host override nobody asked for. The jump host is the one thing that
-/// cannot come along: a profile names its jump by the id of another profile,
-/// and an ad-hoc `-J` hop is not one. Callers say so out loud.
-pub(crate) fn profile_from_live_spec(spec: &NativeSshSpec) -> SshProfile {
-    let mut profile = SshProfile::new(String::new());
-    profile.host = spec.host.clone();
-    profile.port = spec.port;
-    profile.user = spec.user.clone();
-    profile.auth = unmap_auth_mode(spec.auth_mode);
-    profile.identity_files = spec.identity_files.clone();
-    profile.agent_forward = spec.agent_forward;
-    match &spec.proxy {
-        SshProxy::None => {}
-        SshProxy::Command(cmd) => profile.proxy_command = Some(cmd.clone()),
-        SshProxy::Socks { host, port } => {
-            profile.socks_proxy = Some(HostPort::new(host.clone(), *port))
-        }
-        SshProxy::Http { host, port } => {
-            profile.http_proxy = Some(HostPort::new(host.clone(), *port))
-        }
-    }
-    profile.forwards = spec.forwards.iter().map(unmap_forward).collect();
-    profile.keepalive_interval_s = spec.keepalive_interval_s;
-    profile.keepalive_count_max = spec.keepalive_count_max;
-    profile.connect_timeout_s = spec.connect_timeout_s;
-    profile.skip_banner = spec.skip_banner;
-    profile.shell_integration = spec.shell_integration;
-    profile.remote_clipboard_write = spec.remote_clipboard_write;
-    profile.login_scripts = spec.login_script.clone();
-    profile.x11 = spec.x11;
-    profile.algorithms = Algorithms {
-        kex: spec.algorithms.kex.clone(),
-        cipher: spec.algorithms.cipher.clone(),
-        mac: spec.algorithms.mac.clone(),
-        hostkey: spec.algorithms.host_key.clone(),
-        compression: spec.algorithms.compression.clone(),
-    };
-    profile.name = crate::core::ssh_profile::to_connect_string(&profile);
-    profile
-}
-
-fn unmap_auth_mode(auth: SshAuthMode) -> AuthMode {
-    match auth {
-        SshAuthMode::Auto => AuthMode::Auto,
-        SshAuthMode::Gssapi => AuthMode::Gssapi,
-        SshAuthMode::Password => AuthMode::Password,
-        SshAuthMode::PublicKey => AuthMode::PublicKey,
-        SshAuthMode::Agent => AuthMode::Agent,
-        SshAuthMode::KeyboardInteractive => AuthMode::KeyboardInteractive,
-    }
-}
-
-fn unmap_forward(rule: &SshForwardRule) -> ForwardRule {
-    ForwardRule {
-        kind: match rule.kind {
-            SshForwardKind::Local => ForwardKind::Local,
-            SshForwardKind::Remote => ForwardKind::Remote,
-            SshForwardKind::Dynamic => ForwardKind::Dynamic,
-        },
-        bind: HostPort::new(rule.bind_host.clone(), rule.bind_port),
-        target: HostPort::new(rule.target_host.clone(), rule.target_port),
-        description: rule.description.clone().unwrap_or_default(),
-        enabled: rule.enabled,
     }
 }
 
@@ -799,67 +574,6 @@ mod tests {
         nameless.port = 2222;
         let spec = build_native_ssh_spec(&nameless, &[], &store, true);
         assert_eq!(spec.display_name.as_deref(), Some("deploy@10.0.0.5:2222"));
-    }
-
-    /// "Save Connection as Host" opens the form on this, so anything it drops
-    /// is something the user typed once and has to type again. The jump host
-    /// is the one exception, and the caller says so out loud.
-    #[test]
-    fn a_live_connection_reads_back_as_the_profile_it_was_dialled_from() {
-        let store = InMemoryCredentialStore::new();
-        let mut p = profile("prod-web", "10.0.0.5", "deploy");
-        p.port = 2222;
-        p.auth = AuthMode::PublicKey;
-        p.identity_files = vec!["/keys/id_ed25519".into()];
-        p.agent_forward = true;
-        p.x11 = true;
-        p.skip_banner = true;
-        p.remote_clipboard_write = true;
-        p.socks_proxy = Some(HostPort::new("127.0.0.1", 1080));
-        p.keepalive_interval_s = Some(30);
-        p.connect_timeout_s = Some(9);
-        p.login_scripts = vec!["tmux attach".into()];
-        p.algorithms.cipher = vec!["aes256-gcm@openssh.com".into()];
-        p.forwards = vec![ForwardRule {
-            kind: ForwardKind::Local,
-            bind: HostPort::new("localhost", 8080),
-            target: HostPort::new("127.0.0.1", 80),
-            description: "web".into(),
-            enabled: true,
-        }];
-        // A switched-off rule survives the trip through a live spec switched
-        // off, or reopening a host from its connection would turn it back on.
-        p.forwards.push(ForwardRule {
-            bind: HostPort::new("localhost", 8080),
-            target: HostPort::new("10.0.0.7", 80),
-            enabled: false,
-            ..ForwardRule::default()
-        });
-
-        let spec = build_native_ssh_spec(&p, &[], &store, true);
-        let back = profile_from_live_spec(&spec);
-
-        assert_eq!(back.host, p.host);
-        assert_eq!(back.port, p.port);
-        assert_eq!(back.user, p.user);
-        assert_eq!(back.auth, p.auth);
-        assert_eq!(back.identity_files, p.identity_files);
-        assert!(back.agent_forward && back.x11 && back.skip_banner && back.remote_clipboard_write);
-        assert_eq!(back.socks_proxy, p.socks_proxy);
-        assert_eq!(back.keepalive_interval_s, p.keepalive_interval_s);
-        assert_eq!(back.connect_timeout_s, p.connect_timeout_s);
-        assert_eq!(back.login_scripts, p.login_scripts);
-        assert_eq!(back.algorithms.cipher, p.algorithms.cipher);
-        assert_eq!(back.forwards, p.forwards);
-        assert_eq!(
-            back.name, "deploy@10.0.0.5:2222",
-            "a connection dialled by hand was never named, so the form opens on its address"
-        );
-        assert_ne!(back.id, p.id, "saving it makes a host of its own");
-        assert_eq!(
-            back.verify_host_keys, None,
-            "the spec carries the global setting resolved; copying it back would pin an override"
-        );
     }
 
     /// Both halves of "remember passphrase" key the keychain entry off the

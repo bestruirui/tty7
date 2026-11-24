@@ -1,9 +1,7 @@
 use anyhow::{Context as _, Result};
-use gpui::http_client::{AsyncBody, HttpClient as _, HttpRequestExt as _, RedirectPolicy};
-use gpui::{AnyWindowHandle, App, AsyncApp, Global, PromptLevel, Window, http_client};
-use reqwest_client::ReqwestClient;
+use gpui::{AnyWindowHandle, App, AsyncApp, Global, PromptLevel, Window};
 use smol::future::FutureExt as _;
-use smol::io::AsyncReadExt as _;
+use std::io::Read as _;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,7 +12,7 @@ use tty7_core::daemon::install::AssetFetcher as _;
 use crate::core::config::{Config, UpdateChannel};
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 
-const REPO: &str = "l0ng-ai/tty7";
+const REPO: &str = "bestruirui/tty7";
 
 /// The rolling prerelease the Nightly channel follows. Force-moved to a new
 /// commit every night, which is exactly why it cannot double as a version.
@@ -24,13 +22,13 @@ const NIGHTLY_TAG: &str = "nightly";
 /// inferred. See `resolve_version`.
 const NIGHTLY_MANIFEST: &str = "nightly.json";
 
-pub const RELEASES_URL: &str = "https://github.com/l0ng-ai/tty7/releases/latest";
+pub const RELEASES_URL: &str = "https://github.com/bestruirui/tty7/releases/latest";
 
 /// The nightly release's own page. Unlike Stable's, this URL is stable across
 /// nights — the tag stays put even as the commit under it moves. Spelled out
 /// rather than built from `NIGHTLY_TAG`, which `concat!` cannot take; the tail
 /// is asserted against it in `each_channel_reads_its_own_feed` instead.
-pub const NIGHTLY_RELEASE_URL: &str = "https://github.com/l0ng-ai/tty7/releases/tag/nightly";
+pub const NIGHTLY_RELEASE_URL: &str = "https://github.com/bestruirui/tty7/releases/tag/nightly";
 
 const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -305,29 +303,30 @@ fn spawn_check_inner(report_failure: bool, cx: &mut App) {
 
     cx.spawn(async move |cx| {
         let current = current_version();
-        let (release, version) = match fetch_latest_release(channel, manual_proxy)
-            .or(async {
-                cx.background_executor().timer(CHECK_TIMEOUT).await;
-                Err(anyhow::anyhow!("timed out after {CHECK_TIMEOUT:?}"))
-            })
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                log::debug!("update check skipped: {e:#}");
-                let detail = format!("{e:#}");
-                cx.update(|cx| {
-                    update_status(cx, |status| {
-                        status.phase = if report_failure {
-                            UpdatePhase::Failed(UpdateFailure::Check(detail))
-                        } else {
-                            UpdatePhase::Idle
-                        };
-                    })
-                });
-                return;
-            }
-        };
+        let (release, version) =
+            match smol::unblock(move || fetch_latest_release(channel, manual_proxy))
+                .or(async {
+                    cx.background_executor().timer(CHECK_TIMEOUT).await;
+                    Err(anyhow::anyhow!("timed out after {CHECK_TIMEOUT:?}"))
+                })
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    log::debug!("update check skipped: {e:#}");
+                    let detail = format!("{e:#}");
+                    cx.update(|cx| {
+                        update_status(cx, |status| {
+                            status.phase = if report_failure {
+                                UpdatePhase::Failed(UpdateFailure::Check(detail))
+                            } else {
+                                UpdatePhase::Idle
+                            };
+                        })
+                    });
+                    return;
+                }
+            };
 
         if !is_update_available(&version, current) {
             log::debug!("update check: up to date ({channel:?} {version}, running {current})");
@@ -1788,18 +1787,10 @@ struct GitHubError {
     message: String,
 }
 
-/// `nightly.json`, written by the nightly workflow. Only `version` is read
-/// today; the rest is there so a build can be traced back to its commit
-/// without cross-referencing the release notes.
+/// The version read from `nightly.json`, written by the nightly workflow.
 #[derive(Clone, Debug, serde::Deserialize)]
 struct NightlyManifest {
     version: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    commit: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    published_at: String,
 }
 
 /// The GitHub endpoint each channel reads.
@@ -1847,46 +1838,39 @@ fn version_from_assets(assets: &[GitHubAsset]) -> Option<String> {
         .map(|(_, version)| version)
 }
 
-/// Give gpui an HTTP client, so an `img` with a web URL can load.
-///
-/// Until this runs gpui holds a null client and every remote image quietly
-/// fails. The only remote images tty7 draws are the GitHub-hosted ones in an
-/// issue's text (see `core::github::markdown`). Built with the update check's
-/// user agent and proxy; a proxy changed later applies from the next launch.
-pub(crate) fn install_image_client(cx: &mut App) {
-    let manual_proxy = cx.global::<Config>().http_proxy.clone();
-    match build_http_client(manual_proxy.as_deref()) {
-        Ok(client) => cx.set_http_client(std::sync::Arc::new(client)),
-        Err(err) => log::warn!("no HTTP client for images: {err:#}"),
-    }
-}
-
-fn build_http_client(manual_proxy: Option<&str>) -> Result<ReqwestClient> {
+fn build_http_client(manual_proxy: Option<&str>) -> Result<reqwest::blocking::Client> {
     let user_agent = concat!("tty7/", env!("CARGO_PKG_VERSION"));
+    let mut builder = reqwest::blocking::Client::builder()
+        .user_agent(user_agent)
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(CHECK_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::limited(100))
+        .tcp_keepalive(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(30))
+        .http2_keep_alive_interval(Duration::from_secs(15))
+        .http2_keep_alive_timeout(Duration::from_secs(10))
+        .http2_keep_alive_while_idle(true);
     // Normalise through the same helper the downloader uses, so a bare
     // `127.0.0.1:7890` proxies the check as well as the download.
     if let Some(proxy) = manual_proxy
         .and_then(tty7_core::daemon::install::proxy::normalize_manual)
-        .and_then(|url| http_client::Url::parse(&url).ok())
+        .and_then(|url| reqwest::Proxy::all(url).ok())
     {
-        ReqwestClient::proxy_and_user_agent(Some(proxy), user_agent).context("building HTTP client")
-    } else {
-        ReqwestClient::user_agent(user_agent).context("building HTTP client")
+        builder = builder.proxy(proxy.no_proxy(reqwest::NoProxy::from_env()));
     }
+    builder.build().context("building HTTP client")
 }
 
-async fn fetch_json<T: serde::de::DeserializeOwned>(
-    client: &ReqwestClient,
+fn fetch_json<T: serde::de::DeserializeOwned>(
+    client: &reqwest::blocking::Client,
     url: &str,
 ) -> Result<T> {
-    let request = http_client::Request::get(url)
+    let mut response = client
+        .get(url)
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
-        .follow_redirects(RedirectPolicy::FollowAll)
-        .body(AsyncBody::default())
-        .context("building request")?;
-
-    let mut response = client.send(request).await.context("sending the request")?;
+        .send()
+        .context("sending the request")?;
 
     if !response.status().is_success() {
         let status = response.status().as_u16();
@@ -1901,11 +1885,7 @@ async fn fetch_json<T: serde::de::DeserializeOwned>(
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
         let mut body = Vec::new();
-        let _ = response
-            .body_mut()
-            .take(8 * 1024)
-            .read_to_end(&mut body)
-            .await;
+        let _ = response.take(8 * 1024).read_to_end(&mut body);
         anyhow::bail!(github_http_error(
             status,
             rate_remaining.as_deref(),
@@ -1917,9 +1897,7 @@ async fn fetch_json<T: serde::de::DeserializeOwned>(
 
     let mut body = Vec::new();
     response
-        .body_mut()
         .read_to_end(&mut body)
-        .await
         .context("reading response body")?;
 
     serde_json::from_slice(&body).context("parsing JSON")
@@ -1975,40 +1953,36 @@ fn sanitize_github_message(message: &str) -> String {
 
 /// Returns the release together with the version it advertises, which is not
 /// always something the release object states outright — see `resolve_version`.
-async fn fetch_latest_release(
+fn fetch_latest_release(
     channel: UpdateChannel,
     manual_proxy: Option<String>,
 ) -> Result<(LatestRelease, String)> {
     let client = build_http_client(manual_proxy.as_deref())?;
-    let mut release: LatestRelease = fetch_json(&client, &release_endpoint(channel))
-        .await
-        .context("requesting the release")?;
+    let mut release: LatestRelease =
+        fetch_json(&client, &release_endpoint(channel)).context("requesting the release")?;
     if channel == UpdateChannel::Stable && !release.is_stable_desktop() {
         // Mobile releases share this repository and can accidentally be marked
         // latest when published. Walk past those (and drafts/nightlies), rather
         // than trying to install a phone app or stranding the desktop updater.
-        release = find_stable_desktop_release(async |page| {
+        release = find_stable_desktop_release(|page| {
             fetch_json(
                 &client,
                 &format!("https://api.github.com/repos/{REPO}/releases?per_page=100&page={page}"),
             )
-            .await
             .context("requesting desktop releases")
-        })
-        .await?;
+        })?;
     }
     let version = resolve_version(&client, &release)
-        .await
         .with_context(|| format!("release {} advertises no usable version", release.tag_name))?;
     Ok((release, version))
 }
 
-async fn find_stable_desktop_release(
-    mut fetch_page: impl AsyncFnMut(usize) -> Result<Vec<LatestRelease>>,
+fn find_stable_desktop_release(
+    mut fetch_page: impl FnMut(usize) -> Result<Vec<LatestRelease>>,
 ) -> Result<LatestRelease> {
     let mut page = 1;
     loop {
-        let releases = fetch_page(page).await?;
+        let releases = fetch_page(page)?;
         let last_page = releases.len() < 100;
         if let Some(desktop) = releases.into_iter().find(LatestRelease::is_stable_desktop) {
             return Ok(desktop);
@@ -2028,7 +2002,7 @@ async fn find_stable_desktop_release(
 /// The fall back to asset names covers the two cases where the manifest is
 /// absent — a nightly published before it existed, and a night where writing it
 /// failed — because neither is a reason to strand the whole channel.
-async fn resolve_version(client: &ReqwestClient, release: &LatestRelease) -> Option<String> {
+fn resolve_version(client: &reqwest::blocking::Client, release: &LatestRelease) -> Option<String> {
     if parse_version(&release.tag_name).is_some() {
         return Some(release.tag_name.trim_start_matches('v').to_string());
     }
@@ -2037,7 +2011,7 @@ async fn resolve_version(client: &ReqwestClient, release: &LatestRelease) -> Opt
         .iter()
         .find(|asset| asset.name == NIGHTLY_MANIFEST)
     {
-        match fetch_json::<NightlyManifest>(client, &asset.browser_download_url).await {
+        match fetch_json::<NightlyManifest>(client, &asset.browser_download_url) {
             Ok(manifest) if parse_version(&manifest.version).is_some() => {
                 return Some(manifest.version);
             }
@@ -2249,7 +2223,8 @@ fn prepare_update(
     // Runs off the main thread, so the `Config` global is out of reach.
     let cfg = Config::load();
     let fetcher =
-        tty7_core::daemon::install::download::HttpsFetcher::new(cfg.http_proxy.as_deref());
+        tty7_core::daemon::install::download::HttpsFetcher::new(cfg.http_proxy.as_deref())
+            .context("building download client")?;
     // Fetched without progress: a few hundred bytes next to a 30 MB package.
     let checksums = fetcher
         .get(&asset.checksums_url)
@@ -3041,7 +3016,7 @@ mod tests {
     #[test]
     fn stable_desktop_fallback_reads_past_a_page_of_mobile_releases() {
         let mut pages = Vec::new();
-        let release = smol::block_on(find_stable_desktop_release(async |page| {
+        let release = find_stable_desktop_release(|page| {
             pages.push(page);
             Ok(if page == 1 {
                 vec![
@@ -3061,7 +3036,7 @@ mod tests {
                     assets: vec![github_asset("tty7-26.9.4-macos-arm64.zip")],
                 }]
             })
-        }))
+        })
         .unwrap();
         assert_eq!(pages, [1, 2]);
         assert_eq!(release.tag_name, "v26.9.4");
@@ -3069,16 +3044,15 @@ mod tests {
 
     #[test]
     fn stable_desktop_fallback_stops_at_the_end_and_propagates_errors() {
-        let absent = smol::block_on(find_stable_desktop_release(async |_| Ok(vec![])));
+        let absent = find_stable_desktop_release(|_| Ok(vec![]));
         assert!(
             absent
                 .unwrap_err()
                 .to_string()
                 .contains("no stable desktop release")
         );
-        let failure = smol::block_on(find_stable_desktop_release(async |_| {
-            anyhow::bail!("GitHub API rate limit exceeded")
-        }));
+        let failure =
+            find_stable_desktop_release(|_| anyhow::bail!("GitHub API rate limit exceeded"));
         assert!(
             failure
                 .unwrap_err()
@@ -3333,7 +3307,7 @@ mod tests {
         let finished = root.path().join(".tty7-update-backup-done");
         std::fs::create_dir(&finished).unwrap();
         // Neither a user's directory nor a stray file may be touched.
-        std::fs::create_dir(root.path().join("completions")).unwrap();
+        std::fs::create_dir(root.path().join("user-data")).unwrap();
         std::fs::write(root.path().join(".tty7-update-backup-not-a-dir"), b"file").unwrap();
 
         let (got_interrupted, got_finished) = scan_portable_backups(root.path());
@@ -3547,11 +3521,10 @@ mod tests {
         );
     }
 
-    /// Pins the contract between `nightly.yml`'s manifest step and this side of
-    /// it. Renaming a field in the workflow silently drops Nightly back to
-    /// guessing versions out of filenames; this fails instead.
+    /// Reads the published version from the nightly manifest instead of
+    /// guessing it from package filenames.
     #[test]
-    fn nightly_manifest_matches_what_the_workflow_writes() {
+    fn nightly_manifest_reads_the_published_version() {
         let manifest: NightlyManifest = serde_json::from_str(
             r#"{
                 "version": "26.8.2-nightly.20260807",
@@ -3568,7 +3541,7 @@ mod tests {
         let minimal: NightlyManifest =
             serde_json::from_str(r#"{"version": "26.8.2-nightly.20260807"}"#)
                 .expect("version alone is enough");
-        assert_eq!(minimal.commit, "");
+        assert_eq!(minimal.version, manifest.version);
     }
 
     #[test]

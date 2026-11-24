@@ -211,13 +211,15 @@ impl GssapiAuthenticator for GssapiClient {
 
     async fn gssapi_step(
         &mut self,
-        selected_mechanism: Vec<u8>,
+        selected_mechanism: Option<Vec<u8>>,
         input_token: Option<Vec<u8>>,
         mic_data: Vec<u8>,
     ) -> Result<GssapiStep, Self::Error> {
         use libgssapi::context::SecurityContext;
 
-        if input_token.is_none() && selected_mechanism != KRB5_DER_OID {
+        if let Some(mechanism) = selected_mechanism
+            && mechanism != KRB5_DER_OID
+        {
             return Err(GssapiAuthError::Other(
                 "server selected an unsupported gssapi mechanism".to_string(),
             ));
@@ -1207,11 +1209,6 @@ mod tests {
 
     /// A broker standing in for the window: it records the kind of every
     /// prompt that reaches it and answers each from a script, at once.
-    ///
-    /// Answering from inside the emit closure works for the same reason
-    /// `declining_broker` does — `PromptBroker::prompt` files the waiting
-    /// sender before it emits — and it keeps these tests off the two-minute
-    /// prompt timeout.
     fn scripted_broker(script: Vec<AuthResponse>) -> (Arc<Mutex<Vec<String>>>, Arc<PromptBroker>) {
         let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let script = Arc::new(Mutex::new(std::collections::VecDeque::from(script)));

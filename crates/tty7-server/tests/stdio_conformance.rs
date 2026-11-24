@@ -72,26 +72,8 @@ fn stdio_host() -> (SharedHost, TempSandbox) {
 tty7_core::host_conformance_suite!(remote_stdio, stdio_host);
 
 #[test]
-fn the_whole_suite_ran_against_the_server() {
-    let names: Vec<&str> = tty7_core::host::conformance::CASES
-        .iter()
-        .map(|(n, _)| *n)
-        .collect();
-    assert!(
-        names.len() >= 52,
-        "the conformance suite shrank to {} cases: {names:?}",
-        names.len()
-    );
-}
-
-#[test]
 fn the_server_really_is_another_process() {
     let (host, sandbox) = stdio_host();
-    let marker = host.join(sandbox.path(), "written-over-the-wire.txt");
-    host.write_file(&marker, b"from the client").unwrap();
-
-    assert_eq!(std::fs::read(&marker).unwrap(), b"from the client");
-
     let from_here = sandbox.path().join("written-locally.txt");
     std::fs::write(&from_here, b"from the test").unwrap();
     assert_eq!(

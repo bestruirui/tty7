@@ -1005,7 +1005,7 @@ impl Tty7App {
                             .text_color(tk.k45),
                     )
                     .tooltip(|window, cx| {
-                        gpui_component::tooltip::Tooltip::new(t(L10nKey::Close)).build(window, cx)
+                        gpui::component::tooltip::Tooltip::new(t(L10nKey::Close)).build(window, cx)
                     })
                     .on_click(
                         cx.listener(|this, _, window, cx| this.close_settings_checked(window, cx)),
@@ -1311,7 +1311,7 @@ impl Tty7App {
         cx: &mut Context<Self>,
     ) {
         let key = ev.keystroke.key.as_str();
-        if key == "f" && ev.keystroke.modifiers.secondary() && !ev.keystroke.modifiers.shift {
+        if key == "f" && ev.keystroke.modifiers.secondary(cx) && !ev.keystroke.modifiers.shift {
             if let Some(s) = self.active_settings() {
                 let handle = s.search.read(cx).focus_handle(cx);
                 window.focus(&handle, cx);

@@ -1,39 +1,15 @@
-//! Everything tty7 knows about git, split by question:
-//!
-//! - this file — how a `git` process is *run* (and its output re-assembled)
-//! - [`status`] — what the working tree looks like right now
-//! - [`diff`] — what a particular patch looks like
-//! - [`log`] — what the history looks like, and how to lay it out in lanes
-//! - [`ops`] — how to *change* the repository
-//!
-//! Nothing here depends on gpui: the headless `tty7-server` answers the same
-//! questions for a remote workspace that `LocalHost` answers for this machine,
-//! and the conformance suite holds the two to the same behaviour.
-pub mod diff;
 pub mod head;
-pub mod log;
-pub mod ops;
-pub mod status;
 
-use std::io::{self, Read as _};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::host::{Host, Output};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct GitStatus {
-    pub branch: String,
-    pub added: u32,
-    pub removed: u32,
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RepoSnapshot {
     pub root: PathBuf,
     pub home: PathBuf,
-    pub branch: String,
-    pub counts: Option<(u32, u32)>,
 }
 
 /// What asking a directory "which repository are you in" came back with.
@@ -58,31 +34,18 @@ pub enum RepoProbe {
 const GIT_FATAL: i32 = 128;
 
 pub fn probe_repo(host: &dyn Host, cwd: &Path) -> RepoProbe {
-    let (root, home, branch) = match host.repo_head(cwd) {
+    let (root, home) = match host.repo_head(cwd) {
         Some(None) => return RepoProbe::NotARepo,
         Some(Some(head)) => (
             crate::core::path_spelling::spelling_on_buf(host.id(), &head.root),
             crate::core::path_spelling::spelling_on_buf(host.id(), &head.home),
-            head.branch,
         ),
         None => match locate(host, cwd) {
-            Ok((root, home)) => (root, home, None),
+            Ok(paths) => paths,
             Err(outcome) => return outcome,
         },
     };
-    // A branch the files could not spell plainly — a detached HEAD above all —
-    // is `git`'s to name, so it matches what the diff views print for it.
-    // `rev-parse` has already said this is a repository, so a branch that
-    // cannot be read is the probe failing, not the directory changing its mind.
-    let Some(branch) = branch.or_else(|| branch_name(host, cwd)) else {
-        return RepoProbe::Failed;
-    };
-    RepoProbe::Repo(RepoSnapshot {
-        home,
-        root,
-        branch,
-        counts: diff_numstat(host, cwd),
-    })
+    RepoProbe::Repo(RepoSnapshot { root, home })
 }
 
 /// Root and home of `cwd`'s repository, asked of `git` — for a host that
@@ -127,14 +90,6 @@ fn locate(host: &dyn Host, cwd: &Path) -> Result<(PathBuf, PathBuf), RepoProbe> 
     Ok((root, home))
 }
 
-/// [`probe_repo`] for a caller that only wants the snapshot.
-pub fn probe(host: &dyn Host, cwd: &Path) -> Option<RepoSnapshot> {
-    match probe_repo(host, cwd) {
-        RepoProbe::Repo(snap) => Some(snap),
-        RepoProbe::NotARepo | RepoProbe::Failed => None,
-    }
-}
-
 /// A path `git` just printed, in the spelling the rest of tty7 keys by.
 ///
 /// Git for Windows is MSYS2 and answers `rev-parse` with `C:/Users/…` whatever
@@ -174,61 +129,7 @@ pub(crate) fn repo_home(
     common
 }
 
-pub fn branch_name(host: &dyn Host, cwd: &Path) -> Option<String> {
-    if let Some(out) = git(host, cwd, &["symbolic-ref", "--quiet", "--short", "HEAD"]) {
-        let name = out.trim();
-        if !name.is_empty() {
-            return Some(name.to_string());
-        }
-    }
-    let sha = git(host, cwd, &["rev-parse", "--short", "HEAD"])?;
-    let sha = sha.trim();
-    (!sha.is_empty()).then(|| sha.to_string())
-}
-
-fn diff_numstat(host: &dyn Host, cwd: &Path) -> Option<(u32, u32)> {
-    let out = git(host, cwd, &["diff", "--numstat", "HEAD"])?;
-    let mut added = 0u32;
-    let mut removed = 0u32;
-    for line in out.lines() {
-        let mut fields = line.split('\t');
-        if let Some(n) = fields.next().and_then(|s| s.parse::<u32>().ok()) {
-            added += n;
-        }
-        if let Some(n) = fields.next().and_then(|s| s.parse::<u32>().ok()) {
-            removed += n;
-        }
-    }
-    Some((added, removed))
-}
-
-pub fn git(host: &dyn Host, cwd: &Path, args: &[&str]) -> Option<String> {
-    let out = host.git(cwd, args).ok()?;
-    if !out.success() {
-        return None;
-    }
-    String::from_utf8(out.stdout).ok()
-}
-
 pub fn git_output(cwd: &Path, args: &[&str]) -> io::Result<Output> {
-    git_output_with_env(cwd, args, &[])
-}
-
-/// `git_output` plus extra environment.
-///
-/// What `LocalHost` passes is the no-prompt set: git and ssh have to fail
-/// rather than block on a credential prompt nobody is watching. It goes on
-/// every call, not just `fetch`/`pull`/`push` — a read path never prompts, so
-/// carrying it there costs nothing, and a remote workspace only inherits it
-/// because the far side's `LocalHost` applies the same rule to a request that
-/// arrived over the wire with no "this one is a network op" bit on it.
-///
-/// A `None` value removes the variable instead of setting it.
-pub fn git_output_with_env(
-    cwd: &Path,
-    args: &[&str],
-    env: &[(&str, Option<&str>)],
-) -> io::Result<Output> {
     if !cwd.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -239,23 +140,12 @@ pub fn git_output_with_env(
     cmd.arg("-C")
         .arg(cwd)
         .args(args)
-        // Keeps `git status` from refreshing and writing back `.git/index`.
-        // Beyond the obvious (never dirty a repo just by looking at it), this is
-        // what stops the SCM panel's own probes from waking the `.git` watcher
-        // that schedules them — the read path is provably write-free. Do not
-        // drop it.
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    for (key, value) in env {
-        match value {
-            Some(v) => cmd.env(key, v),
-            None => cmd.env_remove(key),
-        };
-    }
     let out = crate::core::proc::hide_console(&mut cmd).output()?;
     Ok(Output {
         status: out.status.code(),
@@ -264,212 +154,6 @@ pub fn git_output_with_env(
     })
 }
 
-pub fn git_stream(
-    cwd: &Path,
-    args: &[&str],
-    mut on_chunk: impl FnMut(&[u8]) -> bool,
-) -> io::Result<Option<i32>> {
-    if !cwd.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("git cwd does not exist: {}", cwd.display()),
-        ));
-    }
-    let mut cmd = Command::new("git");
-    cmd.arg("-C")
-        .arg(cwd)
-        .args(args)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = crate::core::proc::hide_console(&mut cmd).spawn()?;
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| io::Error::other("git stdout was not piped"))?;
-
-    let mut buf = vec![0u8; 64 * 1024];
-    let mut read_err = None;
-    loop {
-        match stdout.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                if !on_chunk(&buf[..n]) {
-                    break;
-                }
-            }
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => {
-                read_err = Some(e);
-                break;
-            }
-        }
-    }
-    drop(stdout);
-    let status = child.wait()?;
-    match read_err {
-        Some(e) => Err(e),
-        None => Ok(status.code()),
-    }
-}
-
-#[derive(Default)]
-pub struct LineSplitter {
-    tail: Vec<u8>,
-    dropped: usize,
-}
-
-pub const MAX_LINE: usize = 1024 * 1024;
-
-impl LineSplitter {
-    pub fn push(&mut self, chunk: &[u8], mut on_line: impl FnMut(&str)) {
-        let mut rest = chunk;
-        while let Some(nl) = rest.iter().position(|b| *b == b'\n') {
-            let (line, after) = rest.split_at(nl);
-            if self.tail.is_empty() && self.dropped == 0 && line.len() <= MAX_LINE {
-                on_line(&trim_cr(line));
-            } else {
-                self.keep(line);
-                let joined = std::mem::take(&mut self.tail);
-                let dropped = std::mem::take(&mut self.dropped);
-                emit(&joined, dropped, &mut on_line);
-            }
-            rest = &after[1..];
-        }
-        self.keep(rest);
-    }
-
-    pub fn finish(self, mut on_line: impl FnMut(&str)) {
-        if !self.tail.is_empty() || self.dropped > 0 {
-            emit(&self.tail, self.dropped, &mut on_line);
-        }
-    }
-
-    fn keep(&mut self, bytes: &[u8]) {
-        let room = MAX_LINE.saturating_sub(self.tail.len());
-        let take = room.min(bytes.len());
-        self.tail.extend_from_slice(&bytes[..take]);
-        self.dropped += bytes.len() - take;
-    }
-}
-
-/// Splits a byte stream on an arbitrary separator, handing out whole records.
-///
-/// [`LineSplitter`]'s sibling, for the two git formats that are *not* newline
-/// delimited: `--porcelain=v2 -z` (NUL) and `log --pretty` with an ASCII record
-/// separator. Records come out as `&[u8]` rather than `&str` because a path in
-/// a `-z` status is raw bytes and need not be UTF-8 at all — deciding what to
-/// do about that belongs to the parser, not to the splitter.
-pub struct RecordSplitter {
-    sep: u8,
-    tail: Vec<u8>,
-    /// The record being assembled overran [`MAX_RECORD`] and is now being
-    /// discarded up to its separator.
-    discarding: bool,
-    dropped: usize,
-}
-
-pub const MAX_RECORD: usize = 1024 * 1024;
-
-impl RecordSplitter {
-    pub fn new(sep: u8) -> RecordSplitter {
-        RecordSplitter {
-            sep,
-            tail: Vec::new(),
-            discarding: false,
-            dropped: 0,
-        }
-    }
-
-    pub fn push(&mut self, chunk: &[u8], mut on_record: impl FnMut(&[u8])) {
-        let mut rest = chunk;
-        while let Some(at) = rest.iter().position(|b| *b == self.sep) {
-            let (record, after) = rest.split_at(at);
-            // An overlong record is dropped whole, never delivered cut short:
-            // a truncated record still parses — a commit body cut mid-way
-            // reads as the real message — and a wrong record is worse than a
-            // missing one the caller is told about.
-            if self.discarding {
-                self.discarding = false;
-                self.dropped += 1;
-            } else if self.tail.is_empty() {
-                // The common case — a whole record inside one chunk — is
-                // borrowed straight from the input, no copy.
-                if record.len() <= MAX_RECORD {
-                    on_record(record);
-                } else {
-                    self.dropped += 1;
-                }
-            } else {
-                self.keep(record);
-                if self.discarding {
-                    self.discarding = false;
-                    self.dropped += 1;
-                } else {
-                    let joined = std::mem::take(&mut self.tail);
-                    on_record(&joined);
-                }
-            }
-            rest = &after[1..];
-        }
-        self.keep(rest);
-    }
-
-    /// Emits a trailing record only if one was actually started — unlike
-    /// lines, well-formed `-z` output ends *with* a separator, so the common
-    /// case here is emitting nothing. Returns how many records were dropped
-    /// whole for overrunning [`MAX_RECORD`]; non-zero means the parse is
-    /// incomplete and the caller must not present it as the full answer.
-    #[must_use]
-    pub fn finish(mut self, mut on_record: impl FnMut(&[u8])) -> usize {
-        if self.discarding {
-            self.dropped += 1;
-        } else if !self.tail.is_empty() {
-            let joined = std::mem::take(&mut self.tail);
-            on_record(&joined);
-        }
-        self.dropped
-    }
-
-    fn keep(&mut self, bytes: &[u8]) {
-        if self.discarding {
-            return;
-        }
-        if self.tail.len() + bytes.len() > MAX_RECORD {
-            // Free what was buffered too — nobody will ever see this record.
-            self.tail.clear();
-            self.discarding = true;
-            return;
-        }
-        self.tail.extend_from_slice(bytes);
-    }
-}
-
-fn emit(line: &[u8], dropped: usize, on_line: &mut impl FnMut(&str)) {
-    if dropped == 0 {
-        on_line(&trim_cr(line));
-        return;
-    }
-    let mut text = String::from_utf8_lossy(line).into_owned();
-    text.push_str(&format!(
-        " …[{dropped} more bytes on this line dropped: past tty7's {MAX_LINE}-byte line cap]"
-    ));
-    on_line(&text);
-}
-
-fn trim_cr(line: &[u8]) -> std::borrow::Cow<'_, str> {
-    let line = match line.last() {
-        Some(b'\r') => &line[..line.len() - 1],
-        _ => line,
-    };
-    String::from_utf8_lossy(line)
-}
-
-/// What [`status`], [`diff`], [`log`] and [`ops`] all need to drive a scratch
-/// repository the same way. One copy here rather than four that drift.
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::path::Path;
@@ -499,14 +183,6 @@ pub(crate) mod test_support {
     ];
 
     /// The same settings, written into `<repo>/.git/config`.
-    ///
-    /// [`PINS`] only reaches the commands the *test* runs. The code under test
-    /// runs its own git — `run_op`'s `checkout --`, `probe_status`,
-    /// `probe_diff` — with no overrides at all, and rightly so: it must obey
-    /// the repository the user actually has. So the line-ending rules have to
-    /// live in the repository, where every git that opens it will read them,
-    /// and repository config outranks the system config that put
-    /// `core.autocrlf=true` there.
     ///
     /// Call this straight after `git init`, before anything is written or
     /// checked out, so no blob is ever created under the other rules.
@@ -600,186 +276,9 @@ mod tests {
     }
 
     #[test]
-    fn line_splitter_rejoins_across_chunks() {
-        let mut split = LineSplitter::default();
-        let mut got = Vec::new();
-        split.push(b"alpha\nbe", |l| got.push(l.to_string()));
-        assert_eq!(got, ["alpha"], "only the complete line so far");
-        split.push(b"ta\ngamma\n", |l| got.push(l.to_string()));
-        split.finish(|l| got.push(l.to_string()));
-        assert_eq!(got, ["alpha", "beta", "gamma"]);
-    }
-
-    #[test]
-    fn line_splitter_handles_crlf_and_a_missing_final_newline() {
-        let mut split = LineSplitter::default();
-        let mut got = Vec::new();
-        split.push(b"one\r\ntwo\r\nthree", |l| got.push(l.to_string()));
-        split.finish(|l| got.push(l.to_string()));
-        assert_eq!(got, ["one", "two", "three"]);
-    }
-
-    #[test]
-    fn line_splitter_replaces_invalid_utf8() {
-        let mut split = LineSplitter::default();
-        let mut got = Vec::new();
-        split.push(b"caf\xe9\n", |l| got.push(l.to_string()));
-        split.finish(|l| got.push(l.to_string()));
-        assert_eq!(got.len(), 1);
-        assert!(got[0].starts_with("caf"), "{:?}", got[0]);
-    }
-
-    #[test]
-    fn record_splitter_rejoins_across_chunks_and_emits_a_trailing_record() {
-        let mut split = RecordSplitter::new(0);
-        let mut got = Vec::new();
-        split.push(b"alpha\0be", |r| got.push(r.to_vec()));
-        assert_eq!(got, [b"alpha".to_vec()], "only the complete record so far");
-        split.push(b"ta\0gamma", |r| got.push(r.to_vec()));
-        // Well-formed `-z` output ends with a separator; a trailing record
-        // without one still comes out at `finish`.
-        assert_eq!(split.finish(|r| got.push(r.to_vec())), 0);
-        assert_eq!(
-            got,
-            [b"alpha".to_vec(), b"beta".to_vec(), b"gamma".to_vec()]
-        );
-    }
-
-    /// An overlong record is dropped whole and *counted* — delivered cut
-    /// short it would still parse, and a commit body cut mid-way reads as the
-    /// real message.
-    #[test]
-    fn record_splitter_drops_an_absurd_record_whole_and_says_so() {
-        let mut split = RecordSplitter::new(0);
-        let mut got = Vec::new();
-        let huge = vec![b'x'; MAX_RECORD + 5_000];
-        split.push(b"before\0", |r| got.push(r.to_vec()));
-        for piece in huge.chunks(64 * 1024) {
-            split.push(piece, |r| got.push(r.to_vec()));
-        }
-        split.push(b"\0after\0", |r| got.push(r.to_vec()));
-        let dropped = split.finish(|r| got.push(r.to_vec()));
-
-        assert_eq!(dropped, 1);
-        assert_eq!(
-            got,
-            [b"before".to_vec(), b"after".to_vec()],
-            "no truncated ghost between the two, and the next record survives"
-        );
-
-        // A single-chunk oversized record takes the borrow fast path and must
-        // be counted the same way.
-        let mut split = RecordSplitter::new(0);
-        let mut got: Vec<Vec<u8>> = Vec::new();
-        let mut one = vec![b'y'; MAX_RECORD + 1];
-        one.push(0);
-        one.extend_from_slice(b"tail\0");
-        split.push(&one, |r| got.push(r.to_vec()));
-        assert_eq!(split.finish(|r| got.push(r.to_vec())), 1);
-        assert_eq!(got, [b"tail".to_vec()]);
-    }
-
-    /// A stream that *ends* mid-way through an oversized record still reports
-    /// the drop.
-    #[test]
-    fn record_splitter_counts_a_truncated_trailing_record() {
-        let mut split = RecordSplitter::new(0);
-        let mut got: Vec<Vec<u8>> = Vec::new();
-        split.push(&vec![b'z'; MAX_RECORD + 1], |r| got.push(r.to_vec()));
-        assert_eq!(split.finish(|r| got.push(r.to_vec())), 1);
-        assert!(got.is_empty());
-    }
-
-    #[test]
-    fn line_splitter_caps_one_absurd_line() {
-        let mut split = LineSplitter::default();
-        let mut got = Vec::new();
-        let huge = vec![b'x'; MAX_LINE + 5_000];
-        split.push(b"before\n", |l| got.push(l.to_string()));
-        for piece in huge.chunks(64 * 1024) {
-            split.push(piece, |l| got.push(l.to_string()));
-        }
-        split.push(b"\nafter\n", |l| got.push(l.to_string()));
-        split.finish(|l| got.push(l.to_string()));
-
-        assert_eq!(
-            got.len(),
-            3,
-            "{:?}",
-            got.iter().map(|l| l.len()).collect::<Vec<_>>()
-        );
-        assert_eq!(got[0], "before");
-        assert_eq!(got[2], "after", "the next line is unaffected");
-        assert!(
-            got[1].starts_with(&"x".repeat(1000)),
-            "the kept prefix is the real content"
-        );
-        assert!(
-            got[1].contains("5000 more bytes"),
-            "the cut says how much went: {}",
-            &got[1][got[1].len() - 80..]
-        );
-        assert!(
-            got[1].len() < MAX_LINE + 200,
-            "nothing past the cap was retained"
-        );
-    }
-
-    #[test]
-    fn line_splitter_caps_a_final_unterminated_line() {
-        let mut split = LineSplitter::default();
-        let mut got = Vec::new();
-        split.push(&vec![b'y'; MAX_LINE + 7], |l| got.push(l.to_string()));
-        split.finish(|l| got.push(l.to_string()));
-        assert_eq!(got.len(), 1);
-        assert!(got[0].contains("7 more bytes"), "{}", got[0]);
-    }
-
-    #[test]
-    fn streaming_and_buffered_reads_agree() {
-        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let args = ["log", "--oneline", "-n", "40"];
-        let Ok(code) = git_stream(here, &args, |_| true) else {
-            return;
-        };
-        if code != Some(0) {
-            return;
-        }
-        let mut streamed = Vec::new();
-        let mut split = LineSplitter::default();
-        git_stream(here, &args, |chunk| {
-            split.push(chunk, |l| streamed.push(l.to_string()));
-            true
-        })
-        .unwrap();
-        split.finish(|l| streamed.push(l.to_string()));
-
-        let buffered = git_output(here, &args).unwrap();
-        let expected: Vec<String> = String::from_utf8_lossy(&buffered.stdout)
-            .lines()
-            .map(str::to_string)
-            .collect();
-        assert_eq!(streamed, expected);
-        assert!(!streamed.is_empty(), "this repo has commits");
-    }
-
-    #[test]
-    fn non_repo_is_none() {
-        let dir = std::env::temp_dir().join("tty7-git-status-not-a-repo-xyz");
-        let _ = std::fs::create_dir_all(&dir);
-        assert_eq!(probe(&*h(), &dir), None);
-    }
-
-    #[test]
-    fn missing_path_is_none() {
-        assert_eq!(probe(&*h(), Path::new("/no/such/tty7/path/here")), None);
-    }
-
-    #[test]
-    fn own_repo_has_a_branch_and_root() {
+    fn own_repo_has_a_root() {
         let here = env!("CARGO_MANIFEST_DIR");
-        if let Some(snap) = probe(&*h(), Path::new(here)) {
-            assert!(!snap.branch.is_empty());
+        if let RepoProbe::Repo(snap) = probe_repo(&*h(), Path::new(here)) {
             assert!(Path::new(here).starts_with(&snap.root));
         }
     }
@@ -830,7 +329,7 @@ mod tests {
     /// Not gated to any platform, deliberately. Git for Windows is MSYS2 and
     /// prints `C:/Users/…`; `Host::canonicalize` used to answer `\\?\C:\Users\
     /// …`; those are different `Prefix` components, so the two never matched
-    /// and every SCM cache keyed by one missed the other. Nothing compared
+    /// and repository caches keyed by one missed the other. Nothing compared
     /// them on Windows, which is exactly why nobody noticed — a `#[cfg(unix)]`
     /// on this would put it straight back.
     #[test]
@@ -840,7 +339,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        let made = git(&*host, &dir, &["init", "--quiet"]).is_some();
+        let made = host
+            .git(&dir, &["init", "--quiet"])
+            .is_ok_and(|out| out.success());
         if !made {
             let _ = std::fs::remove_dir_all(&dir);
             return; // no git on this machine
@@ -849,14 +350,19 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "one\n").unwrap();
         let mut commit = super::test_support::PINS.to_vec();
         commit.extend_from_slice(&["commit", "--quiet", "-m", "base"]);
-        assert!(git(&*host, &dir, &["add", "-A"]).is_some());
-        assert!(git(&*host, &dir, &commit).is_some());
+        assert!(
+            host.git(&dir, &["add", "-A"])
+                .is_ok_and(|out| out.success())
+        );
+        assert!(host.git(&dir, &commit).is_ok_and(|out| out.success()));
 
         // The one directory, under the two names this process can learn it by:
         // what the OS handed back, and what resolving it answers.
         let canonical = host.canonicalize(&dir).expect("the scratch dir resolves");
 
-        let snap = probe(&*host, &dir).expect("a repository was just created here");
+        let RepoProbe::Repo(snap) = probe_repo(&*host, &dir) else {
+            panic!("a repository was just created here");
+        };
         assert_eq!(
             snap.root, canonical,
             "the probed root and the resolved directory are one key"
@@ -865,24 +371,10 @@ mod tests {
 
         // Asking from the resolved spelling has to reach the same answer, or
         // a pane whose cwd arrived that way lands in a second repository.
-        let from_canonical =
-            probe(&*host, &canonical).expect("the same repository, asked from its other name");
-        assert_eq!(from_canonical.root, snap.root);
-
-        // The other two probes answer the same question and must not disagree
-        // with it: `probe_status` keys `ScmData`, `probe_diff` keys the diff
-        // overlay, and a disagreement between any two of them is a re-probe
-        // that never settles.
-        let status = match super::status::probe_status(&*host, &dir) {
-            super::status::StatusProbe::Status(status) => *status,
-            other => panic!("expected a repository, got {other:?}"),
+        let RepoProbe::Repo(from_canonical) = probe_repo(&*host, &canonical) else {
+            panic!("the same repository, asked from its other name");
         };
-        assert_eq!(status.root, snap.root, "probe_status agrees with probe");
-        assert_eq!(status.home, snap.home);
-
-        let diff = super::diff::probe_diff(&*host, &dir, &Default::default())
-            .expect("an empty repository still has a diff");
-        assert_eq!(diff.root, snap.root, "probe_diff agrees with probe");
+        assert_eq!(from_canonical.root, snap.root);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

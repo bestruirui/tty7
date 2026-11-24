@@ -3,20 +3,19 @@ use std::io::{self, Read, Write};
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use crate::core::machine::{self, Attachment, MachineStore};
 use crate::daemon::control::{
     CONTROL_VERSION, ControlClientMsg, ControlEvent, ControlHello, ControlHelloOk, ControlReply,
-    ControlRequest, ControlServerMsg, GIT_STREAM_CHUNK, GIT_STREAM_CHUNK_MAX, LinkShutdown,
-    MAX_CONCURRENT_GIT_STREAMS, PaneAgentState, ReplyOk, ServerStatus, WATCH_BURST_CAP, WireError,
-    WireErrorKind, WorkspaceId, feature, server_started,
+    ControlRequest, ControlServerMsg, LinkShutdown, PaneAgentState, ReplyOk, ServerStatus,
+    WireError, WireErrorKind, WorkspaceId, feature, server_started,
 };
 use crate::daemon::duplex::{Duplex, Halves};
 use crate::daemon::protocol::PaneInfo;
-use crate::host::{Host, SearchHit, SharedHost, WatchSub};
+use crate::host::{Host, SharedHost};
 
 pub const MAX_WORKERS: usize = 64;
 
@@ -243,20 +242,6 @@ pub fn serve_with<D: Duplex>(link: D, host: SharedHost, services: Services) -> i
     serve_halves_with(read, write, shutdown, host, services, label)
 }
 
-pub fn serve_halves<R, W>(
-    r: R,
-    w: W,
-    shutdown: Arc<dyn LinkShutdown>,
-    host: SharedHost,
-    label: &'static str,
-) -> io::Result<()>
-where
-    R: Read,
-    W: Write + Send + 'static,
-{
-    serve_halves_with(r, w, shutdown, host, Services::none(), label)
-}
-
 pub fn serve_halves_with<R, W>(
     mut r: R,
     w: W,
@@ -294,10 +279,6 @@ where
         host,
         sink: Arc::clone(&sink),
         inflight: Mutex::new(HashMap::new()),
-        watches: Mutex::new(HashMap::new()),
-        deferred_watches: Mutex::new(HashMap::new()),
-        next_watch: AtomicU64::new(1),
-        git_streams: Arc::new(AtomicUsize::new(0)),
         pool: Pool::new(),
         machine: services.machine.clone(),
         machine_origin: machine_sub.as_ref().map(machine::Subscription::id),
@@ -329,10 +310,6 @@ where
     let outcome = read_loop(&mut r, &conn);
 
     conn.pool.close();
-    conn.watches
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
     conn.release_all_workspaces();
     // Every exit path converges here, including EOF and protocol errors.
     conn.attachments.unregister_gui(conn.id);
@@ -386,7 +363,6 @@ fn handshake<R: Read>(
         // Every host this server fronts can search its own files; the
         // request only needs a name so an older client's peer is never sent
         // it (see `RemoteHost::search_content`).
-        feature::CONTENT_SEARCH.to_string(),
     ];
     // Only where there are panes to ask about. A control peer serving no panes
     // would answer every ask with an empty list, which reads to a client as
@@ -558,36 +534,11 @@ fn run_job(conn: &Arc<Conn>, req_id: u64, req: ControlRequest, blob: Vec<u8>) {
     }
 
     let wants_blob = req.returns_blob();
-    let (reply, out_blob) = match run_request(conn, req_id, req, blob) {
+    let (reply, out_blob) = match run_request(conn, req, blob) {
         Ok((ok, bytes)) => (ControlReply::Ok(ok), bytes),
         Err(e) => (ControlReply::Err(WireError::from_io(&e)), Vec::new()),
     };
     conn.finish(req_id, reply, out_blob, wants_blob);
-}
-
-fn drop_unsendable_hits(hits: &mut Vec<SearchHit>) {
-    let before = hits.len();
-    hits.retain(|hit| hit.path.to_str().is_some());
-    if hits.len() != before {
-        log::debug!(
-            "search dropped {} hit(s) whose paths are not UTF-8",
-            before - hits.len()
-        );
-    }
-}
-
-/// [`drop_unsendable_hits`] for content hits: a path that is not UTF-8 cannot
-/// cross the JSON wire intact, and a hit the client cannot open is worse than
-/// one it never sees.
-fn drop_unsendable_content_hits(hits: &mut Vec<crate::host::ContentHit>) {
-    let before = hits.len();
-    hits.retain(|hit| hit.path.to_str().is_some());
-    if hits.len() != before {
-        log::debug!(
-            "content search dropped {} hit(s) whose paths are not UTF-8",
-            before - hits.len()
-        );
-    }
 }
 
 fn machine_with_live_panes(conn: &Conn) -> io::Result<machine::Machine> {
@@ -613,7 +564,6 @@ fn machine_with_live_panes(conn: &Conn) -> io::Result<machine::Machine> {
 
 fn run_request(
     conn: &Arc<Conn>,
-    req_id: u64,
     req: ControlRequest,
     blob: Vec<u8>,
 ) -> io::Result<(ReplyOk, Vec<u8>)> {
@@ -623,9 +573,8 @@ fn run_request(
     Ok(match req {
         ControlRequest::Ping => (ReplyOk::Pong, Vec::new()),
 
-        ControlRequest::ReadDir { dir, root } => {
-            let root = root.map(|r| p(&r));
-            let entries = h.read_dir(&p(&dir), root.as_deref())?;
+        ControlRequest::ReadDir { dir } => {
+            let entries = h.read_dir(&p(&dir))?;
             (ReplyOk::Entries(entries), Vec::new())
         }
         ControlRequest::Stat { path } => (ReplyOk::Meta(h.stat(&p(&path))?), Vec::new()),
@@ -643,89 +592,22 @@ fn run_request(
             let meta = h.stat(&path)?;
             (ReplyOk::FileMeta { meta }, bytes)
         }
-        ControlRequest::Search {
-            roots,
-            query,
-            limit,
-            max_dirs,
-            show_hidden,
-        } => {
-            let roots: Vec<PathBuf> = roots.iter().map(|r| p(r)).collect();
-            let mut hits = h.search(
-                &roots,
-                &query,
-                clamp_usize(limit),
-                clamp_usize(max_dirs),
-                show_hidden,
-            )?;
-            drop_unsendable_hits(&mut hits);
-            (ReplyOk::Hits(hits), Vec::new())
-        }
-        ControlRequest::SearchContent {
-            roots,
-            query,
-            limits,
-        } => {
-            let roots: Vec<PathBuf> = roots.iter().map(|r| p(r)).collect();
-            let mut found = h.search_content(&roots, &query, &limits)?;
-            drop_unsendable_content_hits(&mut found.hits);
-            (ReplyOk::ContentHits(found), Vec::new())
-        }
-
         ControlRequest::WriteFile { path } => {
             (ReplyOk::Meta(h.write_file(&p(&path), &blob)?), Vec::new())
         }
-        ControlRequest::CreateFileNew { path } => {
-            h.create_file_new(&p(&path))?;
-            (ReplyOk::Unit, Vec::new())
-        }
         ControlRequest::CreateDir { path, recursive } => {
             h.create_dir(&p(&path), recursive)?;
-            (ReplyOk::Unit, Vec::new())
-        }
-        ControlRequest::Rename { from, to } => {
-            h.rename(&p(&from), &p(&to))?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::Remove { path, recursive } => {
             h.remove(&p(&path), recursive)?;
             (ReplyOk::Unit, Vec::new())
         }
-
-        ControlRequest::RepoRoot { path } => {
-            let root = h.repo_root(&p(&path))?;
-            (
-                ReplyOk::OptPath(root.map(|r| r.to_string_lossy().into_owned())),
-                Vec::new(),
-            )
-        }
         ControlRequest::Git { cwd, args } => {
             let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
             (ReplyOk::Output(h.git(&p(&cwd), &borrowed)?), Vec::new())
         }
-        ControlRequest::GitStream { id, cwd, args } => {
-            conn.start_git_stream(id, p(&cwd), args);
-            (ReplyOk::Unit, Vec::new())
-        }
-
         ControlRequest::Shells => (ReplyOk::Shells(h.shells()?), Vec::new()),
-        ControlRequest::AgentSessions { known_dirs } => (
-            ReplyOk::AgentSessions(h.agent_sessions(&paths(&known_dirs))?),
-            Vec::new(),
-        ),
-
-        ControlRequest::WatchOpen { dirs } => {
-            let id = conn.open_watch(req_id, &paths(&dirs))?;
-            (ReplyOk::WatchId(id), Vec::new())
-        }
-        ControlRequest::WatchSet { id, dirs } => {
-            conn.set_watch_dirs(id, &paths(&dirs))?;
-            (ReplyOk::Unit, Vec::new())
-        }
-        ControlRequest::WatchClose { id } => {
-            conn.close_watch(id);
-            (ReplyOk::Unit, Vec::new())
-        }
 
         ControlRequest::WorkspaceAttach { id } => (
             ReplyOk::Attached {
@@ -1019,10 +901,6 @@ fn control_endpoint_display() -> String {
     String::new()
 }
 
-fn paths(v: &[String]) -> Vec<PathBuf> {
-    v.iter().map(PathBuf::from).collect()
-}
-
 fn clamp_usize(v: u64) -> usize {
     usize::try_from(v).unwrap_or(usize::MAX)
 }
@@ -1031,10 +909,6 @@ struct Conn {
     host: SharedHost,
     sink: Arc<Sink>,
     inflight: Mutex<HashMap<u64, bool>>,
-    watches: Mutex<HashMap<u64, WatchSub>>,
-    deferred_watches: Mutex<HashMap<u64, (u64, smol::channel::Receiver<Vec<PathBuf>>)>>,
-    next_watch: AtomicU64,
-    git_streams: Arc<AtomicUsize>,
     pool: Pool,
     machine: Option<Arc<MachineStore>>,
     machine_origin: Option<machine::SubscriberId>,
@@ -1093,7 +967,6 @@ impl Conn {
             .unwrap_or(false);
         if cancelled {
             log::trace!("control request {req_id} was cancelled; dropping its reply");
-            self.start_deferred_watch(req_id, false);
             return;
         }
 
@@ -1106,7 +979,7 @@ impl Conn {
         } else {
             ControlServerMsg::Response { req_id, reply }
         };
-        let delivered = match msg.to_frame() {
+        match msg.to_frame() {
             Ok((k, payload)) => match self.sink.send_frame(k, &payload) {
                 Ok(()) => true,
                 Err(e) => {
@@ -1126,142 +999,6 @@ impl Conn {
                 false
             }
         };
-
-        self.start_deferred_watch(req_id, delivered);
-    }
-
-    fn open_watch(&self, req_id: u64, dirs: &[PathBuf]) -> io::Result<u64> {
-        let sub = self.host.watch(dirs)?;
-        let id = self.next_watch.fetch_add(1, Ordering::Relaxed);
-        let rx = sub.events().clone();
-        self.watches
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, sub);
-        self.deferred_watches
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(req_id, (id, rx));
-        Ok(id)
-    }
-
-    fn start_deferred_watch(&self, req_id: u64, deliver: bool) {
-        let parked = self
-            .deferred_watches
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&req_id);
-        let Some((id, rx)) = parked else {
-            return;
-        };
-        if !deliver {
-            self.watches
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&id);
-            return;
-        }
-        spawn_watch_forwarder(id, rx, Arc::clone(&self.sink));
-    }
-
-    fn start_git_stream(&self, id: u64, cwd: PathBuf, args: Vec<String>) {
-        let host = Arc::clone(&self.host);
-        let sink = Arc::clone(&self.sink);
-        let slot = StreamSlot(Arc::clone(&self.git_streams));
-        if slot.0.fetch_add(1, Ordering::AcqRel) >= MAX_CONCURRENT_GIT_STREAMS {
-            drop(slot);
-            let _ = self
-                .sink
-                .send(&ControlServerMsg::Event(ControlEvent::GitEnd {
-                    id,
-                    code: None,
-                    failed: true,
-                }));
-            return;
-        }
-        let spawned = std::thread::Builder::new()
-            .name("tty7-control-git-stream".into())
-            .spawn(move || {
-                let _slot = slot;
-                let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-                let mut batch: Vec<u8> = Vec::with_capacity(GIT_STREAM_CHUNK);
-                let mut stopped: Option<StreamStop> = None;
-                let flush = |batch: &mut Vec<u8>, stopped: &mut Option<StreamStop>| {
-                    if stopped.is_some() {
-                        batch.clear();
-                        return;
-                    }
-                    if batch.is_empty() {
-                        return;
-                    }
-                    let bytes = std::mem::take(batch);
-                    for piece in bytes.chunks(GIT_STREAM_CHUNK_MAX) {
-                        let event = ControlServerMsg::Event(ControlEvent::GitChunk {
-                            id,
-                            bytes: piece.to_vec(),
-                        });
-                        let Ok((kind, payload)) = event.to_frame() else {
-                            *stopped = Some(StreamStop::Unencodable);
-                            return;
-                        };
-                        if sink.send_frame(kind, &payload).is_err() {
-                            *stopped = Some(StreamStop::LinkGone);
-                            return;
-                        }
-                    }
-                };
-                let result = host.git_lines(&cwd, &borrowed, &mut |line| {
-                    if stopped.is_some() {
-                        return;
-                    }
-                    batch.extend_from_slice(line.as_bytes());
-                    batch.push(b'\n');
-                    if batch.len() >= GIT_STREAM_CHUNK {
-                        flush(&mut batch, &mut stopped);
-                    }
-                });
-                flush(&mut batch, &mut stopped);
-                if matches!(stopped, Some(StreamStop::LinkGone)) {
-                    return;
-                }
-                let (code, failed) = match (stopped, result) {
-                    (Some(StreamStop::Unencodable), _) => (None, true),
-                    (_, Ok(code)) => (code, false),
-                    (_, Err(_)) => (None, true),
-                };
-                let _ = sink.send(&ControlServerMsg::Event(ControlEvent::GitEnd {
-                    id,
-                    code,
-                    failed,
-                }));
-            });
-        if spawned.is_err() {
-            let _ = self
-                .sink
-                .send(&ControlServerMsg::Event(ControlEvent::GitEnd {
-                    id,
-                    code: None,
-                    failed: true,
-                }));
-        }
-    }
-
-    fn set_watch_dirs(&self, id: u64, dirs: &[PathBuf]) -> io::Result<()> {
-        let watches = self.watches.lock().unwrap_or_else(|e| e.into_inner());
-        let sub = watches.get(&id).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("no such watch subscription {id}"),
-            )
-        })?;
-        sub.set_dirs(dirs)
-    }
-
-    fn close_watch(&self, id: u64) {
-        self.watches
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&id);
     }
 }
 
@@ -1320,46 +1057,6 @@ fn spawn_layout_forwarder(
     if let Err(e) = spawned {
         log::warn!("could not start the layout forwarder: {e}");
     }
-}
-
-fn spawn_watch_forwarder(id: u64, rx: smol::channel::Receiver<Vec<PathBuf>>, sink: Arc<Sink>) {
-    let spawned = std::thread::Builder::new()
-        .name("tty7-control-watch".into())
-        .spawn(move || {
-            while let Ok(batch) = rx.recv_blocking() {
-                let event = if batch.len() > WATCH_BURST_CAP {
-                    ControlEvent::WatchOverflow { id }
-                } else {
-                    ControlEvent::Watch {
-                        id,
-                        paths: batch
-                            .iter()
-                            .map(|p| p.to_string_lossy().into_owned())
-                            .collect(),
-                    }
-                };
-                if sink.send(&ControlServerMsg::Event(event)).is_err() {
-                    return;
-                }
-            }
-        });
-    if let Err(e) = spawned {
-        log::warn!("could not start the watch forwarder for subscription {id}: {e}");
-    }
-}
-
-struct StreamSlot(Arc<AtomicUsize>);
-
-impl Drop for StreamSlot {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum StreamStop {
-    LinkGone,
-    Unencodable,
 }
 
 struct Sink {
@@ -2492,7 +2189,7 @@ mod gui_registry_tests {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::daemon::control::{ControlHello, MTime, feature};
+    use crate::daemon::control::{ControlHello, feature};
     use crate::host::local::LocalHost;
     use crate::host::remote::RemoteHost;
     use crate::host::{Entry, HostId, Meta, Output};
@@ -2626,11 +2323,8 @@ mod tests {
         fn separator(&self) -> char {
             self.inner.separator()
         }
-        fn is_absolute(&self, p: &Path) -> bool {
-            self.inner.is_absolute(p)
-        }
-        fn read_dir(&self, dir: &Path, root: Option<&Path>) -> io::Result<Vec<Entry>> {
-            self.inner.read_dir(dir, root)
+        fn read_dir(&self, dir: &Path) -> io::Result<Vec<Entry>> {
+            self.inner.read_dir(dir)
         }
         fn stat(&self, p: &Path) -> io::Result<Meta> {
             self.inner.stat(p)
@@ -2641,43 +2335,6 @@ mod tests {
         fn canonicalize(&self, p: &Path) -> io::Result<PathBuf> {
             self.inner.canonicalize(p)
         }
-        fn search(
-            &self,
-            roots: &[PathBuf],
-            query: &str,
-            limit: usize,
-            max_dirs: usize,
-            show_hidden: bool,
-        ) -> io::Result<Vec<SearchHit>> {
-            self.inner
-                .search(roots, query, limit, max_dirs, show_hidden)
-        }
-        fn search_content(
-            &self,
-            roots: &[PathBuf],
-            query: &crate::host::ContentQuery,
-            limits: &crate::host::ContentLimits,
-        ) -> io::Result<crate::host::ContentResults> {
-            self.inner.search_content(roots, query, limits)
-        }
-        fn write_file(&self, p: &Path, bytes: &[u8]) -> io::Result<Meta> {
-            self.inner.write_file(p, bytes)
-        }
-        fn create_file_new(&self, p: &Path) -> io::Result<()> {
-            self.inner.create_file_new(p)
-        }
-        fn create_dir(&self, p: &Path, recursive: bool) -> io::Result<()> {
-            self.inner.create_dir(p, recursive)
-        }
-        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-            self.inner.rename(from, to)
-        }
-        fn remove(&self, p: &Path, recursive: bool) -> io::Result<()> {
-            self.inner.remove(p, recursive)
-        }
-        fn repo_root(&self, p: &Path) -> io::Result<Option<PathBuf>> {
-            self.inner.repo_root(p)
-        }
         fn git(&self, _cwd: &Path, _args: &[&str]) -> io::Result<Output> {
             self.running.store(true, Ordering::SeqCst);
             std::thread::sleep(self.delay);
@@ -2687,11 +2344,20 @@ mod tests {
                 stderr: Vec::new(),
             })
         }
+        fn write_file(&self, p: &Path, bytes: &[u8]) -> io::Result<Meta> {
+            self.inner.write_file(p, bytes)
+        }
+
+        fn create_dir(&self, p: &Path, recursive: bool) -> io::Result<()> {
+            self.inner.create_dir(p, recursive)
+        }
+
+        fn remove(&self, p: &Path, recursive: bool) -> io::Result<()> {
+            self.inner.remove(p, recursive)
+        }
+
         fn shells(&self) -> io::Result<crate::host::ShellInventory> {
             self.inner.shells()
-        }
-        fn watch(&self, dirs: &[PathBuf]) -> io::Result<WatchSub> {
-            self.inner.watch(dirs)
         }
     }
 
@@ -2762,46 +2428,6 @@ mod tests {
     }
 
     #[test]
-    fn a_short_deadline_gives_up_on_a_slow_git() {
-        let p = pair_with(Arc::new(SlowGit {
-            inner: LocalHost::new(),
-            delay: Duration::from_millis(300),
-            running: Arc::new(AtomicBool::new(false)),
-        }));
-        let tmp = tempfile::TempDir::new().unwrap();
-
-        let err = p
-            .host
-            .git_with_deadline(tmp.path(), &["status"], Duration::from_millis(100))
-            .unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::TimedOut, "{err}");
-    }
-
-    #[test]
-    fn a_long_deadline_outlasts_the_one_a_git_request_would_get() {
-        let p = pair_with(Arc::new(SlowGit {
-            inner: LocalHost::new(),
-            delay: Duration::from_millis(300),
-            running: Arc::new(AtomicBool::new(false)),
-        }));
-        let tmp = tempfile::TempDir::new().unwrap();
-
-        // The first call abandons its request mid-flight. The server has no
-        // timer of its own — it runs the job to completion and answers into a
-        // slot nobody is waiting on — so the point of doing it twice is that
-        // the link is still usable afterwards. A `push` behind a cancelled
-        // probe depends on exactly that.
-        let _ = p
-            .host
-            .git_with_deadline(tmp.path(), &["status"], Duration::from_millis(100));
-        let out = p
-            .host
-            .git_with_deadline(tmp.path(), &["status"], Duration::from_secs(5))
-            .unwrap();
-        assert_eq!(out.stdout, b"slow");
-    }
-
-    #[test]
     fn replies_come_back_out_of_order() {
         let running = Arc::new(AtomicBool::new(false));
         let p = pair_with(Arc::new(SlowGit {
@@ -2847,7 +2473,6 @@ mod tests {
         assert_eq!(peer.separator, std::path::MAIN_SEPARATOR);
         assert!(peer.has_feature(feature::CONTROL));
         assert!(peer.has_feature(feature::HOST_RPC));
-        assert!(peer.has_feature(feature::CONTENT_SEARCH));
         assert!(
             !peer.home.is_empty(),
             "the server's $HOME backs `new workspace in ~`"
@@ -2979,66 +2604,6 @@ mod tests {
     }
 
     #[test]
-    fn error_kinds_survive_the_round_trip() {
-        let p = pair();
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path();
-
-        let cases: Vec<(io::ErrorKind, io::Error)> = vec![
-            (
-                io::ErrorKind::NotFound,
-                p.host.stat(&root.join("nope")).unwrap_err(),
-            ),
-            (io::ErrorKind::AlreadyExists, {
-                let f = root.join("taken.txt");
-                p.host.write_file(&f, b"x").unwrap();
-                p.host.create_file_new(&f).unwrap_err()
-            }),
-            (io::ErrorKind::FileTooLarge, {
-                let f = root.join("fat.txt");
-                p.host.write_file(&f, &vec![b'x'; 512]).unwrap();
-                p.host.read_file(&f, 16).unwrap_err()
-            }),
-            (io::ErrorKind::IsADirectory, {
-                let d = root.join("adir");
-                p.host.create_dir(&d, false).unwrap();
-                p.host.read_file(&d, 1024).unwrap_err()
-            }),
-            (io::ErrorKind::DirectoryNotEmpty, {
-                let d = root.join("full");
-                p.host.create_dir(&d, false).unwrap();
-                p.host.write_file(&d.join("f"), b"x").unwrap();
-                p.host.remove(&d, false).unwrap_err()
-            }),
-        ];
-        for (want, got) in cases {
-            assert_eq!(got.kind(), want, "{got}");
-            assert!(!got.to_string().is_empty());
-        }
-
-        for kind in [
-            WireErrorKind::NotFound,
-            WireErrorKind::PermissionDenied,
-            WireErrorKind::AlreadyExists,
-            WireErrorKind::InvalidInput,
-            WireErrorKind::NotADirectory,
-            WireErrorKind::IsADirectory,
-            WireErrorKind::DirectoryNotEmpty,
-            WireErrorKind::FileTooLarge,
-            WireErrorKind::TimedOut,
-            WireErrorKind::ConnectionReset,
-            WireErrorKind::Other,
-        ] {
-            let io_err = io::Error::new(kind.to_io_kind(), "x");
-            assert_eq!(
-                WireError::from_io(&io_err).kind,
-                kind,
-                "{kind:?} is not its own round trip"
-            );
-        }
-    }
-
-    #[test]
     fn a_failing_git_is_ok_across_the_wire() {
         let p = pair();
         let tmp = tempfile::TempDir::new().unwrap();
@@ -3107,177 +2672,6 @@ mod tests {
     }
 
     #[test]
-    fn watch_batches_reach_the_client() {
-        let p = pair();
-        let tmp = tempfile::TempDir::new().unwrap();
-        let sub = p.host.watch(&[tmp.path().to_path_buf()]).unwrap();
-        while sub.events().try_recv().is_ok() {}
-
-        let deadline = Instant::now() + Duration::from_secs(8);
-        let mut seen = false;
-        while Instant::now() < deadline && !seen {
-            std::fs::write(tmp.path().join("hello.txt"), b"x").unwrap();
-            std::thread::sleep(Duration::from_millis(200));
-            while let Ok(batch) = sub.events().try_recv() {
-                if batch
-                    .iter()
-                    .any(|q| q.file_name().is_some_and(|n| n == "hello.txt"))
-                {
-                    seen = true;
-                }
-            }
-        }
-        assert!(seen, "no watch event crossed the connection");
-    }
-
-    #[test]
-    fn a_watch_id_reaches_the_client_before_any_batch_for_it() {
-        let (mut client, _ok) = raw();
-        let tmp = tempfile::TempDir::new().unwrap();
-
-        ControlClientMsg::Request {
-            req_id: 1,
-            req: ControlRequest::WatchOpen {
-                dirs: vec![tmp.path().to_string_lossy().into_owned()],
-            },
-        }
-        .encode(&mut client)
-        .unwrap();
-        client.flush().unwrap();
-
-        let churn = tmp.path().to_path_buf();
-        let stop = Arc::new(AtomicBool::new(false));
-        let churning = Arc::clone(&stop);
-        let churner = std::thread::spawn(move || {
-            let mut n = 0u32;
-            while !churning.load(Ordering::SeqCst) {
-                let _ = std::fs::write(churn.join(format!("f{n}")), b"x");
-                n = n.wrapping_add(1);
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        });
-
-        let first = ControlServerMsg::read(&mut client).unwrap();
-        stop.store(true, Ordering::SeqCst);
-        churner.join().unwrap();
-
-        match first {
-            ControlServerMsg::Response {
-                req_id: 1,
-                reply: ControlReply::Ok(ReplyOk::WatchId(_)),
-            } => {}
-            other => panic!("a batch overtook the WatchId reply: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn closing_a_watch_releases_it_on_the_server() {
-        let (server, client) = UnixStream::pair().unwrap();
-        let host = LocalHost::new();
-        std::thread::spawn(move || {
-            let _ = serve(server, host);
-        });
-        let hello = ControlHello::host_rpc("t", "h");
-        let remote = RemoteHost::over_unix(client, "test:watch", &hello).unwrap();
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let sub = remote.watch(&[tmp.path().to_path_buf()]).unwrap();
-        let rx = sub.events().clone();
-        drop(sub);
-
-        std::thread::sleep(Duration::from_millis(300));
-        std::fs::write(tmp.path().join("after.txt"), b"x").unwrap();
-        std::thread::sleep(Duration::from_millis(800));
-        while let Ok(batch) = rx.try_recv() {
-            assert!(
-                !batch
-                    .iter()
-                    .any(|q| q.file_name().is_some_and(|n| n == "after.txt")),
-                "the server kept watching after the subscription closed"
-            );
-        }
-    }
-
-    #[test]
-    fn a_gitignore_edit_reaches_a_remote_listing() {
-        let p = pair();
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path().to_path_buf();
-        p.host
-            .write_file(&root.join(".gitignore"), b"*.log\n")
-            .unwrap();
-        p.host.write_file(&root.join("a.log"), b"").unwrap();
-
-        let listed = p.host.read_dir(&root, Some(&root)).unwrap();
-        assert!(
-            listed.iter().any(|e| e.name == "a.log" && e.ignored),
-            "the fixture should start out ignored"
-        );
-
-        let sub = p.host.watch(std::slice::from_ref(&root)).unwrap();
-
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut cleared = false;
-        while Instant::now() < deadline {
-            p.host
-                .write_file(&root.join(".gitignore"), b"# nothing\n")
-                .unwrap();
-            std::thread::sleep(Duration::from_millis(250));
-            while sub.events().try_recv().is_ok() {}
-            if p.host
-                .read_dir(&root, Some(&root))
-                .unwrap()
-                .iter()
-                .any(|e| e.name == "a.log" && !e.ignored)
-            {
-                cleared = true;
-                break;
-            }
-        }
-        assert!(
-            cleared,
-            "a `.gitignore` change on the server must reach the remote client's listing"
-        );
-    }
-
-    #[test]
-    fn a_write_answers_with_the_new_metadata() {
-        let (mut client, _) = raw();
-        let tmp = tempfile::TempDir::new().unwrap();
-        let f = tmp.path().join("w.txt");
-
-        ControlClientMsg::RequestBlob {
-            req_id: 1,
-            req: ControlRequest::WriteFile {
-                path: f.to_string_lossy().into_owned(),
-            },
-            blob: b"hello".to_vec(),
-        }
-        .encode(&mut client)
-        .unwrap();
-        client.flush().unwrap();
-
-        match ControlServerMsg::read(&mut client).unwrap() {
-            ControlServerMsg::Response {
-                reply: ControlReply::Ok(ReplyOk::Meta(m)),
-                ..
-            } => {
-                assert_eq!(m.len, 5);
-                assert!(
-                    m.mtime.is_some(),
-                    "the editor keys its echo detection on this"
-                );
-                let on_disk = std::fs::metadata(&f).unwrap();
-                assert_eq!(
-                    MTime::from_system_time(on_disk.modified().unwrap()),
-                    m.mtime.unwrap()
-                );
-            }
-            other => panic!("{other:?}"),
-        }
-    }
-
-    #[test]
     fn the_socket_path_honours_its_override() {
         let dir = tempfile::TempDir::new().unwrap();
         let sock = dir.path().join("explicit.sock");
@@ -3326,58 +2720,6 @@ mod tests {
             "bind left a window in which another user could connect"
         );
         drop(listener);
-    }
-
-    #[test]
-    fn a_filename_that_is_not_utf8_costs_only_its_own_hit() {
-        use std::ffi::OsStr;
-        use std::os::unix::ffi::OsStrExt as _;
-
-        let hit = |name: &str, path: &Path| SearchHit {
-            name: name.to_string(),
-            path: path.to_path_buf(),
-            is_dir: false,
-            ignored: false,
-        };
-        let mut hits = vec![
-            hit("plain-needle.rs", Path::new("/home/me/plain-needle.rs")),
-            hit(
-                "caf\u{fffd}-needle.rs",
-                Path::new(OsStr::from_bytes(b"/home/me/caf\xe9-needle.rs")),
-            ),
-            hit("other-needle.rs", Path::new("/home/me/other-needle.rs")),
-        ];
-
-        drop_unsendable_hits(&mut hits);
-        let names: Vec<&str> = hits.iter().map(|h| h.name.as_str()).collect();
-        assert_eq!(
-            names,
-            ["plain-needle.rs", "other-needle.rs"],
-            "the representable hits must survive their neighbour"
-        );
-    }
-
-    #[test]
-    fn a_socket_connection_serves_requests() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let sock = dir.path().join("s.sock");
-        let listener = bind_control_socket(&sock).unwrap();
-        std::thread::spawn(move || serve_listener(listener, LocalHost::new()));
-
-        let stream = UnixStream::connect(&sock).unwrap();
-        let hello = ControlHello::host_rpc("t", "h");
-        let host = RemoteHost::over_unix(stream, "test:sock", &hello).unwrap();
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        host.write_file(&tmp.path().join("x.txt"), b"content")
-            .unwrap();
-        assert_eq!(
-            host.read_file(&tmp.path().join("x.txt"), 1024).unwrap(),
-            b"content"
-        );
-        let entries = host.read_dir(tmp.path(), None).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "x.txt");
     }
 
     #[test]
@@ -3486,107 +2828,6 @@ mod tests {
                 Err(_) => std::thread::sleep(Duration::from_millis(20)),
             }
         }
-    }
-
-    #[test]
-    fn a_stream_slot_comes_back_however_it_leaves() {
-        let count = Arc::new(AtomicUsize::new(0));
-
-        {
-            let slot = StreamSlot(Arc::clone(&count));
-            slot.0.fetch_add(1, Ordering::AcqRel);
-            assert_eq!(count.load(Ordering::Acquire), 1);
-        }
-        assert_eq!(count.load(Ordering::Acquire), 0, "released on drop");
-
-        let refused = StreamSlot(Arc::clone(&count));
-        refused.0.fetch_add(1, Ordering::AcqRel);
-        drop(refused);
-        assert_eq!(count.load(Ordering::Acquire), 0);
-
-        let panicking = Arc::clone(&count);
-        let _ = std::thread::spawn(move || {
-            let slot = StreamSlot(panicking);
-            slot.0.fetch_add(1, Ordering::AcqRel);
-            panic!("the read blew up");
-        })
-        .join();
-        assert_eq!(
-            count.load(Ordering::Acquire),
-            0,
-            "a panicking stream must not take its slot with it"
-        );
-    }
-
-    #[test]
-    fn git_stream_delivers_the_same_lines_as_the_buffered_read() {
-        let (mut client, _hello) = raw();
-        let here = env!("CARGO_MANIFEST_DIR");
-        let args: Vec<String> = ["log", "--oneline", "-n", "30"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        let buffered = match ask(
-            &mut client,
-            1,
-            ControlRequest::Git {
-                cwd: here.to_string(),
-                args: args.clone(),
-            },
-        ) {
-            ControlReply::Ok(ReplyOk::Output(o)) => o,
-            other => panic!("expected output, got {other:?}"),
-        };
-        if buffered.status != Some(0) {
-            return;
-        }
-        let expected: Vec<String> = String::from_utf8_lossy(&buffered.stdout)
-            .lines()
-            .map(str::to_string)
-            .collect();
-
-        ControlClientMsg::Request {
-            req_id: 2,
-            req: ControlRequest::GitStream {
-                id: 77,
-                cwd: here.to_string(),
-                args,
-            },
-        }
-        .encode(&mut client)
-        .unwrap();
-        client.flush().unwrap();
-
-        let mut split = crate::core::git::LineSplitter::default();
-        let mut got: Vec<String> = Vec::new();
-        let mut accepted = false;
-        let code = loop {
-            match ControlServerMsg::read(&mut client).unwrap() {
-                ControlServerMsg::Response { req_id: 2, reply } => {
-                    assert!(
-                        matches!(reply, ControlReply::Ok(ReplyOk::Unit)),
-                        "{reply:?}"
-                    );
-                    accepted = true;
-                }
-                ControlServerMsg::Event(ControlEvent::GitChunk { id, bytes }) => {
-                    assert_eq!(id, 77, "chunks carry the id the client chose");
-                    split.push(&bytes, |l| got.push(l.to_string()));
-                }
-                ControlServerMsg::Event(ControlEvent::GitEnd { id, code, failed }) => {
-                    assert_eq!(id, 77);
-                    assert!(!failed, "git ran");
-                    break code;
-                }
-                other => panic!("unexpected {other:?}"),
-            }
-        };
-        split.finish(|l| got.push(l.to_string()));
-        assert!(accepted, "the request was answered");
-        assert_eq!(code, Some(0));
-        assert_eq!(got, expected, "streamed lines match the buffered read");
-        assert!(!got.is_empty(), "this repo has commits");
     }
 
     fn ask(client: &mut UnixStream, req_id: u64, req: ControlRequest) -> ControlReply {

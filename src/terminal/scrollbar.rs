@@ -3,7 +3,7 @@
 //! A pane's scroll position does not live in a [`gpui::ScrollHandle`]: it is
 //! alacritty's `display_offset`, counted in rows of scrollback rather than in
 //! pixels of laid-out content. This handle translates between the two, so the
-//! pane can hand the grid to the same [`gpui_component::scroll::Scrollbar`] the
+//! pane can hand the grid to the same [`gpui::component::scroll::Scrollbar`] the
 //! sidebar and every list in the app already draw, and get their behaviour for
 //! free — a thumb that appears while the view moves and fades out once it
 //! stops.
@@ -15,8 +15,8 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gpui::{Pixels, Point, Size, point, px, size};
-use gpui_component::scroll::ScrollbarHandle;
+use gpui::component::scroll::ScrollbarHandle;
+use gpui::{Bounds, Pixels, Point, Size, point, px, size};
 
 /// Where the grid stood the last time the pane reported in.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -89,6 +89,14 @@ impl TerminalScrollHandle {
 }
 
 impl ScrollbarHandle for TerminalScrollHandle {
+    fn viewport_bounds(&self) -> Bounds<Pixels> {
+        let grid = self.grid.get();
+        Bounds::new(
+            point(px(0.), px(0.)),
+            size(px(0.), px(grid.screen_lines as f32 * grid.line_height())),
+        )
+    }
+
     fn offset(&self) -> Point<Pixels> {
         let grid = self.grid.get();
         // Scroll offsets run negative as the content moves up past the top of

@@ -1,9 +1,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use gpui::component::ActiveTheme as _;
 use gpui::{App, Bounds, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Window, canvas, div};
 use gpui::{Axis, Entity, InteractiveElement as _, prelude::*, px};
-use gpui_component::ActiveTheme as _;
 
 use crate::terminal::view::TerminalView;
 use crate::ui::pending_pane::PendingPane;

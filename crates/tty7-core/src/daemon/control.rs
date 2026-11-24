@@ -20,7 +20,7 @@ use super::protocol::{MAX_FRAME, read_frame, write_frame};
 /// peer can safely ignore — a field added to a message it already decodes. A
 /// request it has never heard of is not ignorable: the frame fails to decode
 /// and the read loop that failed on it takes the whole link down, which is how
-/// a remote workspace opens with no tabs and a git detail pane never fills.
+/// a remote workspace opens with no tabs.
 ///
 /// v6 pays off the drift since v5, which was most of the dialect: the machine
 /// tree replaced `WorkspaceList`/`Get`/`Put`/`Delete` with `WorkspaceTree`,
@@ -58,10 +58,7 @@ use super::protocol::{MAX_FRAME, read_frame, write_frame};
 /// by id (`TabSetGroup` carries a `GroupId`, not a string), the groups
 /// themselves live on the workspace and move as `WorkspaceSetGroups` and
 /// `LayoutDelta::GroupsChanged`, and a v10 peer can decode none of that.
-///
-/// v12 adds `AgentSessions`: the search's Sessions tab in a remote workspace
-/// lists the coding-agent sessions of the machine the workspace is on.
-pub const CONTROL_VERSION: u32 = 12;
+pub const CONTROL_VERSION: u32 = 14;
 
 const DIALECT_MARKER: &str = "speaks control v";
 
@@ -114,10 +111,6 @@ pub fn server_started() -> Instant {
     *STARTED.get_or_init(Instant::now)
 }
 
-pub const WATCH_BURST_CAP: usize = 1024;
-
-pub const WATCH_COALESCE_WINDOW: Duration = Duration::from_millis(100);
-
 pub mod kind {
 
     pub const HELLO: u8 = 60;
@@ -130,14 +123,6 @@ pub mod kind {
     pub const RESPONSE_BLOB: u8 = 62;
     pub const EVENT: u8 = 63;
 }
-
-pub const GIT_STREAM_CHUNK: usize = 64 * 1024;
-
-pub const GIT_STREAM_CHUNK_MAX: usize = crate::daemon::protocol::MAX_FRAME / 2;
-
-pub const GIT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
-
-pub const MAX_CONCURRENT_GIT_STREAMS: usize = 8;
 
 pub mod feature {
     pub const CONTROL: &str = "control";
@@ -153,11 +138,6 @@ pub mod feature {
     /// while keeping their screens (#762). Needs both a tree and panes, so a
     /// peer serving either alone does not say it.
     pub const TAB_HIBERNATE: &str = "tab-hibernate";
-    /// The peer answers [`ControlRequest::SearchContent`] — find in files for
-    /// the right panel's Search tab. A peer without it has never heard of the
-    /// request, and sending it would take the link down, so a client asks for
-    /// the name first and tells the user the server needs updating instead.
-    pub const CONTENT_SEARCH: &str = "content-search";
     /// The peer keeps each workspace's recently closed tabs in its tree and
     /// answers [`ControlRequest::TabCloseRemembered`] and
     /// [`ControlRequest::TabReopen`] (#1021). Like [`TAB_HIBERNATE`] it needs
@@ -167,9 +147,7 @@ pub mod feature {
     pub const CLOSED_TABS: &str = "closed-tabs";
 }
 
-pub use crate::host::{
-    ContentLimits, ContentQuery, ContentResults, Entry, MTime, Meta, Output, SearchHit,
-};
+pub use crate::host::{Entry, MTime, Meta, Output};
 
 pub use crate::core::shells::{DetectedShell, ShellInventory};
 
@@ -185,7 +163,6 @@ pub enum ControlRequest {
 
     ReadDir {
         dir: String,
-        root: Option<String>,
     },
     Stat {
         path: String,
@@ -200,70 +177,23 @@ pub enum ControlRequest {
         path: String,
         max_bytes: u64,
     },
-    Search {
-        roots: Vec<String>,
-        query: String,
-        limit: u64,
-        max_dirs: u64,
-        show_hidden: bool,
-    },
-    /// Find in files. Gated on [`feature::CONTENT_SEARCH`].
-    SearchContent {
-        roots: Vec<String>,
-        query: ContentQuery,
-        limits: ContentLimits,
-    },
-
     WriteFile {
-        path: String,
-    },
-    CreateFileNew {
         path: String,
     },
     CreateDir {
         path: String,
         recursive: bool,
     },
-    Rename {
-        from: String,
-        to: String,
-    },
     Remove {
         path: String,
         recursive: bool,
     },
 
-    RepoRoot {
-        path: String,
-    },
     Git {
         cwd: String,
         args: Vec<String>,
     },
-    GitStream {
-        id: u64,
-        cwd: String,
-        args: Vec<String>,
-    },
-
     Shells,
-
-    /// Past coding-agent sessions on this machine. `known_dirs` are the
-    /// client's open directories there, which place Cursor's chats.
-    AgentSessions {
-        known_dirs: Vec<String>,
-    },
-
-    WatchOpen {
-        dirs: Vec<String>,
-    },
-    WatchSet {
-        id: u64,
-        dirs: Vec<String>,
-    },
-    WatchClose {
-        id: u64,
-    },
 
     WorkspaceAttach {
         id: String,
@@ -496,23 +426,14 @@ impl ControlRequest {
             | Stat { .. }
             | Exists { .. }
             | Canonicalize { .. }
-            | RepoRoot { .. }
-            | WatchOpen { .. }
-            | WatchSet { .. }
-            | WatchClose { .. }
             // A poll, on a two-second timer: waiting longer than the gap
             // between asks would only stack up requests behind a peer that has
             // stopped answering.
             | PaneProcs { .. } => Duration::from_secs(5),
             ReadFile { .. } | WriteFile { .. } => Duration::from_secs(30),
-            CreateFileNew { .. } | CreateDir { .. } | Rename { .. } | Remove { .. } => {
-                Duration::from_secs(10)
-            }
-            Git { .. } | GitStream { .. } | Search { .. } => Duration::from_secs(20),
-            // Past the host's own time budget (`ContentLimits::max_millis`),
-            // so a search that ran long still gets to say what it found.
-            SearchContent { .. } => Duration::from_secs(30),
-            Shells | AgentSessions { .. } => Duration::from_secs(20),
+            CreateDir { .. } | Remove { .. } => Duration::from_secs(10),
+            Git { .. } => Duration::from_secs(20),
+            Shells => Duration::from_secs(20),
             WorkspaceAttach { .. } | WorkspaceDetach { .. } => Duration::from_secs(10),
             GuiOpen { .. } => Duration::from_secs(5),
             MachineGet
@@ -575,16 +496,11 @@ pub enum ReplyOk {
     Meta(Meta),
     Bool(bool),
     Path(String),
-    OptPath(Option<String>),
     FileMeta {
         meta: Meta,
     },
-    Hits(Vec<SearchHit>),
-    ContentHits(ContentResults),
     Output(Output),
-    WatchId(u64),
     Shells(ShellInventory),
-    AgentSessions(Vec<crate::core::agent_history::PastSession>),
     Attached {
         took_over_from: Option<String>,
     },
@@ -680,25 +596,6 @@ impl WireErrorKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlEvent {
-    Watch {
-        id: u64,
-        paths: Vec<String>,
-    },
-    WatchOverflow {
-        id: u64,
-    },
-
-    GitChunk {
-        id: u64,
-        #[serde(with = "crate::host::b64")]
-        bytes: Vec<u8>,
-    },
-    GitEnd {
-        id: u64,
-        code: Option<i32>,
-        failed: bool,
-    },
-
     PaneExited {
         pane_id: u64,
         code: Option<i32>,
@@ -1098,7 +995,6 @@ struct ClientInner {
     shutdown: Option<Arc<dyn LinkShutdown>>,
     reader_done: Mutex<bool>,
     reader_exit: Condvar,
-    link_down: Mutex<Vec<Box<dyn Fn() + Send + Sync>>>,
 }
 
 impl ControlClient {
@@ -1177,7 +1073,6 @@ impl ControlClient {
             shutdown,
             reader_done: Mutex::new(false),
             reader_exit: Condvar::new(),
-            link_down: Mutex::new(Vec::new()),
         });
 
         let reader_inner = Arc::clone(&inner);
@@ -1197,15 +1092,6 @@ impl ControlClient {
 
     pub fn is_connected(&self) -> bool {
         self.inner.connected.load(Ordering::Acquire)
-    }
-
-    pub fn on_link_down<F: Fn() + Send + Sync + 'static>(&self, hook: F) {
-        if let Ok(mut hooks) = self.inner.link_down.lock() {
-            hooks.push(Box::new(hook));
-        }
-        if !self.is_connected() {
-            self.inner.run_link_down();
-        }
     }
 
     pub fn idle_for(&self) -> Duration {
@@ -1235,25 +1121,6 @@ impl ControlClient {
 
     pub fn call_with_blob(&self, req: ControlRequest, blob: &[u8]) -> io::Result<ReplyOk> {
         self.call_full(req, blob).map(|r| r.reply)
-    }
-
-    /// Sends `req` without waiting for its answer. The reply, when it comes,
-    /// finds nobody waiting for its `req_id` and the reader drops it.
-    ///
-    /// For requests whose answer nobody acts on, made from places that cannot
-    /// afford a round trip: a `Drop` that may run on the UI thread, where a
-    /// `call` parks every window for as long as the peer takes to answer — up
-    /// to the request's whole deadline on a link that has gone quiet.
-    pub fn post(&self, req: ControlRequest) -> io::Result<()> {
-        if !self.is_connected() {
-            return Err(io::Error::new(
-                io::ErrorKind::ConnectionReset,
-                "control connection is down",
-            ));
-        }
-        let req_id = self.inner.next_req_id.fetch_add(1, Ordering::Relaxed);
-        log::debug!(target: "tty7::control", "#{req_id} {req:?} (not awaited)");
-        self.inner.send(&ControlClientMsg::Request { req_id, req })
     }
 
     pub fn call_full(&self, req: ControlRequest, blob: &[u8]) -> io::Result<ControlResponse> {
@@ -1460,15 +1327,6 @@ impl ClientInner {
                 format!("{why} (request {req_id})"),
             )));
         }
-        self.run_link_down();
-    }
-
-    fn run_link_down(&self) {
-        if let Ok(hooks) = self.link_down.lock() {
-            for hook in hooks.iter() {
-                hook();
-            }
-        }
     }
 }
 
@@ -1524,7 +1382,6 @@ mod tests {
     use super::*;
     use crate::daemon::protocol::MAX_FRAME;
     use std::io::Cursor;
-    use std::path::PathBuf;
 
     fn meta() -> Meta {
         Meta {
@@ -1560,73 +1417,7 @@ mod tests {
             shutdown: None,
             reader_done: Mutex::new(false),
             reader_exit: Condvar::new(),
-            link_down: Mutex::new(Vec::new()),
         })
-    }
-
-    fn unrepresentable_path() -> PathBuf {
-        #[cfg(unix)]
-        {
-            use std::os::unix::ffi::OsStrExt as _;
-            PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/caf\xe9.rs"))
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::ffi::OsStringExt as _;
-            PathBuf::from(std::ffi::OsString::from_wide(&[
-                0x0043, 0x003a, 0x005c, 0xd800, 0x002e, 0x0072, 0x0073,
-            ]))
-        }
-    }
-
-    #[test]
-    fn to_frame_refuses_what_cannot_be_sent_without_writing_it() {
-        let unrepresentable = ControlServerMsg::Response {
-            req_id: 1,
-            reply: ControlReply::Ok(ReplyOk::Hits(vec![SearchHit {
-                name: "caf\u{fffd}.rs".into(),
-                path: unrepresentable_path(),
-                is_dir: false,
-                ignored: false,
-            }])),
-        };
-        assert!(
-            unrepresentable.to_frame().is_err(),
-            "a path that is not valid Unicode must not encode"
-        );
-
-        let huge = ControlServerMsg::ResponseBlob {
-            req_id: 1,
-            reply: ControlReply::Ok(ReplyOk::Meta(meta())),
-            blob: vec![0u8; MAX_FRAME + 1],
-        };
-        let err = huge
-            .to_frame()
-            .expect_err("an oversize reply must not encode");
-        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn a_frame_too_large_to_send_does_not_condemn_the_link() {
-        let inner = detached_inner();
-        let oversize = ControlClientMsg::RequestBlob {
-            req_id: 1,
-            req: ControlRequest::WriteFile {
-                path: "/home/me/huge.bin".into(),
-            },
-            blob: vec![0u8; MAX_FRAME + 1],
-        };
-
-        let err = inner
-            .send(&oversize)
-            .expect_err("an oversize frame must fail");
-        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-        assert!(
-            inner.connected.load(Ordering::Acquire),
-            "a local encode failure marked the connection dead"
-        );
-
-        inner.send(&ControlClientMsg::Cancel { req_id: 1 }).unwrap();
     }
 
     #[test]
@@ -1646,232 +1437,6 @@ mod tests {
                 "a blob outlived the request it belonged to (req_id {req_id})"
             );
         }
-    }
-
-    fn every_request() -> Vec<ControlRequest> {
-        vec![
-            ControlRequest::Ping,
-            ControlRequest::ReadDir {
-                dir: "/home/me/proj/src".into(),
-                root: Some("/home/me/proj".into()),
-            },
-            ControlRequest::ReadDir {
-                dir: "/tmp".into(),
-                root: None,
-            },
-            ControlRequest::Stat {
-                path: "/home/me/.zshrc".into(),
-            },
-            ControlRequest::Exists {
-                path: "/nope".into(),
-            },
-            ControlRequest::Canonicalize {
-                path: "/a/../b".into(),
-            },
-            ControlRequest::ReadFile {
-                path: "/home/me/proj/Cargo.toml".into(),
-                max_bytes: 10 * 1024 * 1024,
-            },
-            ControlRequest::Search {
-                roots: vec!["/home/me/proj".into(), "/srv".into()],
-                query: "widget".into(),
-                limit: 200,
-                max_dirs: 2000,
-                show_hidden: false,
-            },
-            ControlRequest::SearchContent {
-                roots: vec!["/home/me/proj".into()],
-                query: ContentQuery {
-                    pattern: r"fn \w+".into(),
-                    case_sensitive: true,
-                    whole_word: false,
-                    regex: true,
-                    show_hidden: false,
-                },
-                limits: ContentLimits::default(),
-            },
-            ControlRequest::WriteFile {
-                path: "/home/me/proj/src/main.rs".into(),
-            },
-            ControlRequest::CreateFileNew {
-                path: "/home/me/new.txt".into(),
-            },
-            ControlRequest::CreateDir {
-                path: "/home/me/a/b/c".into(),
-                recursive: true,
-            },
-            ControlRequest::Rename {
-                from: "/a".into(),
-                to: "/b".into(),
-            },
-            ControlRequest::Remove {
-                path: "/home/me/tmp".into(),
-                recursive: true,
-            },
-            ControlRequest::RepoRoot {
-                path: "/home/me/proj/src/deep".into(),
-            },
-            ControlRequest::Git {
-                cwd: "/home/me/proj".into(),
-                args: vec!["status".into(), "--porcelain".into()],
-            },
-            ControlRequest::WatchOpen {
-                dirs: vec!["/home/me/proj".into()],
-            },
-            ControlRequest::WatchSet {
-                id: 7,
-                dirs: vec!["/home/me/proj".into(), "/home/me/proj/src".into()],
-            },
-            ControlRequest::WatchClose { id: 7 },
-            ControlRequest::GuiOpen {
-                path: Some("/home/me/proj".into()),
-                workspace: None,
-            },
-            ControlRequest::AgentStates,
-            ControlRequest::PaneProcs { pane_id: 7 },
-            ControlRequest::Routes,
-            ControlRequest::Status,
-        ]
-    }
-
-    fn every_reply() -> Vec<ControlReply> {
-        vec![
-            ControlReply::Ok(ReplyOk::Unit),
-            ControlReply::Ok(ReplyOk::Pong),
-            ControlReply::Ok(ReplyOk::Entries(vec![
-                Entry {
-                    name: "src".into(),
-                    is_dir: true,
-                    is_symlink: false,
-                    ignored: false,
-                },
-                Entry {
-                    name: "target".into(),
-                    is_dir: true,
-                    is_symlink: false,
-                    ignored: true,
-                },
-                Entry {
-                    name: "link".into(),
-                    is_dir: false,
-                    is_symlink: true,
-                    ignored: false,
-                },
-            ])),
-            ControlReply::Ok(ReplyOk::Meta(meta())),
-            ControlReply::Ok(ReplyOk::Bool(true)),
-            ControlReply::Ok(ReplyOk::Bool(false)),
-            ControlReply::Ok(ReplyOk::Path("/home/me/proj".into())),
-            ControlReply::Ok(ReplyOk::OptPath(Some("/home/me/proj".into()))),
-            ControlReply::Ok(ReplyOk::OptPath(None)),
-            ControlReply::Ok(ReplyOk::FileMeta { meta: meta() }),
-            ControlReply::Ok(ReplyOk::Hits(vec![SearchHit {
-                name: "widget.rs".into(),
-                path: PathBuf::from("/home/me/proj/src/widget.rs"),
-                is_dir: false,
-                ignored: false,
-            }])),
-            ControlReply::Ok(ReplyOk::ContentHits(ContentResults {
-                hits: vec![crate::host::ContentHit {
-                    path: PathBuf::from("/home/me/proj/src/widget.rs"),
-                    line: 12,
-                    column: 5,
-                    text: "fn widget() {".into(),
-                    ranges: vec![crate::host::ContentRange { start: 3, end: 9 }],
-                }],
-                truncated: true,
-                files_searched: 40,
-            })),
-            ControlReply::Ok(ReplyOk::Output(Output {
-                status: Some(1),
-                stdout: b"?? src/new.rs\n".to_vec(),
-                stderr: vec![0x00, 0xff, 0xfe, b'\n'],
-            })),
-            ControlReply::Ok(ReplyOk::WatchId(42)),
-            ControlReply::Ok(ReplyOk::AgentStates(vec![PaneAgentState {
-                pane_id: 9,
-                agent: Some(crate::core::cli_agent::CLIAgent::Claude),
-                state: crate::core::cli_agent::AgentSessionState {
-                    status: crate::core::cli_agent::AgentStatus::Waiting,
-                    message: Some("needs permission".into()),
-                    session_id: Some("sess-1".into()),
-                    launch_argv: Some(vec!["claude".into()]),
-                    rich: true,
-                    cwd: Some("/work/api".into()),
-                    activity: 3,
-                    turns: 1,
-                    inferred: false,
-                    readout: Default::default(),
-                    since_ms: None,
-                },
-            }])),
-            ControlReply::Ok(ReplyOk::AgentStates(Vec::new())),
-            ControlReply::Ok(ReplyOk::Routes(vec![RouteInfo {
-                key: "me@build-box:22".into(),
-                kind: "ssh".into(),
-                connected: true,
-            }])),
-            ControlReply::Ok(ReplyOk::Status(ServerStatus {
-                pid: 4242,
-                uptime_secs: 61,
-                panes: 3,
-                control_version: CONTROL_VERSION,
-                protocol_version: crate::daemon::protocol::PROTOCOL_VERSION,
-                build: "26.7.5".into(),
-                socket: "/run/user/1000/tty7/daemon.sock".into(),
-            })),
-            ControlReply::Err(WireError::new(WireErrorKind::NotFound, "no such file")),
-            ControlReply::Err(WireError::new(
-                WireErrorKind::PermissionDenied,
-                "permission denied",
-            )),
-            ControlReply::Err(WireError::new(
-                WireErrorKind::AlreadyExists,
-                "already exists",
-            )),
-            ControlReply::Err(WireError::new(WireErrorKind::InvalidInput, "bad path")),
-            ControlReply::Err(WireError::new(WireErrorKind::NotADirectory, "not a dir")),
-            ControlReply::Err(WireError::new(WireErrorKind::IsADirectory, "is a dir")),
-            ControlReply::Err(WireError::new(
-                WireErrorKind::DirectoryNotEmpty,
-                "not empty",
-            )),
-            ControlReply::Err(WireError::new(WireErrorKind::FileTooLarge, "too large")),
-            ControlReply::Err(WireError::new(WireErrorKind::GitUnavailable, "no git")),
-            ControlReply::Err(WireError::new(WireErrorKind::TimedOut, "timed out")),
-            ControlReply::Err(WireError::new(WireErrorKind::ConnectionReset, "reset")),
-            ControlReply::Err(WireError::new(WireErrorKind::Other, "something else")),
-        ]
-    }
-
-    fn every_event() -> Vec<ControlEvent> {
-        vec![
-            ControlEvent::Watch {
-                id: 3,
-                paths: vec!["/home/me/proj/src/main.rs".into()],
-            },
-            ControlEvent::WatchOverflow { id: 3 },
-            ControlEvent::PaneExited {
-                pane_id: 9,
-                code: Some(0),
-            },
-            ControlEvent::PaneExited {
-                pane_id: 9,
-                code: None,
-            },
-            ControlEvent::AgentStatus {
-                pane_id: 9,
-                json: serde_json::json!({ "state": "thinking" }),
-            },
-            ControlEvent::Preempted {
-                workspace: "w1".into(),
-                by: "other-laptop".into(),
-            },
-            ControlEvent::GuiOpen {
-                path: Some("/home/me/proj".into()),
-                workspace: Some(WorkspaceId::new()),
-            },
-        ]
     }
 
     fn hello() -> ControlHello {
@@ -1928,45 +1493,8 @@ mod tests {
     }
 
     #[test]
-    fn client_messages_round_trip() {
-        let mut msgs = vec![
-            ControlClientMsg::Hello(hello()),
-            ControlClientMsg::Hello(ControlHello::host_rpc("tok", "laptop")),
-            ControlClientMsg::Cancel { req_id: 1 },
-            ControlClientMsg::Cancel { req_id: u64::MAX },
-            ControlClientMsg::RequestBlob {
-                req_id: 5,
-                req: ControlRequest::WriteFile {
-                    path: "/tmp/x".into(),
-                },
-                blob: vec![0x00, 0xff, b'h', b'i'],
-            },
-            ControlClientMsg::RequestBlob {
-                req_id: 6,
-                req: ControlRequest::WriteFile {
-                    path: "/tmp/empty".into(),
-                },
-                blob: Vec::new(),
-            },
-        ];
-        for (i, req) in every_request().into_iter().enumerate() {
-            msgs.push(ControlClientMsg::Request {
-                req_id: i as u64 + 1,
-                req,
-            });
-        }
-
-        for msg in &msgs {
-            let mut buf = Vec::new();
-            msg.encode(&mut buf).unwrap();
-            let got = ControlClientMsg::read(&mut Cursor::new(&buf)).unwrap();
-            assert_eq!(&got, msg, "client message did not survive the round trip");
-        }
-    }
-
-    #[test]
     fn server_messages_round_trip() {
-        let mut msgs = vec![
+        let msgs = vec![
             ControlServerMsg::HelloOk(hello_ok()),
             ControlServerMsg::ResponseBlob {
                 req_id: 9,
@@ -1979,61 +1507,12 @@ mod tests {
                 blob: Vec::new(),
             },
         ];
-        for (i, reply) in every_reply().into_iter().enumerate() {
-            msgs.push(ControlServerMsg::Response {
-                req_id: i as u64 + 1,
-                reply,
-            });
-        }
-        for event in every_event() {
-            msgs.push(ControlServerMsg::Event(event));
-        }
-
         for msg in &msgs {
             let mut buf = Vec::new();
             msg.encode(&mut buf).unwrap();
             let got = ControlServerMsg::read(&mut Cursor::new(&buf)).unwrap();
             assert_eq!(&got, msg, "server message did not survive the round trip");
         }
-    }
-
-    #[test]
-    fn frame_layout_matches_the_contract() {
-        let mut buf = Vec::new();
-        ControlClientMsg::RequestBlob {
-            req_id: 0x0102_0304_0506_0708,
-            req: ControlRequest::WriteFile { path: "/x".into() },
-            blob: vec![0xaa, 0xbb],
-        }
-        .encode(&mut buf)
-        .unwrap();
-
-        let payload_len = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
-        assert_eq!(buf[4], 62, "REQUEST_BLOB is kind 62");
-        assert_eq!(
-            buf.len(),
-            5 + payload_len,
-            "frame length covers the payload"
-        );
-
-        let payload = &buf[5..];
-        assert_eq!(
-            &payload[..8],
-            &0x0102_0304_0506_0708u64.to_le_bytes(),
-            "req_id is 8 bytes, little-endian, first"
-        );
-        let json_n = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;
-        let json = &payload[12..12 + json_n];
-        assert_eq!(
-            serde_json::from_slice::<ControlRequest>(json).unwrap(),
-            ControlRequest::WriteFile { path: "/x".into() }
-        );
-        assert_eq!(&payload[12 + json_n..], &[0xaa, 0xbb], "blob is the tail");
-        assert_eq!(
-            payload_len,
-            12 + json_n + 2,
-            "payload_len == 12 + json_n + blob_len"
-        );
     }
 
     #[test]
@@ -2064,57 +1543,6 @@ mod tests {
     }
 
     #[test]
-    fn a_git_chunk_crosses_the_wire_as_base64() {
-        let bytes: Vec<u8> = (0..8192u32).map(|i| b'a' + (i % 26) as u8).collect();
-        let event = ControlEvent::GitChunk {
-            id: 7,
-            bytes: bytes.clone(),
-        };
-        let json = to_json(&event).unwrap();
-        assert!(
-            json.len() < bytes.len() * 2,
-            "a {}-byte chunk encoded to {} bytes of JSON — the array-of-numbers \
-             encoding is back",
-            bytes.len(),
-            json.len()
-        );
-
-        let (k, payload) = ControlServerMsg::Event(event).to_frame().unwrap();
-        match ControlServerMsg::from_frame(k, payload).unwrap() {
-            ControlServerMsg::Event(ControlEvent::GitChunk { id, bytes: got }) => {
-                assert_eq!(id, 7);
-                assert_eq!(got, bytes, "the bytes survive the encoding exactly");
-            }
-            other => panic!("expected a GitChunk, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn the_git_chunk_ceiling_leaves_room_for_base64_and_the_envelope() {
-        let encoded = GIT_STREAM_CHUNK_MAX / 3 * 4 + 4;
-        assert!(
-            encoded + 4096 < MAX_FRAME,
-            "a full chunk encodes to {encoded} bytes against a {MAX_FRAME}-byte frame limit"
-        );
-        const {
-            assert!(
-                GIT_STREAM_CHUNK_MAX > GIT_STREAM_CHUNK,
-                "the ceiling is a backstop for an oversized line, not the batch target"
-            )
-        };
-    }
-
-    #[test]
-    fn events_carry_a_zero_req_id() {
-        let mut buf = Vec::new();
-        ControlServerMsg::Event(ControlEvent::WatchOverflow { id: 1 })
-            .encode(&mut buf)
-            .unwrap();
-        assert_eq!(buf[4], 63);
-        assert_eq!(&buf[5..13], &0u64.to_le_bytes());
-    }
-
-    #[test]
     fn short_payload_is_invalid_data() {
         for len in 0..CONTROL_HEADER {
             let payload = vec![0u8; len];
@@ -2141,31 +1569,6 @@ mod tests {
             let e = ControlServerMsg::from_frame(kind::RESPONSE_BLOB, payload).unwrap_err();
             assert_eq!(e.kind(), io::ErrorKind::InvalidData, "json_n {json_n}");
         }
-    }
-
-    #[test]
-    fn trailing_bytes_on_a_non_blob_kind_are_invalid_data() {
-        let json = serde_json::to_vec(&ControlRequest::Ping).unwrap();
-        let mut payload = encode_body(1, &json, b"extra").unwrap();
-        let e = ControlClientMsg::from_frame(kind::REQUEST, payload.clone()).unwrap_err();
-        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
-
-        payload = encode_body(1, &[], b"extra").unwrap();
-        let e = ControlClientMsg::from_frame(kind::CANCEL, payload).unwrap_err();
-        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
-
-        let json = serde_json::to_vec(&ControlEvent::WatchOverflow { id: 1 }).unwrap();
-        let payload = encode_body(0, &json, b"extra").unwrap();
-        let e = ControlServerMsg::from_frame(kind::EVENT, payload).unwrap_err();
-        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn event_with_a_nonzero_req_id_is_invalid_data() {
-        let json = serde_json::to_vec(&ControlEvent::WatchOverflow { id: 1 }).unwrap();
-        let payload = encode_body(9, &json, &[]).unwrap();
-        let e = ControlServerMsg::from_frame(kind::EVENT, payload).unwrap_err();
-        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
@@ -2243,51 +1646,12 @@ mod tests {
     }
 
     #[test]
-    fn oversize_blob_is_refused_at_encode() {
-        let blob = vec![0u8; MAX_FRAME];
-        let mut sink = Vec::new();
-        let e = ControlClientMsg::RequestBlob {
-            req_id: 1,
-            req: ControlRequest::WriteFile {
-                path: "/tmp/huge".into(),
-            },
-            blob,
-        }
-        .encode(&mut sink)
-        .unwrap_err();
-        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
     fn oversize_declared_length_is_refused_at_decode() {
         let mut buf = Vec::new();
         buf.extend_from_slice(&((MAX_FRAME + 1) as u32).to_le_bytes());
         buf.push(kind::REQUEST);
         let e = ControlClientMsg::read(&mut Cursor::new(&buf)).unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn a_frame_exactly_at_max_frame_survives() {
-        let json = serde_json::to_vec(&ControlRequest::WriteFile {
-            path: "/tmp/big".into(),
-        })
-        .unwrap();
-        let blob = vec![0x5a; MAX_FRAME - CONTROL_HEADER - json.len()];
-        let msg = ControlClientMsg::RequestBlob {
-            req_id: 1,
-            req: ControlRequest::WriteFile {
-                path: "/tmp/big".into(),
-            },
-            blob,
-        };
-        let mut buf = Vec::new();
-        msg.encode(&mut buf).unwrap();
-        assert_eq!(
-            u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize,
-            MAX_FRAME
-        );
-        assert_eq!(ControlClientMsg::read(&mut Cursor::new(&buf)).unwrap(), msg);
     }
 
     #[test]
@@ -2359,7 +1723,7 @@ mod tests {
                     ReplyOk::Output(o) => {
                         assert_eq!(o.status, Some(128));
                         assert!(!o.success());
-                        assert_eq!(o.stderr_trimmed(), "not a git repository");
+                        assert_eq!(o.stderr, b"not a git repository");
                     }
                     other => panic!("expected Output, got {other:?}"),
                 }
@@ -2384,126 +1748,6 @@ mod tests {
         assert!(!json.contains("[0,0,0"), "must not be a number array");
         assert!(json.len() < 4200, "base64 payload is {} bytes", json.len());
         assert_eq!(serde_json::from_str::<Output>(&json).unwrap(), out);
-    }
-
-    #[test]
-    fn deadlines_match_the_contract_table() {
-        use ControlRequest as R;
-        let s = Duration::from_secs;
-        let cases: Vec<(R, Duration)> = vec![
-            (R::Ping, s(5)),
-            (
-                R::ReadDir {
-                    dir: "/".into(),
-                    root: None,
-                },
-                s(5),
-            ),
-            (
-                R::ReadDir {
-                    dir: "/".into(),
-                    root: Some("/".into()),
-                },
-                s(5),
-            ),
-            (R::Stat { path: "/".into() }, s(5)),
-            (R::Exists { path: "/".into() }, s(5)),
-            (R::Canonicalize { path: "/".into() }, s(5)),
-            (R::RepoRoot { path: "/".into() }, s(5)),
-            (R::WatchOpen { dirs: vec![] }, s(5)),
-            (
-                R::WatchSet {
-                    id: 1,
-                    dirs: vec![],
-                },
-                s(5),
-            ),
-            (R::WatchClose { id: 1 }, s(5)),
-            (
-                R::ReadFile {
-                    path: "/".into(),
-                    max_bytes: 1,
-                },
-                s(30),
-            ),
-            (R::WriteFile { path: "/".into() }, s(30)),
-            (R::CreateFileNew { path: "/".into() }, s(10)),
-            (
-                R::CreateDir {
-                    path: "/".into(),
-                    recursive: false,
-                },
-                s(10),
-            ),
-            (
-                R::Rename {
-                    from: "/".into(),
-                    to: "/".into(),
-                },
-                s(10),
-            ),
-            (
-                R::Remove {
-                    path: "/".into(),
-                    recursive: false,
-                },
-                s(10),
-            ),
-            (
-                R::Git {
-                    cwd: "/".into(),
-                    args: vec![],
-                },
-                s(20),
-            ),
-            (
-                R::Search {
-                    roots: vec![],
-                    query: String::new(),
-                    limit: 1,
-                    max_dirs: 1,
-                    show_hidden: true,
-                },
-                s(20),
-            ),
-            (
-                R::SearchContent {
-                    roots: vec![],
-                    query: ContentQuery::default(),
-                    limits: ContentLimits::default(),
-                },
-                s(30),
-            ),
-            (
-                R::GuiOpen {
-                    path: None,
-                    workspace: None,
-                },
-                s(5),
-            ),
-            (R::AgentStates, s(5)),
-            (R::PaneProcs { pane_id: 7 }, s(5)),
-            (R::Routes, s(5)),
-            (R::Status, s(5)),
-        ];
-        assert_eq!(
-            cases.len(),
-            every_request().len(),
-            "every request variant needs a deadline case"
-        );
-        for (req, want) in cases {
-            assert_eq!(req.deadline(), want, "deadline for {req:?}");
-        }
-    }
-
-    #[test]
-    fn blob_shape_is_known_per_request() {
-        for req in every_request() {
-            let takes = matches!(req, ControlRequest::WriteFile { .. });
-            let returns = matches!(req, ControlRequest::ReadFile { .. });
-            assert_eq!(req.takes_blob(), takes, "takes_blob for {req:?}");
-            assert_eq!(req.returns_blob(), returns, "returns_blob for {req:?}");
-        }
     }
 
     #[test]
@@ -2663,7 +1907,6 @@ mod tests {
         let entries = client
             .call(ControlRequest::ReadDir {
                 dir: "/repo".into(),
-                root: None,
             })
             .unwrap();
         done_tx.send("read_dir").unwrap();
@@ -2677,47 +1920,8 @@ mod tests {
         assert_eq!(done_rx.recv().unwrap(), "git");
         assert!(matches!(
             slow.join().unwrap(),
-            ReplyOk::Output(o) if o.stdout_trimmed() == "clean"
+            ReplyOk::Output(o) if o.stdout == b"clean"
         ));
-    }
-
-    /// `post` returns while the peer is still sitting on its answer, and that
-    /// answer, when it does arrive, is not handed to the next caller.
-    #[test]
-    fn a_post_does_not_wait_for_its_answer() {
-        let (seen_tx, seen_rx) = mpsc::channel::<u64>();
-        let (answer_tx, answer_rx) = mpsc::channel::<()>();
-        let client = client_with_peer(no_events(), move |mut sock| {
-            let closed = match ControlClientMsg::read(&mut sock).unwrap() {
-                ControlClientMsg::Request {
-                    req_id,
-                    req: ControlRequest::WatchClose { id: 7 },
-                } => req_id,
-                other => panic!("unexpected message {other:?}"),
-            };
-            seen_tx.send(closed).unwrap();
-            answer_rx.recv().unwrap();
-            reply_to(&mut sock, closed, ReplyOk::Unit);
-            match ControlClientMsg::read(&mut sock).unwrap() {
-                ControlClientMsg::Request { req_id, .. } => {
-                    reply_to(&mut sock, req_id, ReplyOk::Path("/next".into()))
-                }
-                other => panic!("unexpected message {other:?}"),
-            }
-        });
-
-        client.post(ControlRequest::WatchClose { id: 7 }).unwrap();
-        seen_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("the post reached the peer");
-        answer_tx.send(()).unwrap();
-
-        let next = client
-            .call(ControlRequest::Canonicalize {
-                path: "/next".into(),
-            })
-            .unwrap();
-        assert_eq!(next, ReplyOk::Path("/next".into()));
     }
 
     #[test]
@@ -2829,62 +2033,6 @@ mod tests {
     }
 
     #[test]
-    fn blobs_ride_in_both_directions() {
-        let content: Vec<u8> = (0..=255u8).cycle().take(300_000).collect();
-        let echoed = content.clone();
-        let client = client_with_peer(no_events(), move |mut sock| {
-            match ControlClientMsg::read(&mut sock).unwrap() {
-                ControlClientMsg::RequestBlob { req_id, req, blob } => {
-                    assert_eq!(
-                        req,
-                        ControlRequest::WriteFile {
-                            path: "/tmp/f".into()
-                        }
-                    );
-                    assert_eq!(blob, echoed);
-                    reply_to(&mut sock, req_id, ReplyOk::Meta(meta()));
-                }
-                other => panic!("expected RequestBlob, got {other:?}"),
-            }
-            match ControlClientMsg::read(&mut sock).unwrap() {
-                ControlClientMsg::Request { req_id, .. } => {
-                    ControlServerMsg::ResponseBlob {
-                        req_id,
-                        reply: ControlReply::Ok(ReplyOk::FileMeta { meta: meta() }),
-                        blob: echoed.clone(),
-                    }
-                    .encode(&mut sock)
-                    .unwrap();
-                    sock.flush().unwrap();
-                }
-                other => panic!("expected Request, got {other:?}"),
-            }
-        });
-
-        let wrote = client
-            .call_with_blob(
-                ControlRequest::WriteFile {
-                    path: "/tmp/f".into(),
-                },
-                &content,
-            )
-            .unwrap();
-        assert_eq!(wrote, ReplyOk::Meta(meta()));
-
-        let read = client
-            .call_full(
-                ControlRequest::ReadFile {
-                    path: "/tmp/f".into(),
-                    max_bytes: u64::MAX,
-                },
-                &[],
-            )
-            .unwrap();
-        assert_eq!(read.reply, ReplyOk::FileMeta { meta: meta() });
-        assert_eq!(read.blob, content, "the blob is the file's content");
-    }
-
-    #[test]
     fn an_error_reply_becomes_a_matching_io_error() {
         let client = client_with_peer(no_events(), |mut sock| {
             match ControlClientMsg::read(&mut sock).unwrap() {
@@ -2912,56 +2060,6 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::FileTooLarge);
         assert!(e.to_string().contains("900 MB"));
-    }
-
-    #[test]
-    fn events_reach_the_sink_interleaved_with_replies() {
-        let (tx, rx) = mpsc::channel();
-        let sink: EventSink = Box::new(move |e| tx.send(e).unwrap());
-        let client = client_with_peer(sink, |mut sock| {
-            ControlServerMsg::Event(ControlEvent::Watch {
-                id: 1,
-                paths: vec!["/a".into()],
-            })
-            .encode(&mut sock)
-            .unwrap();
-            match ControlClientMsg::read(&mut sock).unwrap() {
-                ControlClientMsg::Request { req_id, .. } => {
-                    ControlServerMsg::Event(ControlEvent::WatchOverflow { id: 1 })
-                        .encode(&mut sock)
-                        .unwrap();
-                    reply_to(&mut sock, req_id, ReplyOk::Pong);
-                }
-                other => panic!("unexpected message {other:?}"),
-            }
-            ControlServerMsg::Event(ControlEvent::Preempted {
-                workspace: "w1".into(),
-                by: "other".into(),
-            })
-            .encode(&mut sock)
-            .unwrap();
-            sock.flush().unwrap();
-        });
-
-        assert_eq!(client.call(ControlRequest::Ping).unwrap(), ReplyOk::Pong);
-        let mut got = Vec::new();
-        for _ in 0..3 {
-            got.push(rx.recv_timeout(Duration::from_secs(5)).unwrap());
-        }
-        assert_eq!(
-            got,
-            vec![
-                ControlEvent::Watch {
-                    id: 1,
-                    paths: vec!["/a".into()]
-                },
-                ControlEvent::WatchOverflow { id: 1 },
-                ControlEvent::Preempted {
-                    workspace: "w1".into(),
-                    by: "other".into()
-                },
-            ]
-        );
     }
 
     #[test]
@@ -3051,23 +2149,6 @@ mod tests {
         ] {
             assert_eq!(parse_dialect_refusal(other), None, "{other}");
         }
-    }
-
-    #[test]
-    fn a_handshake_answered_with_the_wrong_frame_is_invalid_data() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        thread::spawn(move || {
-            let (mut sock, _) = listener.accept().unwrap();
-            let _ = ControlClientMsg::read(&mut sock);
-            ControlServerMsg::Event(ControlEvent::WatchOverflow { id: 1 })
-                .encode(&mut sock)
-                .unwrap();
-            sock.flush().unwrap();
-        });
-        let sock = TcpStream::connect(addr).unwrap();
-        let e = ControlClient::over_tcp(sock, &hello(), no_events()).unwrap_err();
-        assert_eq!(e.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]

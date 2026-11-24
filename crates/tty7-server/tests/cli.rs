@@ -79,7 +79,7 @@ fn the_bridge_carries_a_whole_session() {
     host.write_file(&big, &body).unwrap();
     assert!(host.read_file(&big, 8 * 1024 * 1024).unwrap() == body);
 
-    let entries = host.read_dir(sandbox.path(), None).unwrap();
+    let entries = host.read_dir(sandbox.path()).unwrap();
     assert_eq!(entries.len(), 2);
 }
 

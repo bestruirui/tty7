@@ -116,7 +116,7 @@ if (-not (Test-Path -LiteralPath $Zip)) {
     # `validate_portable_relative_path` allows only these top-level names.
     $managed = @(
         'tty7-app.exe', 'tty7.exe', 'tty7-updater.exe', '.tty7-portable',
-        'completions', 'server', 'LICENSE.txt', 'README.md',
+        'server', 'LICENSE.txt', 'README.md',
         'conpty.dll', 'OpenConsole.exe', 'LICENSE-ConPTY.txt'
     )
     $roots = @($entries |
@@ -147,9 +147,6 @@ if (-not (Test-Path -LiteralPath $Zip)) {
             if (-not (Test-Path -LiteralPath (Join-Path $unzipped $required) -PathType Leaf)) {
                 Fail "the portable archive is missing the required file $required"
             }
-        }
-        if (-not (Test-Path -LiteralPath (Join-Path $unzipped 'completions') -PathType Container)) {
-            Fail "the portable archive is missing the required directory completions"
         }
 
         $markerPath = Join-Path $unzipped '.tty7-portable'

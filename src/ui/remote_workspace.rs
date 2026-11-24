@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use gpui::component::WindowExt as _;
 use gpui::{Context, PromptLevel, Window};
-use gpui_component::WindowExt as _;
 use tty7_core::host::HostId;
 use tty7_core::host::remote::RemoteHost;
 
@@ -144,10 +144,6 @@ impl RemoteStatus {
         }
     }
 
-    #[allow(
-        dead_code,
-        reason = "reached through `workspace_accepts_input`, whose callers are in terminal/view.rs"
-    )]
     pub fn accepts_input(&self) -> bool {
         matches!(self, RemoteStatus::Attached)
     }
@@ -208,8 +204,8 @@ pub(crate) fn install_progress_bar(
     phase: crate::daemon::install::InstallPhase,
     cx: &gpui::App,
 ) -> impl gpui::IntoElement + use<> {
+    use gpui::component::ActiveTheme as _;
     use gpui::{InteractiveElement as _, ParentElement as _, Styled as _};
-    use gpui_component::ActiveTheme as _;
     let theme = cx.theme();
     gpui::div()
         .debug_selector(|| "remote-install-bar".into())
@@ -248,10 +244,10 @@ const STATUS_CARD_MAX: f32 = 0.92;
 /// percentage of, which is what #774's first screenshot doubts — though a bar
 /// escaping its card never did reproduce here, before the change or after.
 pub(crate) fn status_card(cx: &gpui::App) -> gpui::Div {
+    use gpui::component::ActiveTheme as _;
     use gpui::{InteractiveElement as _, Styled as _};
-    use gpui_component::ActiveTheme as _;
     let theme = cx.theme();
-    gpui_component::v_flex()
+    gpui::component::v_flex()
         .debug_selector(|| "remote-status-card".into())
         .w(gpui::px(STATUS_CARD_W))
         .max_w(gpui::relative(STATUS_CARD_MAX))
@@ -272,7 +268,7 @@ pub(crate) fn status_card(cx: &gpui::App) -> gpui::Div {
 /// window.
 pub(crate) fn status_row() -> gpui::Div {
     use gpui::Styled as _;
-    gpui_component::h_flex()
+    gpui::component::h_flex()
         .w_full()
         .min_w_0()
         .flex_wrap()
@@ -348,19 +344,11 @@ impl Backoff {
 }
 
 #[derive(Default)]
-#[allow(
-    dead_code,
-    reason = "the prompt relay that calls this is the other half of D7's start-up connect"
-)]
 pub struct AuthSheetQueue {
     holder: Option<HostId>,
     waiting: std::collections::VecDeque<HostId>,
 }
 
-#[allow(
-    dead_code,
-    reason = "the prompt relay that calls this is the other half of D7's start-up connect"
-)]
 impl AuthSheetQueue {
     pub fn request(&mut self, who: HostId) -> bool {
         match self.holder {
@@ -386,18 +374,6 @@ impl AuthSheetQueue {
         }
         self.holder = self.waiting.pop_front();
         self.holder
-    }
-
-    pub fn withdraw(&mut self, who: HostId) {
-        self.waiting.retain(|w| *w != who);
-    }
-
-    pub fn holder(&self) -> Option<HostId> {
-        self.holder
-    }
-
-    pub fn waiting(&self) -> usize {
-        self.waiting.len()
     }
 }
 
@@ -996,14 +972,6 @@ impl Tty7App {
         .detach();
     }
 
-    /// The palette's "Update tty7 server" for a remote host: put this build's
-    /// server there even when one of our dialect already is. Between dialect
-    /// bumps that is the only way a daemon-side fix reaches a machine — the
-    /// mismatch path never fires, and a restart relaunches the same old file.
-    ///
-    /// Asked for only where the local daemon can route it. One that predates
-    /// the action cannot even decode the request and hangs up without a word,
-    /// so the user is told which server to update first instead.
     pub(crate) fn confirm_update_remote_server(
         &mut self,
         target: RemoteTarget,
@@ -1359,10 +1327,6 @@ pub(crate) struct RemoteLinks {
     /// the user closed the sheet on rather than answered.
     suspended: std::collections::HashSet<HostId>,
     instances: std::collections::HashMap<HostId, String>,
-    #[allow(
-        dead_code,
-        reason = "read by the prompt relay's drain, which lands with the routed auth sheet"
-    )]
     pub(crate) auth: AuthSheetQueue,
     pumping: bool,
 }
@@ -2679,10 +2643,6 @@ fn panes_of(
     app.read(cx).panes()
 }
 
-#[allow(
-    dead_code,
-    reason = "the five keystroke entry points that call this live in terminal/view.rs"
-)]
 pub(crate) fn workspace_accepts_input(cx: &gpui::App, workspace: WorkspaceId) -> bool {
     RemoteLinks::status_of(cx, workspace)
         .or_else(|| crate::ui::local_link::LocalLink::status_of(cx, workspace))
@@ -3201,15 +3161,15 @@ mod tests {
         assert!(q.request(a), "the first asker goes straight through");
         assert!(!q.request(b));
         assert!(!q.request(c));
-        assert_eq!(q.waiting(), 2);
-        assert_eq!(q.holder(), Some(a));
+        assert_eq!(q.waiting.len(), 2);
+        assert_eq!(q.holder, Some(a));
 
         assert_eq!(q.release(a), Some(b));
-        assert_eq!(q.waiting(), 1);
+        assert_eq!(q.waiting.len(), 1);
         assert_eq!(q.release(b), Some(c));
         assert_eq!(q.release(c), None);
-        assert_eq!(q.holder(), None);
-        assert_eq!(q.waiting(), 0);
+        assert_eq!(q.holder, None);
+        assert_eq!(q.waiting.len(), 0);
     }
 
     #[test]
@@ -3218,27 +3178,7 @@ mod tests {
         let a = host("ssh-alias:a");
         assert!(q.request(a));
         assert!(q.request(a));
-        assert_eq!(q.waiting(), 0);
-    }
-
-    #[test]
-    fn a_connect_that_gave_up_leaves_the_queue() {
-        let mut q = AuthSheetQueue::default();
-        let (a, b, c) = (
-            host("ssh-alias:a"),
-            host("ssh-alias:b"),
-            host("ssh-alias:c"),
-        );
-        q.request(a);
-        q.request(b);
-        q.request(c);
-
-        q.withdraw(b);
-        assert_eq!(q.waiting(), 1);
-        assert_eq!(q.release(a), Some(c), "b is gone, c is next");
-
-        assert_eq!(q.release(b), None);
-        assert_eq!(q.holder(), Some(c));
+        assert_eq!(q.waiting.len(), 0);
     }
 
     #[test]
@@ -3248,7 +3188,7 @@ mod tests {
         assert!(q.request(a));
         assert!(!q.request(b));
         assert!(q.request(a));
-        assert_eq!(q.waiting(), 1);
+        assert_eq!(q.waiting.len(), 1);
     }
 
     #[test]

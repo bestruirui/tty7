@@ -620,6 +620,7 @@ mod wsl_tests {
     }
 }
 
+#[cfg(test)]
 pub fn wsl_distros() -> Vec<String> {
     wsl_distros_probed().unwrap_or_default()
 }

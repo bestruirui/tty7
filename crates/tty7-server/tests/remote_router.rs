@@ -57,7 +57,7 @@ fn a_routed_connection_reaches_a_real_server() {
     host.write_file(&big, &body).unwrap();
     assert!(host.read_file(&big, 8 * 1024 * 1024).unwrap() == body);
 
-    assert_eq!(host.read_dir(sandbox.path(), None).unwrap().len(), 2);
+    assert_eq!(host.read_dir(sandbox.path()).unwrap().len(), 2);
 
     drop(host);
     let _ = router.join().unwrap();

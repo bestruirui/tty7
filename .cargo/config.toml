@@ -4,12 +4,6 @@
 [alias]
 dev = "run -- --config-dir .tty7-dev"
 
-# The gpui fork lives in a fork of the Zed monorepo, and cargo's built-in libgit2
-# fetch reliably times out partway through a clone that size. The git CLI handles
-# it (resumable, packed transfer), and is present on every platform we build on.
-[net]
-git-fetch-with-cli = true
-
 # Link the Visual C++ runtime statically on Windows (#902).
 #
 # The default MSVC target links the CRT dynamically, so every shipped binary
@@ -35,7 +29,7 @@ git-fetch-with-cli = true
 #     than adding to them. `.github/scripts/assert-no-vcruntime.ps1` is the
 #     backstop: it fails the build if VCRUNTIME140/MSVCP140 reappear.
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/STACK:8000000"]
 
 [target.aarch64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/STACK:8000000"]

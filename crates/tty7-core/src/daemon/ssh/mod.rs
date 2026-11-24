@@ -28,8 +28,7 @@ use std::time::Duration;
 use russh::{ChannelMsg, Pty};
 
 use crate::daemon::protocol::{
-    AuthPromptKind, AuthResponse, LoopbackForward, ManagedForward, NativeSshSpec, SshForwardRule,
-    SshPhase, SshTestNeed, SshTestReport, WinSize,
+    LoopbackForward, ManagedForward, NativeSshSpec, SshForwardRule, SshPhase, WinSize,
 };
 use crate::daemon::remote_link::{self, RemoteEntry, RemoteLink};
 use crate::daemon::router::{RouteChannel, RouteSetup};
@@ -238,48 +237,6 @@ impl SshManager {
                 let _ = data_tx.send(line.into_bytes()).await;
             }
         });
-    }
-
-    /// Open the connection this spec describes, report what happened, and let
-    /// it go. The whole path is the real one — proxy, jump host, host-key
-    /// check, authentication — so a pass means the next Connect will work and a
-    /// failure carries the same message the pane would have printed.
-    ///
-    /// Anything the handshake would have *asked* a person is refused on the
-    /// spot and reported as what it asked for: a form is nowhere to answer a
-    /// password prompt, and hanging on one for two minutes would be a worse
-    /// answer than "it got that far and wants your password".
-    pub fn test_connection(&'static self, spec: &NativeSshSpec) -> SshTestReport {
-        let budget = spec
-            .connect_timeout_s
-            .filter(|v| *v > 0)
-            .map(|v| Duration::from_secs(u64::from(v)))
-            .unwrap_or(DEFAULT_CONNECT_TIMEOUT);
-        let asked: Arc<Mutex<Option<SshTestNeed>>> = Arc::new(Mutex::new(None));
-        let broker = declining_broker(Arc::clone(&asked));
-        let started = std::time::Instant::now();
-
-        let outcome = self.runtime.block_on(async {
-            let dial = self.open_connection_reusing(spec, &broker, false);
-            match tokio::time::timeout(budget, dial).await {
-                Ok(result) => result.map_err(|e| format!("{e}")),
-                Err(_) => Err("connection timed out".to_string()),
-            }
-        });
-        let elapsed_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
-
-        // A test holds nothing open and leaves nothing behind: it never entered
-        // the connection cache, so dropping the only `Arc` closes it.
-        match outcome {
-            Ok((conn, _reused)) => {
-                drop(conn);
-                SshTestReport::Authenticated { elapsed_ms }
-            }
-            Err(reason) => match asked.lock().ok().and_then(|a| *a) {
-                Some(need) => SshTestReport::NeedsInput { need, elapsed_ms },
-                None => SshTestReport::Failed { reason },
-            },
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -562,16 +519,6 @@ impl SshManager {
         Ok(())
     }
 
-    pub fn open_remote_link_blocking(
-        &self,
-        spec: &NativeSshSpec,
-        setup: &RouteSetup,
-        server_command: Option<&str>,
-    ) -> anyhow::Result<(RemoteLink, Arc<SshConnection>)> {
-        self.runtime
-            .block_on(self.open_remote_link(spec, setup, server_command))
-    }
-
     /// Forget the connection this key was serving, keeping the slot that
     /// serves it.
     ///
@@ -667,49 +614,22 @@ impl SshManager {
         spec: &'a NativeSshSpec,
         broker: &'a Arc<PromptBroker>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<(Arc<SshConnection>, bool)>> + Send + 'a>> {
-        self.open_connection_reusing(spec, broker, true)
-    }
-
-    /// `reuse` is what separates opening a session from testing one. A session
-    /// is glad to ride an existing connection; a test that did would report on
-    /// the credentials that connection was made with, not the ones in the form
-    /// — a password typed wrong would come back green. So a test dials its own
-    /// and leaves the cache to the sessions.
-    ///
-    /// It leaves the cache's *lock* alone too. The slot is held for the whole
-    /// handshake, so a test that took it would stall every Connect to the same
-    /// host behind a connection it is not going to leave them — and, waiting
-    /// its turn behind a session already dialling, would spend its own budget
-    /// on the queue and come back "connection timed out" about a host that
-    /// answers fine.
-    fn open_connection_reusing<'a>(
-        &'a self,
-        spec: &'a NativeSshSpec,
-        broker: &'a Arc<PromptBroker>,
-        reuse: bool,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<(Arc<SshConnection>, bool)>> + Send + 'a>> {
         Box::pin(async move {
             let key = ConnectionKey::from_spec(spec);
-            let mut guard = match reuse {
-                true => {
-                    let slot: ConnSlot = {
-                        let mut map = self.conns.lock().unwrap();
-                        map.entry(key.clone()).or_default().clone()
-                    };
-                    let guard = slot.lock_owned().await;
-                    if let Some(conn) = guard.usable() {
-                        return Ok((conn, true));
-                    }
-                    if guard.any_live() {
-                        log::info!(
-                            "ssh {key:?}: every connection is at the server's session limit; \
-                             dialling another beside them"
-                        );
-                    }
-                    Some(guard)
-                }
-                false => None,
+            let slot: ConnSlot = {
+                let mut map = self.conns.lock().unwrap();
+                map.entry(key.clone()).or_default().clone()
             };
+            let mut guard = slot.lock_owned().await;
+            if let Some(conn) = guard.usable() {
+                return Ok((conn, true));
+            }
+            if guard.any_live() {
+                log::info!(
+                    "ssh {key:?}: every connection is at the server's session limit; \
+                     dialling another beside them"
+                );
+            }
 
             let has_proxy_command =
                 matches!(&spec.proxy, crate::daemon::protocol::SshProxy::Command(_));
@@ -764,48 +684,10 @@ impl SshManager {
                 .map_err(anyhow::Error::msg)?;
 
             let conn = SshConnection::new(handle, key, remote_forwards);
-            if let Some(guard) = guard.as_mut() {
-                guard.add(&conn);
-            }
+            guard.add(&conn);
             Ok((conn, false))
         })
     }
-}
-
-/// A broker that answers every prompt with "cancelled" the moment it is asked,
-/// and remembers what the first ask was for.
-///
-/// It answers from inside its own emit closure, which works because
-/// [`PromptBroker::prompt`] files the waiting sender before it emits — so the
-/// reply lands on a channel that is already there, and nothing waits out the
-/// two-minute prompt timeout or the fifteen-second delivery window.
-fn declining_broker(asked: Arc<Mutex<Option<SshTestNeed>>>) -> Arc<PromptBroker> {
-    let back: Arc<OnceLock<Weak<PromptBroker>>> = Arc::new(OnceLock::new());
-    let emit_back = Arc::clone(&back);
-    let broker = PromptBroker::new(Box::new(move |msg| {
-        let crate::daemon::protocol::DaemonMsg::AuthPrompt { request_id, prompt } = msg else {
-            // Status and banner frames are not questions; drop them.
-            return true;
-        };
-        let need = match prompt {
-            AuthPromptKind::Password { .. } => SshTestNeed::Password,
-            AuthPromptKind::KeyPassphrase { .. } => SshTestNeed::KeyPassphrase,
-            AuthPromptKind::KeyboardInteractive { .. } => SshTestNeed::KeyboardInteractive,
-            AuthPromptKind::HostKeyUnknown { .. } => SshTestNeed::HostKeyDecision,
-            AuthPromptKind::HostKeyChanged { .. } => SshTestNeed::HostKeyChanged,
-            // Delivered with request_id 0 and never waited on.
-            AuthPromptKind::Banner { .. } => return true,
-        };
-        if let Ok(mut slot) = asked.lock() {
-            slot.get_or_insert(need);
-        }
-        if let Some(broker) = emit_back.get().and_then(Weak::upgrade) {
-            broker.deliver(request_id, AuthResponse::Cancelled);
-        }
-        true
-    }));
-    let _ = back.set(Arc::downgrade(&broker));
-    broker
 }
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1196,59 +1078,5 @@ mod tests {
             conn.mark_dead();
             manager.evict_connection(conn.key());
         });
-    }
-
-    /// The broker a connection test hands the handshake. If it ever waited for
-    /// a real answer, a test against a password host would sit there for two
-    /// minutes with a spinner on it; it has to come back at once, and it has to
-    /// say which question it turned down.
-    #[test]
-    fn a_test_broker_declines_every_prompt_at_once_and_remembers_what_was_asked() {
-        let asked = Arc::new(Mutex::new(None));
-        let broker = declining_broker(Arc::clone(&asked));
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("build test runtime");
-
-        let answer = rt.block_on(async {
-            tokio::time::timeout(
-                Duration::from_secs(1),
-                broker.prompt(AuthPromptKind::Password {
-                    user: "u".into(),
-                    host: "h".into(),
-                }),
-            )
-            .await
-        });
-        assert_eq!(
-            answer,
-            Ok(AuthResponse::Cancelled),
-            "a prompt nobody can answer is declined, not waited on"
-        );
-        assert_eq!(*asked.lock().unwrap(), Some(SshTestNeed::Password));
-
-        // The first question is the one worth reporting: a host key that has to
-        // be reviewed is why the password was never reached.
-        let answer = rt.block_on(async {
-            tokio::time::timeout(
-                Duration::from_secs(1),
-                broker.prompt(AuthPromptKind::KeyboardInteractive {
-                    name: "2FA".into(),
-                    instructions: String::new(),
-                    prompts: vec![],
-                    stored_rejected: false,
-                }),
-            )
-            .await
-        });
-        assert_eq!(answer, Ok(AuthResponse::Cancelled));
-        assert_eq!(*asked.lock().unwrap(), Some(SshTestNeed::Password));
-
-        // A banner is not a question; it must not be mistaken for one.
-        let fresh = Arc::new(Mutex::new(None));
-        let quiet = declining_broker(Arc::clone(&fresh));
-        quiet.banner("welcome".into());
-        assert_eq!(*fresh.lock().unwrap(), None);
     }
 }

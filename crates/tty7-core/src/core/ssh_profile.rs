@@ -93,10 +93,6 @@ impl SshProfile {
             .map(|f| expand_identity_placeholders(f, &self.host, &self.user))
             .collect()
     }
-
-    pub fn connect_string(&self) -> String {
-        to_connect_string(self)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

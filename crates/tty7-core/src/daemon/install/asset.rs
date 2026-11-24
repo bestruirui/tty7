@@ -18,7 +18,7 @@ pub const ASSET_WINDOWS_AARCH64: &str = "tty7-server-windows-aarch64.exe";
 
 pub const CHECKSUMS_ASSET: &str = "checksums.txt";
 
-pub const RELEASE_BASE: &str = "https://github.com/l0ng-ai/tty7/releases/download";
+pub const RELEASE_BASE: &str = "https://github.com/bestruirui/tty7/releases/download";
 
 pub const INSTALL_DIR_COMPONENTS: [&str; 4] = [".local", "share", "tty7", "bin"];
 
@@ -253,15 +253,6 @@ pub fn binary_name(control: u32, protocol: u32) -> String {
     format!("tty7-server-c{control}p{protocol}")
 }
 
-pub fn remote_paths_for_binary(
-    home: &str,
-    binary: &str,
-    control: u32,
-    protocol: u32,
-) -> RemotePaths {
-    remote_paths_for_binary_on(RemotePlatform::Unix, home, binary, control, protocol)
-}
-
 pub fn remote_paths_for_binary_on(
     platform: RemotePlatform,
     home: &str,
@@ -462,11 +453,11 @@ mod tests {
     fn download_urls_point_at_the_release_the_tag_names() {
         assert_eq!(
             download_url(&release_tag("26.7.5"), ASSET_LINUX_X86_64),
-            "https://github.com/l0ng-ai/tty7/releases/download/v26.7.5/tty7-server-linux-x86_64-musl"
+            "https://github.com/bestruirui/tty7/releases/download/v26.7.5/tty7-server-linux-x86_64-musl"
         );
         assert_eq!(
             download_url(&release_tag("26.7.6-nightly.20260727"), CHECKSUMS_ASSET),
-            "https://github.com/l0ng-ai/tty7/releases/download/nightly/checksums.txt"
+            "https://github.com/bestruirui/tty7/releases/download/nightly/checksums.txt"
         );
     }
 

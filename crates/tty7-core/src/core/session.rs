@@ -150,16 +150,6 @@ impl RemoteTarget {
         }
     }
 
-    pub fn parse_direct(input: &str) -> Option<RemoteTarget> {
-        let q = crate::core::ssh_profile::parse_quick_connect(input)?;
-        let port = q.port_or_default();
-        Some(RemoteTarget::direct(
-            q.user.unwrap_or_default(),
-            q.host,
-            port,
-        ))
-    }
-
     pub fn connection_key(&self) -> String {
         match self {
             RemoteTarget::Profile { id } => format!("ssh-profile:{id}"),
@@ -171,15 +161,6 @@ impl RemoteTarget {
             RemoteTarget::LocalStdio { program, args } => {
                 format!("local-stdio:{program} {}", args.join(" "))
             }
-        }
-    }
-
-    pub fn is_ssh(&self) -> bool {
-        match self {
-            RemoteTarget::Profile { .. }
-            | RemoteTarget::Alias { .. }
-            | RemoteTarget::Direct { .. } => true,
-            RemoteTarget::Wsl { .. } | RemoteTarget::LocalStdio { .. } => false,
         }
     }
 
@@ -872,38 +853,6 @@ mod tests {
     }
 
     #[test]
-    fn only_ssh_machines_are_reached_over_ssh() {
-        assert!(
-            RemoteTarget::Profile {
-                id: uuid::Uuid::nil()
-            }
-            .is_ssh()
-        );
-        assert!(
-            RemoteTarget::Alias {
-                alias: "devbox".into()
-            }
-            .is_ssh()
-        );
-        assert!(RemoteTarget::direct("me", "box.local", 22).is_ssh());
-        assert!(
-            !RemoteTarget::Wsl {
-                distro: "Ubuntu".into()
-            }
-            .is_ssh(),
-            "a distribution is reached through wsl.exe, not a connection"
-        );
-        assert!(
-            !RemoteTarget::LocalStdio {
-                program: "tty7-server".into(),
-                args: vec!["--stdio".into()],
-            }
-            .is_ssh(),
-            "a stdio machine is a child process per connection"
-        );
-    }
-
-    #[test]
     fn every_machine_but_a_stdio_one_has_a_server_to_restart() {
         assert!(
             RemoteTarget::Profile {
@@ -936,15 +885,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_targets_normalize_and_reuse_the_quick_connect_parser() {
-        assert_eq!(
-            RemoteTarget::parse_direct("ssh://me@Box.Local"),
-            Some(RemoteTarget::direct("me", "box.local", 22))
-        );
-        assert_eq!(
-            RemoteTarget::parse_direct("me@box.local:2222"),
-            Some(RemoteTarget::direct("me", "box.local", 2222))
-        );
+    fn direct_target_host_keys_are_normalized_and_alias_keys_remain_case_sensitive() {
         let shouty = RemoteTarget::Direct {
             user: "me".into(),
             host: "BOX.LOCAL".into(),
@@ -954,8 +895,6 @@ mod tests {
             shouty.host_id(),
             RemoteTarget::direct("me", "box.local", 22).host_id()
         );
-        assert_eq!(RemoteTarget::parse_direct(""), None);
-        assert_eq!(RemoteTarget::parse_direct("me@box:0"), None);
         assert_ne!(
             RemoteTarget::Alias {
                 alias: "Devbox".into()

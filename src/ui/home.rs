@@ -1,13 +1,13 @@
 use std::time::Duration;
 
+use gpui::component::kbd::Kbd;
+use gpui::component::{ActiveTheme as _, IconName, h_flex, v_flex};
 use gpui::{
     Animation, AnimationExt as _, App, Context, KeyDownEvent, Keystroke, MouseButton, div,
     prelude::*, px,
 };
-use gpui_component::kbd::Kbd;
-use gpui_component::{ActiveTheme as _, IconName, h_flex, v_flex};
 
-use crate::core::actions::{NewTab, OpenSettings, ReopenClosedTab, TogglePalette, ToggleSwitcher};
+use crate::core::actions::{NewTab, OpenSettings, ReopenClosedTab, ToggleSwitcher};
 use crate::core::session::{SessionPane, SessionTab};
 use crate::ui::app::Tty7App;
 use crate::ui::i18n::{L10nKey, t, t_fmt, t_plural};
@@ -26,17 +26,13 @@ const LOGO_PX: f32 = 20.0;
 /// word when there is none — the home page was advertising two chords that do
 /// nothing from the only screen that offers them. `ReopenClosedTab` earns its
 /// row only while something is on the closed stack.
-const HOME_SHORTCUTS: [&str; 5] = [
+const HOME_SHORTCUTS: [&str; 4] = [
     "NewTab",
     "ReopenClosedTab",
     "ToggleSwitcher",
-    "TogglePalette",
     "OpenSettings",
 ];
 
-/// The shortcut list under the logo. Rows are the sidebar's 28px step rather
-/// than the old 42px buttons: five of them stacked at that height read as a
-/// wall of controls on a page whose only job is to say "press ⌘T".
 const HOME_LIST_W: f32 = 340.;
 const HOME_ROW_H: f32 = 28.;
 
@@ -179,7 +175,7 @@ fn snap_to_separator(tail: &str) -> &str {
 pub(crate) fn key_stroke(action: &str, cx: &App) -> Option<Keystroke> {
     let spec = crate::ui::keymap::effective_key(action, cx)?;
     let first = spec.split_whitespace().next()?;
-    Keystroke::parse(first).ok()
+    Keystroke::parse_with_os(first, cx.platform_info().os).ok()
 }
 
 /// The first stroke of `action`'s binding, one token per key.
@@ -198,7 +194,6 @@ fn home_shortcut_label(action: &str, closed: Option<&str>) -> String {
         "NewTab" => crate::ui::i18n::t(crate::ui::i18n::L10nKey::HomeNewTab),
         "ReopenClosedTab" => crate::ui::i18n::t(crate::ui::i18n::L10nKey::HomeReopenClosedTab),
         "ToggleSwitcher" => crate::ui::i18n::t(crate::ui::i18n::L10nKey::HomeSwitchWorkspace),
-        "TogglePalette" => crate::ui::i18n::t(crate::ui::i18n::L10nKey::HomeSearchEverywhere),
         "SplitRight" => crate::ui::i18n::t(crate::ui::i18n::L10nKey::HomeSplitRight),
         "SplitDown" => crate::ui::i18n::t(crate::ui::i18n::L10nKey::HomeSplitDown),
         "OpenSettings" => crate::ui::i18n::t(crate::ui::i18n::L10nKey::HomeSettings),
@@ -280,7 +275,6 @@ impl Tty7App {
                             "NewTab" => Box::new(NewTab),
                             "ReopenClosedTab" => Box::new(ReopenClosedTab),
                             "ToggleSwitcher" => Box::new(ToggleSwitcher),
-                            "TogglePalette" => Box::new(TogglePalette),
                             "OpenSettings" => Box::new(OpenSettings),
                             _ => return,
                         };
@@ -352,7 +346,7 @@ impl Tty7App {
             crate::ui::remote_workspace::status_card(cx)
                 .child(
                     crate::ui::remote_workspace::status_row()
-                        .child(gpui_component::Icon::new(IconName::Globe))
+                        .child(gpui::component::Icon::new(IconName::Globe))
                         .child(crate::ui::remote_workspace::status_message(message))
                         .when_some(action, |this, (label, action)| {
                             this.child(

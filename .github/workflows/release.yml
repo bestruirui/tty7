@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-latest
             os: macos
             arch: arm64
             target: aarch64-apple-darwin
@@ -54,12 +54,9 @@ jobs:
     continue-on-error: ${{ matrix.experimental == true }}
     steps:
       - name: Checkout tty7
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: tty7
-
-      # gpui-component is pulled as a git dependency (see Cargo.toml's patch
-      # section), so no sibling checkout is needed.
 
       # gpui's Linux backends resolve the x11/wayland/xkb/font dev packages via
       # pkg-config at build time — the same set the README documents for
@@ -226,7 +223,7 @@ jobs:
       RUSTFLAGS: -C strip=symbols
     steps:
       - name: Checkout tty7
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: tty7
 
@@ -237,9 +234,11 @@ jobs:
       # zig provides the musl sysroot and the C cross-compiler for both targets
       # from one x86_64 runner — see the same job in ci.yml for why the
       # alternatives (cross, musl-tools) do not cope with aws-lc-rs' cmake build.
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
+      - name: Install Zig
+        run: |
+          python3 -m venv .zig-venv
+          .zig-venv/bin/python -m pip install ziglang==0.16.0
+          echo "CARGO_ZIGBUILD_PYTHON_PATH=$GITHUB_WORKSPACE/.zig-venv/bin/python" >> "$GITHUB_ENV"
 
       - uses: taiki-e/install-action@v2
         with:
@@ -304,7 +303,7 @@ jobs:
   # version-free names that `install::asset` derives from `uname -sm`. Separate
   # from `server-musl` because an Apple target needs an Apple runner, and both
   # slices come off one arm64 runner — the Xcode SDK carries both. See ci.yml's
-  # `server-macos` for the rest of the reasoning; keep the three in sync.
+  # `server-macos` for the rest of the reasoning; keep both in sync.
   #
   # Not code-signed or notarized, and deliberately: this binary is never
   # downloaded by the destination Mac. The client fetches it, verifies it against
@@ -327,7 +326,7 @@ jobs:
       RUSTFLAGS: -C strip=symbols
     steps:
       - name: Checkout tty7
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: tty7
 
@@ -424,7 +423,7 @@ jobs:
       CARGO_PROFILE_RELEASE_STRIP: symbols
     steps:
       - name: Checkout tty7
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: tty7
 
@@ -459,14 +458,9 @@ jobs:
           path: tty7/dist/${{ matrix.asset }}
           if-no-files-found: error
 
-  # Single assembly step, after every GUI platform and every server slice
-  # succeeds. The release object is
-  # created as a **draft** and left that way: a draft is invisible to both
-  # /releases/latest and the releases page, so nothing can prompt a user to
-  # download a version whose asset set is incomplete or whose notes are still
-  # empty. Publishing is the release skill's job — it verifies the platform assets and
-  # writes the body first, then flips the draft. See .claude/skills/release/SKILL.md.
-  draft-release:
+  # Assemble all platform assets and checksums in a draft, then publish it only
+  # after every upload succeeds so the updater never sees an incomplete release.
+  release:
     needs: [build, server-musl, server-macos, server-windows]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
@@ -532,3 +526,6 @@ jobs:
               --draft --title "$GITHUB_REF_NAME" --notes ""
           fi
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Publish release
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

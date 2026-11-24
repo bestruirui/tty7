@@ -101,8 +101,6 @@ impl Global for Interactions {}
 pub mod state {
     pub const HOVER: f32 = 1.18;
     pub const SELECTED: f32 = 1.30;
-    pub const PRESSED: f32 = 1.55;
-    pub const CURSOR: f32 = 1.70;
     /// The side panels' own, lighter rungs (see `Theme::panel_surface`).
     /// A panel lists many rows at once, and at the window's 1.30 the current
     /// one read as a dark slab; these land on #ededec / #e8e8e7 on the
@@ -118,11 +116,6 @@ pub struct Surface {
     pub base: u32,
     pub hover: u32,
     pub selected: u32,
-    pub pressed: u32,
-    /// The top rung. No surface paints it today; the ladder tests hold the
-    /// rungs below it apart against it.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub cursor: u32,
     pub text_resting: u32,
     pub text_selected: u32,
 }
@@ -153,26 +146,6 @@ pub fn scrim_fill(cx: &App) -> Hsla {
 pub struct ActiveAccent(pub u32);
 
 impl Global for ActiveAccent {}
-
-/// How many lanes of the commit graph get a colour of their own.
-///
-/// Six because that is how many hues of the ANSI set survive being pulled to a
-/// contrast floor while staying apart from each other — and because the graph
-/// caps its visible lanes at the same number, which is what guarantees no two
-/// columns on screen are ever the same colour.
-pub const LANE_SLOTS: usize = 6;
-
-#[derive(Debug, Clone, Copy)]
-pub struct Lanes {
-    pub ink: [u32; LANE_SLOTS],
-    /// Everything past the last slot shares one column, so it gets a neutral:
-    /// a hue there would claim a branch identity the column does not have.
-    pub overflow: u32,
-}
-
-pub struct ActiveLanes(pub Lanes);
-
-impl Global for ActiveLanes {}
 
 impl Theme {
     pub fn background_color(&self) -> u32 {
@@ -284,8 +257,6 @@ impl Theme {
             base,
             hover: raise(base, fg, state::HOVER),
             selected,
-            pressed: raise(base, fg, state::PRESSED),
-            cursor: raise(base, fg, state::CURSOR),
             text_resting,
             text_selected: stepped_ink(selected, base, fg, text_resting),
         }
@@ -301,11 +272,11 @@ impl Theme {
         let shade = shade_of(base, fg);
         let selected = raise(base, shade, state::PANEL_SELECTED);
         Surface {
+            base,
             hover: raise(base, shade, state::PANEL_HOVER),
             selected,
             text_resting,
             text_selected: stepped_ink(selected, base, fg, text_resting),
-            ..self.surface(base)
         }
     }
 
@@ -389,38 +360,6 @@ impl Theme {
             warning: build(amber),
             info: build(self.accent),
             link: build(self.accent),
-        }
-    }
-
-    /// Lane colours for the commit graph, derived the same way every other
-    /// colour in this file is: seeded from the theme's own palette, then walked
-    /// to a contrast floor on each surface it can be painted on.
-    ///
-    /// Not a fixed table of hexes. A hard-coded palette would be the one thing
-    /// here that does not follow the theme, and — worse — the contrast tests
-    /// below cannot see it, so the four light builtins would ship a graph whose
-    /// lanes sit at 2:1 against their own background.
-    ///
-    /// The seed order is blue, yellow, magenta, green, cyan, red. Three
-    /// constraints picked it: no two adjacent slots share a hue family; red and
-    /// green are never neighbours, for the readers who cannot tell them apart;
-    /// and red is last because a panel three or four lanes wide never reaches
-    /// it, so the one colour that also means "danger" everywhere else in the UI
-    /// stays out of the common case.
-    pub fn lanes(&self) -> Lanes {
-        const SEEDS: [usize; LANE_SLOTS] = [4, 3, 5, 2, 6, 1];
-        let bg = self.background_color();
-        let fg = legible_foreground(bg, self.foreground);
-        // Through `clear_ink`, the same three surfaces `semantics` clears on:
-        // the graph draws on the window in a floating panel, on the sidebar
-        // when the panel is docked, and on a popover in the detail view.
-        let mut ink = [0u32; LANE_SLOTS];
-        for (slot, seed) in SEEDS.iter().enumerate() {
-            ink[slot] = self.clear_ink(self.ansi_seed(*seed), ACCENT_FLOOR);
-        }
-        Lanes {
-            ink,
-            overflow: dim(fg, bg, state::TEXT_RESTING),
         }
     }
 
@@ -753,26 +692,6 @@ const RAIL_TINT: f32 = 0.03;
 /// ratio that clears `TEXT_STEP` over a 4.6:1 caption with room to spare on
 /// the fills a sidebar is actually painted on.
 const TITLE_FLOOR: f32 = 7.0;
-
-/// A semantic ink stepped down to sit beside body text instead of over it.
-///
-/// `success` and `danger` are cleared to `TEXT_FLOOR` at full chroma, which is
-/// right for the one line that says a push failed and wrong for a `+94 −26`
-/// repeated on every row of a list: twelve saturated numerals become the
-/// loudest thing in the column while carrying the least. Blending toward the
-/// caption ink they sit next to keeps the hue (green still means added) and
-/// takes the shout out, then the blend is walked back toward the full ink
-/// only when the surface it lands on cannot carry it at `TEXT_FLOOR`.
-pub(crate) fn resting_ink(ink: Hsla, beside: Hsla, surface: Hsla) -> Hsla {
-    let (ink, beside, surface) = (pack(ink), pack(beside), pack(surface));
-    let blend = mix(ink, beside, 0.45);
-    gpui::rgb(at_least(blend, ink, surface, TEXT_FLOOR)).into()
-}
-
-fn pack(c: Hsla) -> u32 {
-    let rgb = crate::terminal::palette::hsla_to_rgb(c);
-    (rgb.r as u32) << 16 | (rgb.g as u32) << 8 | rgb.b as u32
-}
 
 /// Hairlines are separators, not control outlines — the surfaces they divide
 /// carry their own fills, so WCAG 1.4.11's 3:1 does not apply and painting them
@@ -1790,7 +1709,6 @@ mod tests {
                 let sel_base = contrast(sf.selected, sf.base);
                 let sel_hover = contrast(sf.selected, sf.hover);
                 let hover_base = contrast(sf.hover, sf.base);
-                let cursor_sel = contrast(sf.cursor, sf.selected);
                 assert!(
                     sel_base >= 1.25,
                     "{}/{name}: selected is only {sel_base:.2}:1 from the surface",
@@ -1802,18 +1720,8 @@ mod tests {
                     t.id
                 );
                 assert!(
-                    cursor_sel >= 1.2,
-                    "{}/{name}: cursor is only {cursor_sel:.2}:1 from the resting selection",
-                    t.id
-                );
-                assert!(
                     hover_base >= 1.1,
                     "{}/{name}: hover is only {hover_base:.2}:1 from the surface",
-                    t.id
-                );
-                assert!(
-                    contrast(sf.pressed, sf.base) > sel_base,
-                    "{}/{name}: pressed must read past selected",
                     t.id
                 );
             }
@@ -1835,11 +1743,6 @@ mod tests {
                 assert!(
                     sel_base >= state::PANEL_SELECTED - 0.02 && sel_base > hover_base,
                     "{}/{name}: selected is only {sel_base:.2}:1 from the surface",
-                    t.id
-                );
-                assert!(
-                    contrast(sf.pressed, sf.base) > sel_base,
-                    "{}/{name}: pressed must read past selected",
                     t.id
                 );
             }
@@ -1873,7 +1776,6 @@ mod tests {
     fn dracula_selection_matches_the_signed_off_greys() {
         let dracula = builtins().into_iter().find(|t| t.id == "dracula").unwrap();
         let bg = dracula.background_color();
-        let s = dracula.surfaces();
         // The resting rung is checked as `state::SELECTED` on the sidebar
         // fill it was signed off on — the old rail, 3% toward the foreground —
         // rather than on today's rail, which has since gone flat onto the
@@ -1881,134 +1783,13 @@ mod tests {
         // that decision.
         let fg = legible_foreground(bg, dracula.foreground);
         let signed_off_rail = mix(bg, fg, 0.03);
-        for (what, now, legacy) in [
-            (
-                "resting",
+        assert!(
+            contrast(
                 raise(signed_off_rail, fg, state::SELECTED),
                 mix(bg, dracula.foreground, 0.12),
-            ),
-            ("cursor", s.window.cursor, mix(bg, dracula.foreground, 0.17)),
-        ] {
-            assert!(
-                contrast(now, legacy) < 1.05,
-                "Dracula's {what} selection moved: {now:#08x} vs the tuned {legacy:#08x}"
-            );
-        }
-    }
-
-    /// CIE L*a*b* for a packed sRGB colour, D65.
-    ///
-    /// Contrast is a luminance ratio and says nothing about hue: two lanes can
-    /// both clear 3:1 against the background and still be the same colour to
-    /// look at. ΔE is the measure that catches that, and it needs Lab.
-    fn lab(c: u32) -> (f32, f32, f32) {
-        fn linear(v: u32) -> f32 {
-            let s = v as f32 / 255.0;
-            if s <= 0.04045 {
-                s / 12.92
-            } else {
-                ((s + 0.055) / 1.055).powf(2.4)
-            }
-        }
-        let (r, g, b) = (
-            linear(c >> 16 & 0xff),
-            linear(c >> 8 & 0xff),
-            linear(c & 0xff),
+            ) < 1.05,
+            "Dracula's resting selection moved"
         );
-        // sRGB → XYZ, then normalised by the D65 white point.
-        let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
-        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
-        let f = |t: f32| {
-            if t > 0.008856 {
-                t.cbrt()
-            } else {
-                7.787 * t + 16.0 / 116.0
-            }
-        };
-        let (fx, fy, fz) = (f(x), f(y), f(z));
-        (116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz))
-    }
-
-    fn delta_e76(a: u32, b: u32) -> f32 {
-        let (l1, a1, b1) = lab(a);
-        let (l2, a2, b2) = lab(b);
-        ((l1 - l2).powi(2) + (a1 - a2).powi(2) + (b1 - b2).powi(2)).sqrt()
-    }
-
-    #[test]
-    fn lane_colours_clear_the_floor_on_every_surface() {
-        for t in builtins() {
-            let m = t.neutrals();
-            let lanes = t.lanes();
-            for (name, surface) in [
-                ("background", m.background),
-                ("sidebar", m.sidebar),
-                ("popover", m.popover),
-            ] {
-                for (slot, ink) in lanes.ink.iter().enumerate() {
-                    let ratio = contrast(*ink, surface);
-                    assert!(
-                        ratio >= ACCENT_FLOOR,
-                        "{}/{name}: lane {slot} is only {ratio:.2}:1",
-                        t.id
-                    );
-                }
-                let ratio = contrast(lanes.overflow, surface);
-                assert!(
-                    ratio >= ACCENT_FLOOR,
-                    "{}/{name}: the overflow lane is only {ratio:.2}:1",
-                    t.id
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn adjacent_lanes_are_never_the_same_colour() {
-        // A just-noticeable difference is around 2.3. The floor is set far
-        // above it because these are 1.5px lines a few pixels apart, not
-        // patches side by side, and the eye is much worse at hairlines.
-        const FLOOR: f32 = 12.0;
-        for t in builtins() {
-            let lanes = t.lanes();
-            for slot in 0..LANE_SLOTS - 1 {
-                let d = delta_e76(lanes.ink[slot], lanes.ink[slot + 1]);
-                assert!(
-                    d >= FLOOR,
-                    "{}: lanes {slot} and {} are ΔE {d:.1} apart",
-                    t.id,
-                    slot + 1
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn lane_colours_are_deterministic() {
-        for t in builtins() {
-            assert_eq!(
-                t.lanes().ink,
-                t.lanes().ink,
-                "{}: lane derivation is not a pure function",
-                t.id
-            );
-        }
-    }
-
-    /// The seeds were chosen so that no two neighbours share a hue family and
-    /// red never sits beside green. Both are properties of the *order*, so a
-    /// reshuffle has to fail here rather than only looking slightly worse.
-    #[test]
-    fn the_lane_seed_order_keeps_red_and_green_apart() {
-        let seeds = [4usize, 3, 5, 2, 6, 1];
-        let red = seeds.iter().position(|s| *s == 1).expect("red is a seed");
-        let green = seeds.iter().position(|s| *s == 2).expect("green is a seed");
-        assert!(
-            red.abs_diff(green) > 1,
-            "red and green ended up adjacent at slots {red} and {green}"
-        );
-        assert_eq!(red, LANE_SLOTS - 1, "red should be the last slot reached");
     }
 
     #[test]
@@ -2233,34 +2014,6 @@ mod tests {
                 m.sidebar_fg,
                 m.muted_foreground
             );
-        }
-    }
-
-    #[test]
-    fn resting_semantic_ink_keeps_the_text_floor() {
-        for t in builtins() {
-            let m = t.neutrals();
-            let sem = t.semantics();
-            let beside: Hsla = gpui::rgb(m.muted_foreground).into();
-            for (name, ink) in [("success", sem.success.ink), ("danger", sem.danger.ink)] {
-                for (surface_name, surface) in [
-                    ("window", m.background),
-                    ("sidebar", m.sidebar),
-                    ("popover", m.popover),
-                ] {
-                    let resting = pack(resting_ink(
-                        gpui::rgb(ink).into(),
-                        beside,
-                        gpui::rgb(surface).into(),
-                    ));
-                    let ratio = contrast(resting, surface);
-                    assert!(
-                        ratio >= TEXT_FLOOR - 0.02,
-                        "{}/{surface_name}: resting {name} {resting:#08x} is only {ratio:.2}:1",
-                        t.id
-                    );
-                }
-            }
         }
     }
 

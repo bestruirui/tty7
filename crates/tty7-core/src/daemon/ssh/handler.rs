@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use russh::Channel;
 use russh::client::{ChannelOpenHandle, Msg, Session};
-use russh::keys::PublicKey;
+use russh::keys::{PublicKey, PublicKeyOrCertificate};
 use tokio::net::TcpStream;
 
 use crate::daemon::protocol::{AuthPromptKind, AuthResponse};
@@ -132,8 +132,15 @@ impl russh::client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        let PublicKeyOrCertificate::PublicKey {
+            key: server_public_key,
+            ..
+        } = server_public_key
+        else {
+            return Ok(false);
+        };
         let status = known_hosts::check(&self.host, self.port, server_public_key);
         if !self.verify_host_keys && matches!(status, HostKeyStatus::Revoked) {
             log::warn!(

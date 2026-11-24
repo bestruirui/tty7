@@ -67,8 +67,9 @@ pub(super) fn grid_smart_range<T: EventListener>(
         return Some(resolved(s, e));
     }
 
+    #[cfg(target_os = "macos")]
     if is_cjk(chars[click_idx])
-        && let Some((s, e)) = cjk_word_range(&text, click_idx)
+        && let Some((s, e)) = tokenizer::word_range(&text, click_idx)
     {
         return Some(resolved(s, e));
     }
@@ -87,71 +88,6 @@ pub(super) fn is_cjk(c: char) -> bool {
         | 0xFF00..=0xFFEF
         | 0x20000..=0x3134F
     )
-}
-
-#[cfg(not(target_os = "macos"))]
-fn is_kana_or_hangul(c: char) -> bool {
-    matches!(
-        u32::from(c),
-        0x1100..=0x11FF
-        | 0x3040..=0x30FF
-        | 0x31F0..=0x31FF
-        | 0xA960..=0xA97F
-        | 0xAC00..=0xD7FF
-        | 0xFF66..=0xFF9F
-    )
-}
-
-#[cfg(not(target_os = "macos"))]
-static JIEBA: OnceLock<jieba_rs::Jieba> = OnceLock::new();
-
-#[cfg(not(target_os = "macos"))]
-fn warm() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        std::thread::spawn(|| {
-            let _ = JIEBA.get_or_init(jieba_rs::Jieba::new);
-        });
-    });
-}
-
-pub(super) fn cjk_word_range(text: &str, click: usize) -> Option<(usize, usize)> {
-    #[cfg(target_os = "macos")]
-    {
-        tokenizer::word_range(text, click)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let chars: Vec<char> = text.chars().collect();
-        chars.get(click)?;
-        jieba_word_range(&chars, click)
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn jieba_word_range(chars: &[char], click: usize) -> Option<(usize, usize)> {
-    let mut rs = click;
-    while rs > 0 && is_cjk(chars[rs - 1]) {
-        rs -= 1;
-    }
-    let mut re = click;
-    while re + 1 < chars.len() && is_cjk(chars[re + 1]) {
-        re += 1;
-    }
-    if chars[rs..=re].iter().copied().any(is_kana_or_hangul) {
-        return None;
-    }
-    let Some(jieba) = JIEBA.get() else {
-        warm();
-        return None;
-    };
-    let run: String = chars[rs..=re].iter().collect();
-    let rel = click - rs;
-    jieba
-        .cut(&run, true)
-        .iter()
-        .find(|tok| rel < tok.end)
-        .map(|tok| (rs + tok.start, rs + tok.end - 1))
 }
 
 #[cfg(target_os = "macos")]
@@ -655,11 +591,6 @@ mod tests {
 
     const SEPS: &str = ",│`|:\"' ()[]{}<>\t";
 
-    fn ensure_segmenter() {
-        #[cfg(not(target_os = "macos"))]
-        let _ = JIEBA.get_or_init(jieba_rs::Jieba::new);
-    }
-
     fn range(text: &str, click: usize) -> Option<(usize, usize)> {
         let chars: Vec<char> = text.chars().collect();
         smart_range(text, &chars, click, SEPS)
@@ -732,101 +663,6 @@ mod tests {
             grid_select(&term, 1, col_of("com/deep/path here", "deep")).as_deref(),
             Some(whole),
         );
-    }
-
-    /// A path the terminal itself wrapped is one path, from either side of
-    /// the seam and however many rows it takes.
-    #[test]
-    fn a_soft_wrapped_file_path_is_one_link() {
-        let dir = std::env::temp_dir().join(format!("tty7-wrap-{}", std::process::id()));
-        let make = |rel: &str| {
-            let path = dir.join(rel);
-            std::fs::create_dir_all(path.parent().expect("a parent")).expect("create dirs");
-            std::fs::write(&path, b"x").expect("create file");
-            path
-        };
-        let ascii = make("a/bb/ccc/dddd/notes.md");
-        let cjk = make("文档/子目录/笔记.md");
-        let deep = make("aaaa/bbbb/cccc/dddd/eeee/ffff/notes.md");
-        let roots = crate::terminal::search::LinkRoots::local(vec![dir.clone()]);
-
-        let resolved = |input: &str, line: i32, col: usize| {
-            let term = term_with(20, 5, input);
-            let click = Point::new(Line(line), Column(col));
-            let (text, _points, idx) = logical_line_at(&term, click, true)?;
-            let link = crate::terminal::search::link_at(
-                &text,
-                idx,
-                &roots,
-                true,
-                &mut crate::terminal::search::local_probe,
-            )?;
-            match link.target {
-                crate::terminal::search::LinkTarget::File { path, .. } => Some(path),
-                crate::terminal::search::LinkTarget::Url(_) => None,
-            }
-        };
-
-        // 20 columns, so each of these runs past the right edge.
-        let line = "see a/bb/ccc/dddd/notes.md here";
-        for (row, col, where_) in [
-            (0, 6, "before the seam"),
-            (0, 19, "the last cell of the first row"),
-            (1, 0, "the first cell of the second row"),
-            (1, 2, "after the seam"),
-        ] {
-            assert_eq!(
-                resolved(line, row, col).as_deref(),
-                Some(ascii.as_path()),
-                "{where_} is the same link"
-            );
-        }
-
-        assert_eq!(
-            resolved("see 文档/子目录/笔记.md here", 1, 1).as_deref(),
-            Some(cjk.as_path()),
-            "a wide-character path wraps like any other"
-        );
-        assert_eq!(
-            resolved("at aaaa/bbbb/cccc/dddd/eeee/ffff/notes.md end", 1, 10).as_deref(),
-            Some(deep.as_path()),
-            "and one that takes three rows is still one path"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A newline is only read as a wrap when the text ran into the right
-    /// edge. Anything else is two lines that happen to sit next to each
-    /// other, and gluing those together would invent paths out of unrelated
-    /// output.
-    #[test]
-    fn a_newline_short_of_the_right_edge_is_not_a_wrap() {
-        let dir = std::env::temp_dir().join(format!("tty7-nowrap-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("a/bb/ccc/dddd")).expect("create dirs");
-        std::fs::write(dir.join("a/bb/ccc/dddd/notes.md"), b"x").expect("create file");
-        let roots = crate::terminal::search::LinkRoots::local(vec![dir.clone()]);
-
-        let term = term_with(20, 5, "see a/bb/ccc/dddd/\r\nnotes.md here");
-        let click = Point::new(Line(0), Column(6));
-        let (text, _points, idx) = logical_line_at(&term, click, true).expect("logical line");
-        let link = crate::terminal::search::link_at(
-            &text,
-            idx,
-            &roots,
-            true,
-            &mut crate::terminal::search::local_probe,
-        )
-        .expect("the directory on the first row still resolves");
-        match link.target {
-            crate::terminal::search::LinkTarget::File { path, is_dir, .. } => {
-                assert_eq!(path, dir.join("a/bb/ccc/dddd"));
-                assert!(is_dir, "the first row on its own names a directory");
-            }
-            crate::terminal::search::LinkTarget::Url(url) => panic!("expected a file, got {url}"),
-        }
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -981,9 +817,9 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn wide_glyph_and_its_spacer_resolve_to_the_same_word() {
-        ensure_segmenter();
         let term = term_with(40, 3, "run 北京欢迎你 done");
         let expected = grid_select(&term, 0, 4);
         assert_eq!(expected.as_deref(), Some("北京"), "click on 北");
@@ -1004,9 +840,9 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn wide_glyph_wrapping_to_the_next_row_keeps_its_word_intact() {
-        ensure_segmenter();
         let term = term_with(9, 4, "abcdefgh北京欢迎你");
         assert_eq!(grid_select(&term, 1, 0).as_deref(), Some("北京"));
     }
@@ -1236,47 +1072,47 @@ mod tests {
         assert_eq!(bracket_range(&chars, 1), None);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn cjk_segmentation_selects_a_dictionary_word_not_the_whole_run() {
-        ensure_segmenter();
         let text = "run 北京欢迎你 done";
         let chars: Vec<char> = text.chars().collect();
         let click = chars.iter().position(|&c| c == '京').unwrap();
-        let (s, e) = cjk_word_range(text, click).expect("segmented range");
+        let (s, e) = tokenizer::word_range(text, click).expect("segmented range");
         let sel: String = chars[s..=e].iter().collect();
         assert_eq!(sel, "北京");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn cjk_segmentation_survives_surrogate_pairs_before_the_click() {
-        ensure_segmenter();
         for text in ["你好世界", "🙂 你好世界", "🙂🙂🙂 你好世界"] {
             let chars: Vec<char> = text.chars().collect();
             let click = chars.iter().position(|&c| c == '世').unwrap();
-            let (s, e) = cjk_word_range(text, click).expect("segmented range");
+            let (s, e) = tokenizer::word_range(text, click).expect("segmented range");
             let sel: String = chars[s..=e].iter().collect();
             assert_eq!(sel, "世界", "{text:?} segmented wrong");
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn cjk_punctuation_is_its_own_token() {
-        ensure_segmenter();
         let text = "比赛，天气";
         let chars: Vec<char> = text.chars().collect();
         let click = chars.iter().position(|&c| c == '，').unwrap();
-        let (s, e) = cjk_word_range(text, click).expect("segmented range");
+        let (s, e) = tokenizer::word_range(text, click).expect("segmented range");
         let sel: String = chars[s..=e].iter().collect();
         assert_eq!(sel, "，");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn japanese_is_not_shredded_into_single_kana() {
-        ensure_segmenter();
         let text = "日本語の文章です";
         let chars: Vec<char> = text.chars().collect();
         let click = chars.iter().position(|&c| c == 'で').unwrap();
-        if let Some((s, e)) = cjk_word_range(text, click) {
+        if let Some((s, e)) = tokenizer::word_range(text, click) {
             let sel: String = chars[s..=e].iter().collect();
             assert_eq!(sel, "です");
         }

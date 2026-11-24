@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: bash .github/scripts/check-host-boundary.sh
 
   # Docs-only PRs skip the Rust jobs: no markdown or docs/ file is compiled in.
@@ -73,7 +73,7 @@ jobs:
     outputs:
       code: ${{ steps.diff.outputs.code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 2
       # A PR checkout is the merge commit, so its first parent is the base.
@@ -96,7 +96,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-latest
             target: aarch64-apple-darwin
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
@@ -120,11 +120,7 @@ jobs:
     steps:
       - name: Checkout tty7
         if: needs.changes.outputs.code == 'true'
-        uses: actions/checkout@v4
-
-      # gpui-component is a git dependency (see Cargo.toml), so no sibling
-      # checkout is needed. The Windows backend (gpui_windows + DirectWrite/D3D)
-      # ships with the windows-latest runner's SDK — no extra system deps.
+        uses: actions/checkout@v5
 
       # gpui's Linux backends need the x11/wayland/xkb/font dev packages at
       # build time (build scripts resolve them via pkg-config). Same set the
@@ -233,8 +229,8 @@ jobs:
   # onto the far machine (decision D10).
   # One binary has to run on any distro without regard to the target's glibc
   # version, so it is linked fully static against musl rather than built per
-  # distro. Compile-only — this job publishes nothing; release.yml and
-  # nightly.yml carry the same job with an upload step.
+  # distro. Compile-only — this job publishes nothing; release.yml carries
+  # the same job with an upload step.
   #
   # Deliberately a *separate* job rather than two more rows in the `build` matrix
   # above: those three `build & test (<target>)` names are main's required
@@ -259,7 +255,7 @@ jobs:
     env:
       RUSTFLAGS: -D warnings -C strip=symbols
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -273,15 +269,11 @@ jobs:
       # `musl-tools` only ships an x86_64 `musl-gcc` wrapper with no C++ driver
       # and nothing at all for aarch64. Verified locally: both targets link
       # statically and the resulting binaries run under Alpine.
-      #
-      # If setup-zig ever becomes a problem (its GitHub repo is a mirror of a
-      # Codeberg original), cargo-zigbuild also accepts zig from PyPI —
-      # `pip3 install ziglang`, which it finds via CARGO_ZIGBUILD_PYTHON_PATH —
-      # so this can drop to zero third-party actions without changing anything
-      # else.
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
+      - name: Install Zig
+        run: |
+          python3 -m venv .zig-venv
+          .zig-venv/bin/python -m pip install ziglang==0.16.0
+          echo "CARGO_ZIGBUILD_PYTHON_PATH=$GITHUB_WORKSPACE/.zig-venv/bin/python" >> "$GITHUB_ENV"
 
       - uses: taiki-e/install-action@v2
         with:
@@ -332,7 +324,7 @@ jobs:
   # nothing but the rustup target: the Xcode SDK carries both architectures, and
   # the linker is the same one.
   #
-  # Compile-only, like `server-musl` — release.yml and nightly.yml carry the
+  # Compile-only, like `server-musl` — release.yml carries the
   # same job with an upload step. Non-required until it has a few weeks of
   # green, for the branch-protection reason spelled out above.
   server-macos:
@@ -352,7 +344,7 @@ jobs:
     env:
       RUSTFLAGS: -D warnings -C strip=symbols
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
         with:

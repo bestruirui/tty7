@@ -1,5 +1,4 @@
 pub mod conformance;
-pub mod content_search;
 pub mod local;
 pub mod remote;
 pub mod server;
@@ -62,7 +61,6 @@ pub struct Entry {
     pub name: String,
     pub is_dir: bool,
     pub is_symlink: bool,
-    pub ignored: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -130,135 +128,6 @@ impl Output {
     pub fn success(&self) -> bool {
         self.status == Some(0)
     }
-
-    pub fn stdout_trimmed(&self) -> String {
-        String::from_utf8_lossy(&self.stdout).trim().to_string()
-    }
-
-    pub fn stderr_trimmed(&self) -> String {
-        String::from_utf8_lossy(&self.stderr).trim().to_string()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SearchHit {
-    pub name: String,
-    pub path: PathBuf,
-    pub is_dir: bool,
-    pub ignored: bool,
-}
-
-/// What [`Host::search_content`] looks for.
-///
-/// Every flag defaults to off, so a peer that grows a field later still reads
-/// an older client's query the way that client meant it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ContentQuery {
-    /// The text to find — or, with `regex`, the expression.
-    pub pattern: String,
-    #[serde(default)]
-    pub case_sensitive: bool,
-    /// Only where the match starts and ends on a word boundary.
-    #[serde(default)]
-    pub whole_word: bool,
-    /// `pattern` is a regular expression (Rust `regex` syntax) rather than
-    /// literal text.
-    #[serde(default)]
-    pub regex: bool,
-    /// Walk dot-directories and gitignored paths too, as the name search's
-    /// flag of the same name does.
-    #[serde(default)]
-    pub show_hidden: bool,
-}
-
-/// How far one [`Host::search_content`] may go before it stops and says it
-/// stopped. Every cap reached is reported as `truncated`, never as silence.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ContentLimits {
-    /// Matching lines across every file.
-    pub max_hits: u64,
-    /// Matching lines taken from one file; the rest of that file is skipped.
-    pub max_hits_per_file: u64,
-    /// Files opened and read. The walk stops at this many.
-    pub max_files: u64,
-    /// A file longer than this is not read at all — a minified bundle or a
-    /// data dump is not source anyone is searching.
-    pub max_file_bytes: u64,
-    /// Wall-clock budget for the whole search, so a huge tree answers with
-    /// what it found instead of running into the caller's deadline.
-    pub max_millis: u64,
-}
-
-impl Default for ContentLimits {
-    fn default() -> Self {
-        ContentLimits {
-            max_hits: 2000,
-            max_hits_per_file: 100,
-            max_files: 20_000,
-            max_file_bytes: 1024 * 1024,
-            max_millis: 10_000,
-        }
-    }
-}
-
-/// One matching line.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ContentHit {
-    pub path: PathBuf,
-    /// 1-based.
-    pub line: u32,
-    /// 1-based, in characters, of the first match on the line in the file —
-    /// what an editor's cursor wants, independent of how `text` was cut.
-    pub column: u32,
-    /// The line as shown: leading whitespace dropped, and a line too long to
-    /// show cut down to a window around its first match, with `…` marking
-    /// each cut.
-    pub text: String,
-    /// Byte ranges of each match within `text`, in order, never overlapping,
-    /// always on character boundaries.
-    pub ranges: Vec<ContentRange>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ContentRange {
-    pub start: u32,
-    pub end: u32,
-}
-
-/// What a [`Host::search_content`] found, in walk order: files sorted by path
-/// within each directory, lines in file order.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ContentResults {
-    pub hits: Vec<ContentHit>,
-    /// A limit in [`ContentLimits`] cut the search short, so there may be
-    /// more matches than `hits` holds.
-    pub truncated: bool,
-    /// How many files were actually read.
-    #[serde(default)]
-    pub files_searched: u64,
-}
-
-pub struct WatchSub {
-    rx: smol::channel::Receiver<Vec<PathBuf>>,
-    inner: Box<dyn WatchHandle>,
-}
-
-impl WatchSub {
-    pub fn new(rx: smol::channel::Receiver<Vec<PathBuf>>, inner: Box<dyn WatchHandle>) -> WatchSub {
-        WatchSub { rx, inner }
-    }
-
-    pub fn events(&self) -> &smol::channel::Receiver<Vec<PathBuf>> {
-        &self.rx
-    }
-
-    pub fn set_dirs(&self, dirs: &[PathBuf]) -> io::Result<()> {
-        self.inner.set_dirs(dirs)
-    }
-}
-
-pub trait WatchHandle: Send + Sync {
-    fn set_dirs(&self, dirs: &[PathBuf]) -> io::Result<()>;
 }
 
 pub trait Host: Send + Sync + 'static {
@@ -279,9 +148,7 @@ pub trait Host: Send + Sync + 'static {
         default_join(dir, name, self.separator())
     }
 
-    fn is_absolute(&self, p: &Path) -> bool;
-
-    fn read_dir(&self, dir: &Path, root: Option<&Path>) -> io::Result<Vec<Entry>>;
+    fn read_dir(&self, dir: &Path) -> io::Result<Vec<Entry>>;
 
     fn stat(&self, p: &Path) -> io::Result<Meta>;
 
@@ -293,42 +160,11 @@ pub trait Host: Send + Sync + 'static {
 
     fn canonicalize(&self, p: &Path) -> io::Result<PathBuf>;
 
-    fn search(
-        &self,
-        roots: &[PathBuf],
-        query: &str,
-        limit: usize,
-        max_dirs: usize,
-        show_hidden: bool,
-    ) -> io::Result<Vec<SearchHit>>;
-
-    /// Search file *contents* under `roots` — the right panel's Search tab.
-    ///
-    /// Walks the way [`Host::search`] does: `.gitignore` honoured (with or
-    /// without a repository), dot-directories skipped, both unless
-    /// `query.show_hidden`. Binary files and files over
-    /// `limits.max_file_bytes` are skipped. A pattern that does not compile is
-    /// [`io::ErrorKind::InvalidInput`]; a host that cannot search contents at
-    /// all is [`io::ErrorKind::Unsupported`], which callers must tell apart
-    /// from "no matches".
-    fn search_content(
-        &self,
-        roots: &[PathBuf],
-        query: &ContentQuery,
-        limits: &ContentLimits,
-    ) -> io::Result<ContentResults>;
-
     fn write_file(&self, p: &Path, bytes: &[u8]) -> io::Result<Meta>;
-
-    fn create_file_new(&self, p: &Path) -> io::Result<()>;
 
     fn create_dir(&self, p: &Path, recursive: bool) -> io::Result<()>;
 
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
-
     fn remove(&self, p: &Path, recursive: bool) -> io::Result<()>;
-
-    fn repo_root(&self, p: &Path) -> io::Result<Option<PathBuf>>;
 
     fn git(&self, cwd: &Path, args: &[&str]) -> io::Result<Output>;
 
@@ -344,57 +180,7 @@ pub trait Host: Send + Sync + 'static {
         None
     }
 
-    /// `git`, but with an explicit ceiling on how long to wait for the far side.
-    ///
-    /// Network verbs (`fetch`/`pull`/`push`) run for as long as the network
-    /// takes, which is minutes, not the seconds an interactive query is allowed.
-    ///
-    /// `LocalHost` deliberately does not override this: `Command::output()`
-    /// blocks until the child exits and has no timeout of its own, so waiting
-    /// "until the deadline" and waiting "until git is done" are the same wait —
-    /// forwarding to `git` is the honest implementation, not a stub. `RemoteHost`
-    /// does override it, because its per-request deadline is sized for
-    /// interactive queries and a push walks straight into it.
-    ///
-    /// The reply is still the plain `Git` request on the wire, so a server that
-    /// predates this method serves it unchanged.
-    fn git_with_deadline(
-        &self,
-        cwd: &Path,
-        args: &[&str],
-        deadline: std::time::Duration,
-    ) -> io::Result<Output> {
-        let _ = deadline;
-        self.git(cwd, args)
-    }
-
-    fn git_lines(
-        &self,
-        cwd: &Path,
-        args: &[&str],
-        on_line: &mut dyn FnMut(&str),
-    ) -> io::Result<Option<i32>> {
-        let out = self.git(cwd, args)?;
-        let mut split = crate::core::git::LineSplitter::default();
-        split.push(&out.stdout, &mut *on_line);
-        split.finish(&mut *on_line);
-        Ok(out.status)
-    }
-
     fn shells(&self) -> io::Result<ShellInventory>;
-
-    /// Past coding-agent sessions on this host, most recent first.
-    /// `known_dirs` are directories open on it (see
-    /// [`crate::core::agent_history::scan`]). A host that cannot look has
-    /// none to offer.
-    fn agent_sessions(
-        &self,
-        _known_dirs: &[PathBuf],
-    ) -> io::Result<Vec<crate::core::agent_history::PastSession>> {
-        Ok(Vec::new())
-    }
-
-    fn watch(&self, dirs: &[PathBuf]) -> io::Result<WatchSub>;
 
     fn is_connected(&self) -> bool {
         true
@@ -415,21 +201,6 @@ pub trait Host: Send + Sync + 'static {
     }
 }
 
-/// Did this watch event mean something *changed*, or only that something was
-/// read?
-///
-/// The distinction does not exist on macOS, and on Linux it decides whether a
-/// watch can feed itself. `notify`'s inotify backend asks for `IN_OPEN`, so
-/// every `open(2)` under a watched directory arrives as an event — and the one
-/// thing every consumer of a watch does with an event is go and read the
-/// directory it came from. Reading `.git/index` to answer "did the repository
-/// change" is itself an event saying the repository may have changed, so the
-/// answer schedules the next question, at whatever rate the debounce allows,
-/// forever. Measured at ~2.6 `git status -uall` per second on an idle Source
-/// Control panel before this filter existed (issue #523).
-///
-/// `IN_CLOSE_WRITE` also arrives as `Access`, and that one is a real write
-/// finishing, so it stays. Everything else under `Access` is a reader.
 pub fn is_content_change(kind: &notify::EventKind) -> bool {
     use notify::event::{AccessKind, AccessMode};
 
@@ -530,34 +301,22 @@ mod tests {
     fn output_success_is_exit_zero_only() {
         let ok = Output {
             status: Some(0),
-            stdout: b"  main\n".to_vec(),
+            stdout: Vec::new(),
             stderr: Vec::new(),
         };
         assert!(ok.success());
-        assert_eq!(ok.stdout_trimmed(), "main");
         let bad = Output {
             status: Some(128),
             stdout: Vec::new(),
-            stderr: b"not a git repository\n".to_vec(),
+            stderr: Vec::new(),
         };
         assert!(!bad.success());
-        assert_eq!(bad.stderr_trimmed(), "not a git repository");
         let signalled = Output {
             status: None,
             stdout: Vec::new(),
             stderr: Vec::new(),
         };
         assert!(!signalled.success());
-    }
-
-    #[test]
-    fn output_text_is_lossy_not_fallible() {
-        let o = Output {
-            status: Some(0),
-            stdout: vec![0xff, b'a', 0xfe],
-            stderr: Vec::new(),
-        };
-        assert!(o.stdout_trimmed().contains('a'));
     }
 
     #[test]
@@ -574,40 +333,6 @@ mod tests {
             "bytes must not render as an array: {json}"
         );
         assert_eq!(serde_json::from_str::<Output>(&json).unwrap(), o);
-    }
-
-    #[test]
-    fn value_types_round_trip_through_json() {
-        let e = Entry {
-            name: "src".into(),
-            is_dir: true,
-            is_symlink: false,
-            ignored: false,
-        };
-        let back: Entry = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
-        assert_eq!(back, e);
-
-        let m = Meta {
-            is_dir: false,
-            is_symlink: true,
-            len: 42,
-            mtime: Some(MTime {
-                secs: -1,
-                nanos: 999_999_999,
-            }),
-            readonly: true,
-        };
-        let back: Meta = serde_json::from_str(&serde_json::to_string(&m).unwrap()).unwrap();
-        assert_eq!(back, m);
-
-        let h = SearchHit {
-            name: "a.rs".into(),
-            path: PathBuf::from("/tmp/a.rs"),
-            is_dir: false,
-            ignored: true,
-        };
-        let back: SearchHit = serde_json::from_str(&serde_json::to_string(&h).unwrap()).unwrap();
-        assert_eq!(back, h);
     }
 
     #[test]

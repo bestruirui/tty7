@@ -120,32 +120,6 @@ pub struct ShellSpec {
     pub args_are_tty7_defaults: bool,
 }
 
-pub fn ssh_option_takes_value(flag: char) -> bool {
-    matches!(
-        flag,
-        'B' | 'b'
-            | 'c'
-            | 'D'
-            | 'E'
-            | 'e'
-            | 'F'
-            | 'I'
-            | 'i'
-            | 'J'
-            | 'L'
-            | 'l'
-            | 'm'
-            | 'O'
-            | 'o'
-            | 'p'
-            | 'Q'
-            | 'R'
-            | 'S'
-            | 'W'
-            | 'w'
-    )
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneInfo {
     pub pane_id: u64,
@@ -323,50 +297,14 @@ pub struct SftpEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SftpOp {
-    Stat {
-        path: String,
-    },
-    Mkdir {
-        path: String,
-    },
-    CreateFile {
-        path: String,
-    },
-    RemoveFile {
-        path: String,
-    },
-    RemoveDir {
-        path: String,
-    },
-    Rename {
-        from: String,
-        to: String,
-    },
-    Chmod {
-        path: String,
-        mode: u32,
-    },
-    Readlink {
-        path: String,
-    },
-    Realpath {
-        path: String,
-    },
-    /// Whole-file read, for the built-in editor. `max_bytes` is the reader's
-    /// own ceiling; a file larger than it answers with an error instead of a
-    /// truncated body that would later be saved back short.
-    ReadFile {
-        path: String,
-        max_bytes: u64,
-    },
-    /// Whole-file write, in place (truncate + write, no temp-and-rename): the
-    /// editor saves over a file the user already has open, and replacing the
-    /// inode would silently drop its mode and ownership.
-    WriteFile {
-        path: String,
-        #[serde(with = "crate::host::b64")]
-        bytes: Vec<u8>,
-    },
+    Stat { path: String },
+    Mkdir { path: String },
+    RemoveFile { path: String },
+    RemoveDir { path: String },
+    Rename { from: String, to: String },
+    Chmod { path: String, mode: u32 },
+    Readlink { path: String },
+    Realpath { path: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -376,23 +314,12 @@ pub enum SftpOpResult {
     Stat(SftpEntry),
     Link(String),
     Error(String),
-    /// Reply to [`SftpOp::ReadFile`]: the bytes, plus the stat they were
-    /// actually read under. The stat costs nothing — the size check before
-    /// the read has it in hand either way — and it is the only description of
-    /// the body that cannot disagree with it, which a separate `Stat` round
-    /// trip either side of the read can.
-    File {
-        entry: SftpEntry,
-        #[serde(with = "crate::host::b64")]
-        bytes: Vec<u8>,
-    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SftpTransferKind {
     Upload,
-    Download,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -411,27 +338,16 @@ pub enum SftpJobState {
     Running,
     Done,
     Error,
-    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SftpJobProgress {
     pub job_id: u64,
-    pub pane_id: u64,
-    pub kind: SftpTransferKind,
     pub state: SftpJobState,
-    #[serde(default)]
-    pub current: String,
     #[serde(default)]
     pub bytes_done: u64,
     #[serde(default)]
-    pub bytes_total: u64,
-    #[serde(default)]
     pub error: Option<String>,
-    #[serde(default)]
-    pub local: String,
-    #[serde(default)]
-    pub remote: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -678,36 +594,6 @@ pub struct NativeSshSpec {
     pub profile_id: Option<String>,
 }
 
-/// What a connection test found. The daemon reports the outcome, never the
-/// wording: the sentence a user reads is localized, and the daemon has no
-/// locale.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SshTestReport {
-    /// Transport, host key and authentication all went through. The connection
-    /// was dropped immediately afterwards.
-    Authenticated { elapsed_ms: u32 },
-    /// The server answered and the handshake got as far as needing something
-    /// only a person can supply. Reaching this point already proves the address,
-    /// the port, the proxy chain and the jump host.
-    NeedsInput { need: SshTestNeed, elapsed_ms: u32 },
-    /// Never got that far. The reason is the connect path's own message, which
-    /// is what the pane would have printed.
-    Failed { reason: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SshTestNeed {
-    Password,
-    KeyPassphrase,
-    KeyboardInteractive,
-    /// The server's host key is one nobody here has accepted yet.
-    HostKeyDecision,
-    /// The server presented a *different* key than the one on file. Kept apart
-    /// from `HostKeyDecision` because "not accepted yet" and "not the key it
-    /// gave last time" are not the same news.
-    HostKeyChanged,
-}
-
 impl NativeSshSpec {
     #[allow(dead_code)]
     pub fn without_secrets(&self) -> NativeSshSpec {
@@ -752,16 +638,6 @@ impl std::fmt::Debug for NativeSshSpec {
             .field("profile_id", &self.profile_id)
             .finish()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct KnownHostEntry {
-    pub host: String,
-    #[serde(default)]
-    pub marker: Option<String>,
-    pub key_type: String,
-    pub fingerprint_sha256: String,
-    pub id: KnownHostId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -944,13 +820,6 @@ pub enum ClientMsg {
         request_id: u64,
         response: AuthResponse,
     },
-    ListKnownHosts,
-    DeleteKnownHost(KnownHostId),
-    /// Open this connection, report what happened, and drop it. Answered with
-    /// exactly one [`DaemonMsg::SshTestResult`].
-    TestSsh {
-        spec: Box<NativeSshSpec>,
-    },
     SftpList {
         pane_id: u64,
         path: String,
@@ -960,9 +829,6 @@ pub enum ClientMsg {
         op: SftpOp,
     },
     SftpTransferStart(SftpTransferSpec),
-    SftpTransferCancel {
-        job_id: u64,
-    },
     SftpTransferList {
         pane_id: u64,
     },
@@ -1038,8 +904,6 @@ pub enum DaemonMsg {
     SshStatus {
         phase: SshPhase,
     },
-    KnownHostsList(Vec<KnownHostEntry>),
-    SshTestResult(SshTestReport),
     SftpEntries(Vec<SftpEntry>),
     SftpOpResult(SftpOpResult),
     SftpTransferStarted {
@@ -1070,13 +934,9 @@ mod kind {
     pub const ENSURE_LOOPBACK_FORWARD: u8 = 10;
     pub const SPAWN_NATIVE_SSH: u8 = 14;
     pub const AUTH_RESPONSE: u8 = 15;
-    pub const LIST_KNOWN_HOSTS: u8 = 16;
-    pub const DELETE_KNOWN_HOST: u8 = 17;
-    pub const TEST_SSH: u8 = 18;
     pub const SFTP_LIST: u8 = 30;
     pub const SFTP_OP: u8 = 31;
     pub const SFTP_TRANSFER_START: u8 = 32;
-    pub const SFTP_TRANSFER_CANCEL: u8 = 33;
     pub const SFTP_TRANSFER_LIST: u8 = 34;
     pub const ADD_FORWARD: u8 = 20;
     pub const REMOVE_FORWARD: u8 = 21;
@@ -1105,8 +965,6 @@ mod kind {
     pub const LOOPBACK_FORWARD: u8 = 11;
     pub const AUTH_PROMPT: u8 = 13;
     pub const SSH_STATUS: u8 = 14;
-    pub const KNOWN_HOSTS_LIST: u8 = 15;
-    pub const SSH_TEST_RESULT: u8 = 16;
     pub const SFTP_ENTRIES: u8 = 30;
     pub const SFTP_OP_RESULT: u8 = 31;
     pub const SFTP_TRANSFER_STARTED: u8 = 32;
@@ -1337,11 +1195,6 @@ impl ClientMsg {
                 request_id,
                 response,
             } => write_frame(w, kind::AUTH_RESPONSE, &to_json(&(request_id, response))?),
-            ClientMsg::ListKnownHosts => write_frame(w, kind::LIST_KNOWN_HOSTS, &[]),
-            ClientMsg::DeleteKnownHost(id) => {
-                write_frame(w, kind::DELETE_KNOWN_HOST, &to_json(id)?)
-            }
-            ClientMsg::TestSsh { spec } => write_frame(w, kind::TEST_SSH, &to_json(spec)?),
             ClientMsg::SftpList { pane_id, path } => {
                 write_frame(w, kind::SFTP_LIST, &to_json(&(pane_id, path))?)
             }
@@ -1350,9 +1203,6 @@ impl ClientMsg {
             }
             ClientMsg::SftpTransferStart(spec) => {
                 write_frame(w, kind::SFTP_TRANSFER_START, &to_json(spec)?)
-            }
-            ClientMsg::SftpTransferCancel { job_id } => {
-                write_frame(w, kind::SFTP_TRANSFER_CANCEL, &to_json(job_id)?)
             }
             ClientMsg::SftpTransferList { pane_id } => {
                 write_frame(w, kind::SFTP_TRANSFER_LIST, &to_json(pane_id)?)
@@ -1478,11 +1328,6 @@ impl ClientMsg {
                     response,
                 }
             }
-            kind::LIST_KNOWN_HOSTS => ClientMsg::ListKnownHosts,
-            kind::DELETE_KNOWN_HOST => ClientMsg::DeleteKnownHost(from_json(&payload)?),
-            kind::TEST_SSH => ClientMsg::TestSsh {
-                spec: from_json(&payload)?,
-            },
             kind::SFTP_LIST => {
                 let (pane_id, path) = from_json(&payload)?;
                 ClientMsg::SftpList { pane_id, path }
@@ -1492,9 +1337,6 @@ impl ClientMsg {
                 ClientMsg::SftpOp { pane_id, op }
             }
             kind::SFTP_TRANSFER_START => ClientMsg::SftpTransferStart(from_json(&payload)?),
-            kind::SFTP_TRANSFER_CANCEL => ClientMsg::SftpTransferCancel {
-                job_id: from_json(&payload)?,
-            },
             kind::SFTP_TRANSFER_LIST => ClientMsg::SftpTransferList {
                 pane_id: from_json(&payload)?,
             },
@@ -1572,12 +1414,6 @@ impl DaemonMsg {
                 write_frame(w, kind::AUTH_PROMPT, &to_json(&(request_id, prompt))?)
             }
             DaemonMsg::SshStatus { phase } => write_frame(w, kind::SSH_STATUS, &to_json(phase)?),
-            DaemonMsg::KnownHostsList(list) => {
-                write_frame(w, kind::KNOWN_HOSTS_LIST, &to_json(list)?)
-            }
-            DaemonMsg::SshTestResult(report) => {
-                write_frame(w, kind::SSH_TEST_RESULT, &to_json(report)?)
-            }
             DaemonMsg::SftpEntries(entries) => {
                 write_frame(w, kind::SFTP_ENTRIES, &to_json(entries)?)
             }
@@ -1636,8 +1472,6 @@ impl DaemonMsg {
             kind::SSH_STATUS => DaemonMsg::SshStatus {
                 phase: from_json(&payload)?,
             },
-            kind::KNOWN_HOSTS_LIST => DaemonMsg::KnownHostsList(from_json(&payload)?),
-            kind::SSH_TEST_RESULT => DaemonMsg::SshTestResult(from_json(&payload)?),
             kind::SFTP_ENTRIES => DaemonMsg::SftpEntries(from_json(&payload)?),
             kind::SFTP_OP_RESULT => DaemonMsg::SftpOpResult(from_json(&payload)?),
             kind::SFTP_TRANSFER_STARTED => DaemonMsg::SftpTransferStarted {
@@ -1830,12 +1664,6 @@ mod tests {
                 remote_host: "127.0.0.1".into(),
                 remote_port: 3000,
             }),
-            ClientMsg::ListKnownHosts,
-            ClientMsg::DeleteKnownHost(KnownHostId {
-                host: "example.com".into(),
-                key_type: "ssh-ed25519".into(),
-                keyblob: "AAAAC3Nz".into(),
-            }),
             ClientMsg::SftpList {
                 pane_id: 4,
                 path: "/home/deploy/项目".into(),
@@ -1870,20 +1698,6 @@ mod tests {
                 pane_id: 4,
                 op: SftpOp::Realpath { path: ".".into() },
             },
-            ClientMsg::SftpOp {
-                pane_id: 4,
-                op: SftpOp::ReadFile {
-                    path: "/etc/nginx/nginx.conf".into(),
-                    max_bytes: 4 * 1024 * 1024,
-                },
-            },
-            ClientMsg::SftpOp {
-                pane_id: 4,
-                op: SftpOp::WriteFile {
-                    path: "/home/deploy/笔记.md".into(),
-                    bytes: vec![0x00, 0xff, b'h', b'i'],
-                },
-            },
             ClientMsg::SftpTransferStart(SftpTransferSpec {
                 pane_id: 4,
                 kind: SftpTransferKind::Upload,
@@ -1891,7 +1705,6 @@ mod tests {
                 remote: "/remote/f".into(),
                 recursive: true,
             }),
-            ClientMsg::SftpTransferCancel { job_id: 9 },
             ClientMsg::SftpTransferList { pane_id: 4 },
             ClientMsg::AddForward {
                 pane_id: 7,
@@ -2007,25 +1820,6 @@ mod tests {
             })),
             DaemonMsg::AgentStatus(None),
             DaemonMsg::LoopbackForward(LoopbackForward { local_port: 49152 }),
-            DaemonMsg::KnownHostsList(vec![KnownHostEntry {
-                host: "example.com".into(),
-                marker: Some("@revoked".into()),
-                key_type: "ssh-ed25519".into(),
-                fingerprint_sha256: "SHA256:abc".into(),
-                id: KnownHostId {
-                    host: "example.com".into(),
-                    key_type: "ssh-ed25519".into(),
-                    keyblob: "AAAAC3Nz".into(),
-                },
-            }]),
-            DaemonMsg::SshTestResult(SshTestReport::Authenticated { elapsed_ms: 640 }),
-            DaemonMsg::SshTestResult(SshTestReport::NeedsInput {
-                need: SshTestNeed::HostKeyDecision,
-                elapsed_ms: 91,
-            }),
-            DaemonMsg::SshTestResult(SshTestReport::Failed {
-                reason: "connect to 10.0.0.5:2222 failed: Connection refused".into(),
-            }),
             DaemonMsg::SftpEntries(vec![
                 SftpEntry {
                     name: "src".into(),
@@ -2055,29 +1849,12 @@ mod tests {
                 permissions: 0o100644,
                 target_is_dir: false,
             })),
-            DaemonMsg::SftpOpResult(SftpOpResult::File {
-                entry: SftpEntry {
-                    name: "nginx.conf".into(),
-                    kind: SftpEntryKind::File,
-                    size: 4,
-                    mtime: 1_700_000_000,
-                    permissions: 0o100644,
-                    target_is_dir: false,
-                },
-                bytes: vec![0x00, 0xff, 0x80, b'!'],
-            }),
             DaemonMsg::SftpTransferStarted { job_id: 3 },
             DaemonMsg::SftpTransferProgress(vec![SftpJobProgress {
                 job_id: 3,
-                pane_id: 4,
-                kind: SftpTransferKind::Download,
                 state: SftpJobState::Running,
-                current: "big.iso".into(),
                 bytes_done: 1024,
-                bytes_total: 4096,
                 error: None,
-                local: "/local".into(),
-                remote: "/remote".into(),
             }]),
             DaemonMsg::ForwardList(vec![
                 ManagedForward {
@@ -2649,7 +2426,7 @@ mod tests {
             WorkspaceOp::SftpTransferStart {
                 spec: SftpTransferSpec {
                     pane_id: 0,
-                    kind: SftpTransferKind::Download,
+                    kind: SftpTransferKind::Upload,
                     local: PathBuf::from("/local/f"),
                     remote: "/remote/f".into(),
                     recursive: false,
@@ -2696,9 +2473,6 @@ mod tests {
                     accept: true,
                     remember: true,
                 },
-            },
-            ClientMsg::TestSsh {
-                spec: Box::new(sample_native_spec()),
             },
         ];
         let mut buf = Vec::new();

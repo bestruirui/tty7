@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use alacritty_terminal::event::Event as AlacEvent;
 use alacritty_terminal::vte::ansi::Rgb;
+use gpui::component::ActiveTheme;
 use gpui::{App, Context};
-use gpui_component::ActiveTheme;
 use tty7_core::core::term_modes::{COLOR_SCHEME_UPDATES, TerminalModes};
 
 use super::view::TerminalView;
@@ -46,7 +46,7 @@ fn background(cx: &App) -> Rgb {
 /// follow-system flip, a config reload) ends in the `Theme` global.
 pub(super) fn watch(cx: &mut Context<TerminalView>) {
     let mut last = background(cx);
-    cx.observe_global::<gpui_component::Theme>(move |view, cx| {
+    cx.observe_global::<gpui::component::Theme>(move |view, cx| {
         let now = background(cx);
         if std::mem::replace(&mut last, now) != now && view.terminal.color_scheme_updates() {
             view.terminal.write(report(now).into_bytes());

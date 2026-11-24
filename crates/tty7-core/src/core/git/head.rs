@@ -7,10 +7,6 @@
 //! in that window used to come back "not a repository" and pull its tab out of
 //! its group. Nothing here spawns anything: the answer is a handful of small
 //! files, which is all `git rev-parse` reads for it too.
-//!
-//! Only the *where*: root, home and the branch name. The line counts beside
-//! the branch still come from `git diff --numstat`, the same CLI the diff views
-//! read, so the two never disagree about a number.
 
 use std::path::{Path, PathBuf};
 
@@ -21,11 +17,6 @@ pub struct RepoHead {
     pub root: PathBuf,
     /// The main working tree a linked one belongs to; `root` otherwise.
     pub home: PathBuf,
-    /// The checked-out branch, when HEAD names one plainly. `None` for
-    /// anything `git` should spell instead — a detached HEAD, whose short sha
-    /// `git` lengthens until it is unambiguous, and a reftable repository,
-    /// whose HEAD file is a placeholder.
-    pub branch: Option<String>,
 }
 
 /// The repository `cwd` is in, or `None` when it is in none.
@@ -38,9 +29,6 @@ pub fn read_head(cwd: &Path) -> Option<RepoHead> {
     let (path, _trust) = gix_discover::upwards_opts(cwd, options).ok()?;
     let (git_dir, work_dir) = path.into_repository_and_work_tree_directories();
     let work_dir = work_dir?;
-    // `git` answers with the physical path, and the root is the key the diff
-    // views file their own `rev-parse` answer under: a pane that reached its
-    // repository through a symlink has to land on the same spelling.
     let root = std::fs::canonicalize(&work_dir).ok()?;
     let git_dir = std::fs::canonicalize(&git_dir).ok()?;
     // Standing in the git dir itself: discovery walks up to the tree it
@@ -49,10 +37,7 @@ pub fn read_head(cwd: &Path) -> Option<RepoHead> {
         return None;
     }
     let home = home_of(&root, &git_dir);
-    let branch = std::fs::read_to_string(git_dir.join("HEAD"))
-        .ok()
-        .and_then(|head| branch_of(&head));
-    Some(RepoHead { root, home, branch })
+    Some(RepoHead { root, home })
 }
 
 /// The main working tree `root` belongs to, given its git directory.
@@ -79,16 +64,6 @@ fn home_of(root: &Path, git_dir: &Path) -> PathBuf {
     }
 }
 
-/// The branch a HEAD file names, spelled the way `git symbolic-ref --short`
-/// would, or `None` where that is not a plain read.
-fn branch_of(head: &str) -> Option<String> {
-    let name = head
-        .trim_end_matches(['\n', '\r'])
-        .strip_prefix("ref: refs/heads/")?;
-    // Reftable keeps HEAD only for older tools to trip over.
-    (!name.is_empty() && name != ".invalid").then(|| name.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,21 +75,6 @@ mod tests {
         let out = crate::core::git::git_output(cwd, &full).ok()?;
         out.success()
             .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-    }
-
-    #[test]
-    fn head_files_spell_branches_like_git() {
-        assert_eq!(branch_of("ref: refs/heads/main\n").as_deref(), Some("main"));
-        assert_eq!(
-            branch_of("ref: refs/heads/feat/x\r\n").as_deref(),
-            Some("feat/x")
-        );
-        assert_eq!(
-            branch_of("0123456789abcdef0123456789abcdef01234567\n"),
-            None
-        );
-        assert_eq!(branch_of("ref: refs/heads/.invalid\n"), None);
-        assert_eq!(branch_of("ref: refs/remotes/origin/main\n"), None);
     }
 
     /// The whole point: every answer here is the one `git` gives, for a main
@@ -146,15 +106,14 @@ mod tests {
         .unwrap();
 
         let canon = |p: &Path| std::fs::canonicalize(p).unwrap();
-        for (cwd, root, home, branch) in [
-            (&main, &main, &main, "trunk"),
-            (&sub, &main, &main, "trunk"),
-            (&linked, &linked, &main, "feat/x"),
+        for (cwd, root, home) in [
+            (&main, &main, &main),
+            (&sub, &main, &main),
+            (&linked, &linked, &main),
         ] {
             let got = read_head(cwd).unwrap_or_else(|| panic!("{} is a repo", cwd.display()));
             assert_eq!(got.root, canon(root), "root of {}", cwd.display());
             assert_eq!(got.home, canon(home), "home of {}", cwd.display());
-            assert_eq!(got.branch.as_deref(), Some(branch));
             // In one spelling: `canonicalize` answers `\\?\C:\…` on Windows and
             // git `C:/…`. `probe_repo` folds the first into the local spelling
             // before anything keys on it.
@@ -166,13 +125,6 @@ mod tests {
                 "and git names the same root"
             );
         }
-
-        git(&main, &["checkout", "--quiet", "--detach"]).unwrap();
-        assert_eq!(
-            read_head(&main).unwrap().branch,
-            None,
-            "git spells a detached HEAD"
-        );
 
         assert_eq!(
             read_head(&main.join(".git")),

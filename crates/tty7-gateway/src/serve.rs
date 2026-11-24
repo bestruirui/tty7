@@ -23,9 +23,9 @@ use tty7_core::core::machine::Machine;
 use tty7_core::daemon::control::PaneAgentState;
 use tty7_core::daemon::protocol::{DaemonMsg, LeaseRequest, WinSize};
 use tty7_mobile_proto::{
-    ControlEvent, ControlRequest, Diff, Frame, FrameReader, GridSize, MAX_DIFF, MAX_UPLOAD, Open,
-    OpenReply, PROTOCOL_VERSION, PaneEvent, PaneRequest, RemoteView, TabCreated, Tree, Uploaded,
-    read_frame, write_bytes, write_msg,
+    ControlEvent, ControlRequest, Frame, FrameReader, GridSize, MAX_UPLOAD, Open, OpenReply,
+    PROTOCOL_VERSION, PaneEvent, PaneRequest, RemoteView, TabCreated, Tree, Uploaded, read_frame,
+    write_bytes, write_msg,
 };
 
 use crate::state::State;
@@ -257,26 +257,6 @@ async fn serve_stream(
             finish(send).await;
             Ok(())
         }
-        Open::Diff { cwd, machine } => {
-            let read = if machine.is_some() {
-                Err(io::Error::other(
-                    "changes can only be read on this computer for now",
-                ))
-            } else {
-                tokio::task::spawn_blocking(move || read_diff(&cwd))
-                    .await
-                    .map_err(io::Error::other)?
-            };
-            match read {
-                Ok(diff) => {
-                    write_msg(&mut send, &ok).await?;
-                    write_msg(&mut send, &diff).await?;
-                }
-                Err(e) => write_msg(&mut send, &denied(&e.to_string())).await?,
-            }
-            finish(send).await;
-            Ok(())
-        }
         Open::Upload {
             name,
             size,
@@ -333,59 +313,6 @@ async fn serve_stream(
             }
         }
     }
-}
-
-/// The changes in the git working tree `cwd` is in, against its last commit
-/// (against nothing, in a repository with no commits yet).
-fn read_diff(cwd: &str) -> io::Result<Diff> {
-    let git = |args: &[&str]| -> io::Result<std::process::Output> {
-        std::process::Command::new("git")
-            .arg("-C")
-            .arg(cwd)
-            .args(args)
-            .stdin(std::process::Stdio::null())
-            .output()
-    };
-    let top = git(&["rev-parse", "--show-toplevel"])?;
-    if !top.status.success() {
-        return Err(io::Error::other(format!(
-            "{cwd} is not in a git repository"
-        )));
-    }
-    let root = String::from_utf8_lossy(&top.stdout).trim().to_string();
-    let args = ["--no-pager", "diff", "--no-color", "--no-ext-diff", "-M"];
-    let mut out = git(&[&args[..], &["HEAD"]].concat())?;
-    if !out.status.success() {
-        // No commit yet: what is staged is all there is to show.
-        out = git(&[&args[..], &["--cached"]].concat())?;
-    }
-    if !out.status.success() {
-        return Err(io::Error::other(
-            String::from_utf8_lossy(&out.stderr).trim().to_string(),
-        ));
-    }
-    let truncated = out.stdout.len() > MAX_DIFF;
-    let mut patch = out.stdout;
-    patch.truncate(MAX_DIFF);
-    // A new directory is one entry, as `git status` shows it, not every
-    // file under it: a generated folder would bury the rest.
-    let untracked = git(&[
-        "ls-files",
-        "--others",
-        "--exclude-standard",
-        "--directory",
-        "--full-name",
-        ":/",
-    ])?;
-    Ok(Diff {
-        root,
-        patch: String::from_utf8_lossy(&patch).into_owned(),
-        untracked: String::from_utf8_lossy(&untracked.stdout)
-            .lines()
-            .map(str::to_string)
-            .collect(),
-        truncated,
-    })
 }
 
 /// Reads a file the phone sends and writes it where the desktop keeps pasted

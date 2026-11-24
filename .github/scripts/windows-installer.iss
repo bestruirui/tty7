@@ -32,9 +32,9 @@ AppName=tty7
 AppVersion={#AppVersion}
 VersionInfoVersion={#VersionInfoVersion}
 AppPublisher=tty7 contributors
-AppPublisherURL=https://github.com/l0ng-ai/tty7
-AppSupportURL=https://github.com/l0ng-ai/tty7/issues
-AppUpdatesURL=https://github.com/l0ng-ai/tty7/releases
+AppPublisherURL=https://github.com/bestruirui/tty7
+AppSupportURL=https://github.com/bestruirui/tty7/issues
+AppUpdatesURL=https://github.com/bestruirui/tty7/releases
 DefaultDirName={autopf}\tty7
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
@@ -95,7 +95,6 @@ Source: "{#StageDir}\tty7-updater.exe"; DestDir: "{app}"; Flags: ignoreversion s
 ; This installer-only marker is the authority for enabling automatic Windows
 ; updates. The portable archive is created before the marker enters the stage.
 Source: "{#StageDir}\.tty7-inno-install"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "{#StageDir}\completions\*"; DestDir: "{app}\completions"; Flags: ignoreversion recursesubdirs
 ; Microsoft's redistributable ConPTY. It has to land in {app} rather than a
 ; subdirectory: `portable-pty` finds it through the DLL search path, which
 ; starts at the directory of the executable that loads it (the daemon is

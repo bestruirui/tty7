@@ -101,7 +101,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsEditShortcuts => "编辑快捷键…",
         L10nKey::SettingsModifiedOnly => "仅显示已修改",
         L10nKey::SettingsModified => "已修改",
-        L10nKey::SettingsResetValue => "恢复默认值",
         L10nKey::SettingsSearchResults => "搜索结果",
         L10nKey::SettingsOpenSetting => "打开设置",
         L10nKey::SettingsNoModified => "没有符合筛选条件的已修改设置。",
@@ -115,102 +114,23 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsRetrySave => "重新保存",
 
         L10nKey::SearchTabs => "搜索标签页…",
-        L10nKey::SearchFiles => "搜索文件…",
-        L10nKey::PanelSearchPlaceholder => "在文件中搜索…",
-        L10nKey::PanelSearchWholeWord => "全字匹配",
-        L10nKey::PanelSearchIdle => "搜索以下目录中所有文件的内容：",
-        L10nKey::PanelSearchNoFolder => "没有可搜索的文件夹。",
-        L10nKey::PanelSearchNoFolderHint => "搜索范围是当前标签页所在的项目。",
-        L10nKey::PanelSearchSshPane => "无法搜索 SSH 窗格中的文件内容。",
-        L10nKey::PanelSearchSshPaneHint => "将该主机作为远程工作区打开即可搜索，或在“文件”中浏览。",
-        L10nKey::PanelSearchSearching => "正在搜索…",
-        L10nKey::PanelSearchNoMatches => "没有找到“{query}”。",
-        L10nKey::PanelSearchBadPattern => "不是有效的正则表达式：{e}",
-        L10nKey::PanelSearchServerTooOld => "这台机器上的 tty7-server 版本过旧，无法搜索文件内容。",
-        L10nKey::PanelSearchServerTooOldHint => "请更新该主机上的服务器后再使用搜索。",
-        L10nKey::PanelSearchFailed => "搜索失败：{e}",
-        L10nKey::PanelSearchResultCount => "{count} 个结果",
-        L10nKey::PanelSearchFileCount => "{count} 个文件",
-        L10nKey::PanelSearchSummary => "{files}中有 {results}",
-        L10nKey::PanelSearchTruncated => "未显示全部匹配项。缩小搜索范围以查看其余结果。",
-        L10nKey::PanelSearchLineTooltip => "第 {line} 行，第 {column} 列",
-        L10nKey::PanelSearchHostGone => "该项目所在的机器未连接。",
-        L10nKey::SearchThemes => "搜索主题…",
         L10nKey::SearchSettings => "搜索设置…",
         L10nKey::FilterHosts => "筛选主机…",
         L10nKey::SearchTheme => "搜索…",
-        L10nKey::SearchTabAll => "全部",
-        L10nKey::SearchTabActions => "命令",
-        L10nKey::SearchTabTerminals => "终端",
-        L10nKey::SearchTabHosts => "主机",
-        L10nKey::SearchTabSymbols => "符号",
-        L10nKey::SearchPlaceholderAll => "搜索文件、操作、终端和主机…",
-        L10nKey::SearchPlaceholderActions => "搜索命令…",
-        L10nKey::SearchPlaceholderTerminals => "搜索已打开的标签页、Shell 和 Agent…",
-        L10nKey::SearchPlaceholderHosts => "搜索主机，或输入 user@host 连接…",
-        L10nKey::SearchPlaceholderSymbols => "跳转到本文件中的符号…",
-        L10nKey::SearchSymbolsNone => "此文件中没有符号",
-        L10nKey::SearchSymbolsNoneHint => {
-            "支持 Rust、Go、Python、JavaScript、TypeScript、C、C++、Java、Ruby、Shell 和 Markdown 的符号。"
-        }
-        L10nKey::SearchTabFiles => "文件",
-        L10nKey::SearchPlaceholderFiles => "按名称转到文件，加上 :行号 可直接跳转…",
-        L10nKey::SearchFilesNoRoots => "没有可搜索的项目",
-        L10nKey::SearchFilesNoRootsHint => "文件在终端所在的项目中查找。cd 进入一个项目即可搜索。",
-        L10nKey::SearchFilesIndexing => "正在索引文件…",
-        L10nKey::SearchFilesFailed => "无法列出这个项目的文件。",
-        L10nKey::SearchFilesGoToLine => "第 {line} 行",
-        L10nKey::SearchFilesCapped => "大型项目——只搜索前 {count} 个文件",
-        L10nKey::CmdGoToFile => "转到文件…",
-        L10nKey::SearchTabSessions => "会话",
-        L10nKey::SearchPlaceholderSessions => "搜索历史 Agent 会话…",
-        L10nKey::SearchSessionsEmptyHint => "这里列出本机上各编码 agent 的历史会话。",
-        L10nKey::SearchSectionSessionsHere => "在 {dir}",
-        L10nKey::SearchSectionSessionsRecent => "最近",
-        L10nKey::AppSessionNotResumable => "{name} 不支持按 ID 恢复会话。",
-        L10nKey::AppSessionDirectoryGone => "会话所在的目录已不存在：{path}",
-        L10nKey::SearchSessionActions => "选择要对这个会话执行的操作…",
-        L10nKey::SessionActionsHint => "操作",
-        L10nKey::SessionActionResume => "恢复",
-        L10nKey::SessionActionResumeSubtitle => "在它原来的目录里开新标签页继续",
-        L10nKey::SessionActionHide => "从列表中移除",
-        L10nKey::SessionActionHideSubtitle => "agent 自己的历史记录不受影响",
-        L10nKey::SearchMoreIn => "{tab}中还有 {count} 项",
-        L10nKey::SearchNoResults => "没有结果",
-        L10nKey::SearchSectionNewTerminal => "新建终端",
         L10nKey::SearchWorkspacesAndMachines => "搜索工作区、标签页和机器…",
-        L10nKey::SearchFonts => "搜索字体…",
         L10nKey::SearchFind => "查找…",
         L10nKey::SearchMatchCase => "区分大小写",
         L10nKey::SearchUseRegex => "使用正则表达式",
-        L10nKey::NewFolderName => "新文件夹名",
-        L10nKey::NewFileName => "新文件名",
         L10nKey::HomeNewTab => "新标签页",
         L10nKey::HomeReopenClosedTab => "重新打开已关闭的标签页",
         L10nKey::HomeSwitchWorkspace => "切换工作区…",
-        L10nKey::HomeSearchEverywhere => "随处搜索…",
         L10nKey::HomeSplitRight => "向右分屏",
         L10nKey::HomeSplitDown => "向下分屏",
         L10nKey::HomeSettings => "设置…",
-        L10nKey::TrayQuitStopServer => "退出并停止 server…",
         L10nKey::Reconnect => "重新连接",
         L10nKey::None => "无。",
         L10nKey::TryAgain => "重试",
-        L10nKey::Refreshing => "正在刷新…",
-        L10nKey::Binary => "二进制文件",
         L10nKey::Delete => "删除",
-        L10nKey::ConnectSshHint => "输入 user@host 改为通过 SSH 连接。",
-        L10nKey::EditHint => "编辑",
-        L10nKey::OpenFileFromTree => "从文件树打开文件",
-        L10nKey::TreeDirLoading => "读取中…",
-        L10nKey::TreeDirEmpty => "空",
-        L10nKey::TreeDirHiddenOnly => "只有隐藏文件",
-        L10nKey::TreeDirUnreadable => "无法读取",
-        L10nKey::TreeSearchCapped => "只显示前 {n} 个匹配",
-        L10nKey::TreeSearchFailed => "搜索失败",
-        L10nKey::FileChangedOnDisk => "文件在磁盘上已被修改",
-        L10nKey::Reload => "重新加载",
-        L10nKey::KeepMine => "保留我的版本",
         L10nKey::Dismiss => "关闭",
         L10nKey::StoredPasswordRejected => "已存储的密码被拒绝，请输入新密码。",
         L10nKey::StoredPassphraseRejected => "已保存的口令无法解锁该密钥，请输入正确的口令。",
@@ -243,7 +163,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsNavAgents => "集成",
         L10nKey::SettingsNavKeybindings => "快捷键",
         L10nKey::SettingsNavAbout => "关于",
-        L10nKey::SettingsHeader => "设置",
         L10nKey::SettingsWindowTitle => "设置",
         L10nKey::Reset => "重置",
         L10nKey::Save => "保存",
@@ -251,8 +170,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::Download => "下载",
         L10nKey::Link => "关联",
         L10nKey::SettingsThemeIntroTitle => "主题",
-        L10nKey::SettingsThemeIntroDesc => "每个主题自带浅色或深色外观。",
-        L10nKey::SettingsTypography => "字体排版",
         L10nKey::SettingsFontSize => "终端字号",
         L10nKey::SettingsFontSizeDesc => "终端文字大小（磅）。",
         L10nKey::SettingsUiFontSize => "界面字号",
@@ -335,26 +252,12 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::OpenInFileManagerFailed => "无法打开 {path}",
         L10nKey::ExplorerMenuOpenIn => "在 tty7 中打开",
         L10nKey::ExplorerMenuOpenHere => "在此处打开 tty7",
-        L10nKey::SettingsCustomThemesIntro => {
-            "复制主题后即可编辑，或把 YAML、.itermcolors 文件放进主题文件夹。"
-        }
         L10nKey::SettingsDuplicateToEdit => "复制以编辑",
         L10nKey::SettingsHosts => "主机",
-        L10nKey::SettingsDefaults => "默认值",
-        L10nKey::SettingsInheritedByEveryHost => "对所有主机生效",
-        L10nKey::SettingsNoSavedHosts => "还没有保存的主机。",
         L10nKey::SettingsNothingMatches => "没有匹配 {query} 的内容。",
         L10nKey::SettingsInTty7 => "tty7 设置",
         L10nKey::SettingsImportFromSshConfig => "从 ~/.ssh/config 导入",
-        L10nKey::SettingsExpandAllGroups => "展开所有分组",
         L10nKey::SettingsNoHostsYet => "还没有主机",
-        L10nKey::SettingsNothingSelected => "未选择任何内容",
-        L10nKey::SettingsTypeAddressToConnect => "输入地址即可立刻连接，之后 tty7 会提示保存。",
-        L10nKey::SettingsMoreInSshConfig => "~/.ssh/config 中还有 {count} 个",
-        L10nKey::SettingsAliasesLinked => "已关联 {count} 个别名。",
-        L10nKey::SettingsImportAliases => "导入别名",
-        L10nKey::SettingsImportAliasesDesc => "重新读取文件并添加新条目，不会改动文件本身。",
-        L10nKey::SettingsImportNow => "立即导入",
         L10nKey::SettingsImportUnreadable => "无法读取 {path}——没有导入任何内容。",
         L10nKey::SettingsImportNoHosts => "{path} 中没有可导入的主机——只有通配符或 Match 规则。",
         L10nKey::SettingsImportSummary => {
@@ -364,24 +267,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
             "有 {count} 个选项在 tty7 中没有对应设置，仍留在文件里：{options}"
         }
         L10nKey::SettingsImportMoreOptions => "还有 {count} 个",
-        L10nKey::SettingsDefaultsIntro => "所有主机都以此为默认值，可在各自的高级选项中覆盖。",
-        L10nKey::SettingsCopyAddress => "复制地址",
-        L10nKey::SettingsDuplicate => "复制",
-        L10nKey::SettingsForgetPassword => "清除已保存的密码",
-        L10nKey::SettingsForgetPasswordTitle => "要清除 {endpoint} 的已保存密码吗？",
-        L10nKey::SettingsForgetPasswordBody => {
-            "下次连接它时会重新询问密码。这台主机的其他设置不受影响。"
-        }
-        L10nKey::SettingsForgetPasswordSharedBody => {
-            "还有 {count} 个主机配置同样使用 {endpoint}，那些连接也需要重新输入密码。"
-        }
-        L10nKey::SettingsForgotPasswordFor => "已清除 {endpoint} 的已保存密码",
-        L10nKey::SettingsDeleteProfileBody => {
-            "为它保存的密码也会一并删除，除非还有别的连接用着同一个地址。"
-        }
-        L10nKey::SettingsDeleteProfileCascade => {
-            "有 {count} 个已保存的远程工作区条目指向 {endpoint}，会一并从本机清除。远端机器上的会话照常跑——新建配置连上去就能在工作区列表里找回。"
-        }
         L10nKey::SettingsCouldntForgetPassword => "无法清除 {endpoint} 的已保存密码：{error}",
         L10nKey::SettingsSecurity => "安全",
         L10nKey::SettingsSecurityIntro => "主机可以在自己的高级选项中覆盖这些设置。",
@@ -392,123 +277,24 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::WarnBeforeClosing => "关闭前警告",
         L10nKey::SettingsWarnBeforeClosingDesc => "关闭有活动 SSH 会话的标签页前确认。",
         L10nKey::SettingsNewHost => "新主机",
-        L10nKey::SettingsDiscardChangesTitle => "放弃未保存的更改？",
-        L10nKey::SettingsDiscardChangesBody => "当前连接有未保存的更改。",
         L10nKey::SettingsKeepEditing => "继续编辑",
-        L10nKey::SettingsName => "名称",
-        L10nKey::SettingsHost => "主机",
         L10nKey::SettingsHostRequired => "需要填写主机——不会被保存。",
         L10nKey::SettingsPortInvalid => "端口必须在 1-65535 之间——留空表示 22。",
-        L10nKey::SettingsUser => "用户",
-        L10nKey::SettingsAuth => "认证",
-        L10nKey::SettingsAuthDesc => "认证方式。自动会依次尝试所有适用的方式。",
-        L10nKey::SettingsAuthModeAuto => "自动",
-        L10nKey::SettingsAuthModePassword => "密码",
-        L10nKey::SettingsAuthModeKey => "密钥",
-        L10nKey::SettingsAuthModeAgent => "ssh-agent",
-        L10nKey::SettingsAuthMode2Fa => "2FA",
         L10nKey::SettingsPassword => "密码",
         L10nKey::SettingsNameHint => "可不填",
         L10nKey::SettingsHostHint => "主机名或 IP",
         L10nKey::SettingsUserHint => "连接时再定",
-        L10nKey::SettingsPasswordDesc => "存在系统钥匙串里，不会写进配置文件。",
         L10nKey::SettingsPasswordHint => "连接时再问",
         L10nKey::SettingsKeyPassphrase => "密钥口令",
-        L10nKey::SettingsKeyPassphraseDesc => "用来解锁上面那个密钥，存在系统钥匙串里。",
         L10nKey::SettingsPassphraseNeedsKey => "先填一个密钥文件——口令是跟着它解锁的那个密钥存的。",
-        L10nKey::SettingsBrowseKey => "浏览…",
         L10nKey::SettingsCouldntSavePassword => "无法保存 {endpoint} 的密码：{error}",
         L10nKey::SettingsCouldntSavePassphrase => "无法保存 {key} 的口令：{error}",
-        L10nKey::SettingsJumpHost => "跳板主机",
-        L10nKey::SettingsJumpHostDesc => "用于中转的另一个主机配置的名称（留空 = 直连）。",
         L10nKey::SettingsJumpHostUnknown => "没有名为 {jump_name} 的主机配置——不会被保存。",
         L10nKey::SettingsJumpHostSelf => "主机不能把自己当作跳板——不会被保存。",
-        L10nKey::SettingsNoneSummary => "（无）",
-        L10nKey::SettingsPortForwarding => "端口转发",
-        L10nKey::SettingsRulesOpenedWithConnection => "1 条规则，随连接打开",
-        L10nKey::SettingsAddRule => "+ 添加规则",
-        L10nKey::SettingsRemoveRule => "删除规则",
-        L10nKey::SettingsFwdLegendLocal => "L — 本地端口可达远程侧",
-        L10nKey::SettingsFwdLegendRemote => "R — 远程端口可达本机",
-        L10nKey::SettingsFwdLegendDynamic => "D — 动态 SOCKS 代理",
         L10nKey::SettingsFwdNeedsBoth => "需要监听端口和目标 host:port——不会被保存。",
         L10nKey::SettingsFwdNeedsListen => "需要监听端口——不会被保存。",
-        L10nKey::SettingsAdvanced => "高级",
-        L10nKey::SettingsAdvancedSummary => "算法 / 保活 / 代理 / X11 / 登录脚本",
-        L10nKey::SettingsGroupAuthentication => "认证",
-        L10nKey::SettingsGroupProxies => "代理",
-        L10nKey::SettingsGroupAlgorithms => "算法",
-        L10nKey::SettingsGroupConnection => "连接",
-        L10nKey::SettingsGroupSession => "会话",
-        L10nKey::SettingsGroupSecurity => "安全",
-        L10nKey::SettingsRemoteClipboardWrite => "远端剪贴板图片",
-        L10nKey::SettingsRemoteClipboardWriteDesc => "允许此主机通过 OSC 5522 写入图片到剪贴板。",
-        L10nKey::SettingsIdentityFiles => "身份文件",
-        L10nKey::SettingsIdentityFilesDesc => "私钥路径，每行一个（支持 %h/%r 展开）。",
-        L10nKey::SettingsAgentForwarding => "ssh-agent 转发",
-        L10nKey::SettingsAgentForwardingDesc => "将本机 ssh-agent 转发到该连接。",
-        L10nKey::SettingsProxyCommand => "代理命令",
-        L10nKey::SettingsProxyCommandDesc => "传输命令（%h/%p/%r 会被替换）。",
-        L10nKey::SettingsSocks5Proxy => "SOCKS5 代理",
-        L10nKey::SettingsSocks5ProxyDesc => "host:port（留空 = 无）。",
-        L10nKey::SettingsHttpProxy => "HTTP 代理",
-        L10nKey::SettingsHttpProxyDesc => "host:port（留空 = 无）。",
-        L10nKey::SettingsProxyOverridden => "不会生效：优先用{winner}。",
-        L10nKey::SettingsTestConnection => "测试",
-        L10nKey::SettingsTestRunning => "正在测试连接…",
-        L10nKey::SettingsTestReached => "已连接并通过认证，用时 {time}。",
-        L10nKey::SettingsTestNeedsPassword => "已连到服务器：它要求输入密码，点连接后再输入。",
-        L10nKey::SettingsTestNeedsPassphrase => "已连到服务器：私钥要求输入口令，点连接后再输入。",
-        L10nKey::SettingsTestNeedsInteractive => {
-            "已连到服务器：它要求交互式验证（如 2FA），点连接后再作答。"
-        }
-        L10nKey::SettingsTestNeedsHostKey => "已连到服务器：它的主机密钥还没被接受，先连一次确认。",
-        L10nKey::SettingsTestHostKeyChanged => {
-            "已连到服务器：它的主机密钥和上次不一样了，先连一次核对这次变更。"
-        }
-        L10nKey::SettingsTestFailed => "没连上：{reason}",
         L10nKey::SettingsProxyPortInvalid => "端口必须在 1-65535 之间——只写主机则使用默认端口。",
-        L10nKey::SettingsKexAlgorithms => "KEX 算法",
-        L10nKey::SettingsKexAlgorithmsDesc => "逗号分隔（留空 = 库默认值）。",
-        L10nKey::SettingsCiphers => "加密算法",
-        L10nKey::SettingsCiphersDesc => "逗号分隔（留空 = 默认值）。",
-        L10nKey::SettingsMacs => "MAC 算法",
-        L10nKey::SettingsMacsDesc => "逗号分隔（留空 = 默认值）。",
-        L10nKey::SettingsHostKeyAlgorithms => "主机密钥算法",
-        L10nKey::SettingsHostKeyAlgorithmsDesc => "逗号分隔（留空 = 默认值）。",
-        L10nKey::SettingsCompression => "压缩算法",
-        L10nKey::SettingsJumpHostVia => "经由 {jump_name}",
-        L10nKey::SettingsConnected => "已连接",
-        L10nKey::SettingsProfileCopied => "{name}（副本）",
-        L10nKey::SettingsCompressionDesc => "逗号分隔（留空 = 默认值）。",
-        L10nKey::SettingsKeepaliveInterval => "保活间隔（秒）",
-        L10nKey::SettingsKeepaliveIntervalDesc => "留空 = 库默认值。",
-        L10nKey::SettingsKeepaliveCountMax => "最大保活次数",
-        L10nKey::SettingsKeepaliveCountMaxDesc => "判定断连前允许丢失的保活次数。",
-        L10nKey::SettingsConnectTimeout => "连接超时（秒）",
-        L10nKey::SettingsConnectTimeoutDesc => "留空 = 库默认值。",
-        L10nKey::SettingsX11Forwarding => "X11 转发",
-        L10nKey::SettingsX11ForwardingDesc => {
-            if cfg!(target_os = "macos") {
-                "请求 X11 转发（需要 XQuartz）。"
-            } else if cfg!(target_os = "windows") {
-                "请求 X11 转发（需要运行 X 服务端，如 VcXsrv 或 X410）。"
-            } else {
-                "请求 X11 转发。"
-            }
-        }
-        L10nKey::SettingsShellIntegration => "Shell 集成",
-        L10nKey::SettingsShellIntegrationDesc => "让远程 shell 报告提示符、退出码和工作目录。",
-        L10nKey::SettingsLoginScripts => "登录脚本",
-        L10nKey::SettingsLoginScriptsDesc => "shell 打开后发送的命令，每行一个。",
-        L10nKey::SettingsSkipBanner => "跳过横幅",
-        L10nKey::SettingsSkipBannerDesc => "抑制服务器登录横幅。",
-        L10nKey::SettingsDefaultFollowsDefaults => "沿用全局默认设置（当前为 {value}）。",
-        L10nKey::SettingsValueOn => "开",
-        L10nKey::SettingsValueOff => "关",
         L10nKey::SettingsDefault => "默认",
-        L10nKey::SettingsOn => "开",
-        L10nKey::SettingsOff => "关",
         L10nKey::SettingsShell => "Shell",
         L10nKey::SettingsShellIntro => "新终端启动的程序，留空则使用{default}。",
         L10nKey::SettingsProgram => "Shell 程序",
@@ -543,6 +329,12 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMouseZoomDesc => "按住它滚动滚轮可缩放终端字号。",
         L10nKey::SettingsMouseZoomOff => "关闭",
         L10nKey::SettingsReportMouseToApps => "向应用报告鼠标",
+        L10nKey::SettingsMouseRightClick => "鼠标右键行为",
+        L10nKey::SettingsMouseRightClickDesc => {
+            "菜单：打开右键菜单；复制粘贴：有选区时复制并取消选区，无选区时粘贴。应用接管鼠标时按住 Shift 使用。"
+        }
+        L10nKey::SettingsMouseRightClickMenu => "菜单",
+        L10nKey::SettingsMouseRightClickCopyPaste => "复制粘贴",
         L10nKey::SettingsReportMouseToAppsDesc => {
             "让 vim、tmux 等应用处理点击，按住 Shift 则留在本地。"
         }
@@ -554,35 +346,10 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsDetectUrlsDesc => "悬停显示下划线，{modifier}+点击 打开。",
         L10nKey::ForwardSshLoopbackLinks => "转发远程端口",
         L10nKey::SettingsForwardSshLoopbackLinksDesc => "在本机打开远程窗格的 localhost 链接。",
-        L10nKey::SettingsOpenFilesInternal => "内置编辑器",
-        L10nKey::SettingsOpenFilesSystem => "默认应用",
-        L10nKey::SettingsOpenFilesCommand => "自定义命令",
-        L10nKey::SettingsOpenFilesModeDesc => {
-            "{modifier}+点击文件链接时的打开方式。只有内置编辑器能跳到指定行、打开远程文件。"
-        }
-        L10nKey::LinkFileNotUnder => "{path}：{dir} 下没有这个文件",
-        L10nKey::LinkFileNoDirectory => "{path}：当前窗格未上报工作目录，无法解析相对路径",
-        L10nKey::LinkFileMissing => "{path}：路径不存在",
-        L10nKey::LinkDirOutsideTree => "{path}：它在另一台机器上，也不在文件面板打开的任何目录里",
-        L10nKey::OpenFilesWith => "打开文件方式",
-        L10nKey::SettingsOpenFilesWithDesc => "可用 {path}、{line}、{column}，留空用默认应用。",
         L10nKey::SettingsBellModeOff => "关",
         L10nKey::SettingsBellModeVisual => "闪烁",
         L10nKey::SettingsBellModeAudible => "声音",
         L10nKey::SettingsBellModeBoth => "闪烁 + 声音",
-        L10nKey::SettingsPrompt => "提示符与命令历史",
-        L10nKey::SettingsPromptIntro => "提示符上 tty7 自带的编辑器和菜单，关闭即交还给 shell。",
-        L10nKey::SettingsPromptEditor => "tty7 提示符编辑器",
-        L10nKey::SettingsPromptEditorDesc => {
-            "在输入行上提供选择、撤销和菜单。关闭后交还给 ZLE、readline 或 fish。"
-        }
-        L10nKey::SettingsNeedsPromptEditor => {
-            "依赖提示符编辑器：关闭提示符编辑器时，此按键由 shell 处理。"
-        }
-        L10nKey::SettingsTabCompletion => "Tab 补全",
-        L10nKey::SettingsTabCompletionDesc => "Tab 打开 tty7 的补全菜单，关闭后交给 shell。",
-        L10nKey::SettingsHistorySearch => "命令历史搜索",
-        L10nKey::SettingsHistorySearchDesc => "⌃R 打开 tty7 的模糊历史搜索，关闭后交给 shell。",
         L10nKey::SettingsSelectionClipboard => "选择与剪贴板",
         L10nKey::SettingsSmartSelection => "智能选择",
         L10nKey::SettingsSmartSelectionDesc => "双击选中完整的 URL、路径、邮箱或括号对。",
@@ -604,9 +371,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
             "安装 hook 后，agent 的状态（进行中 / 等待中 / 已完成）会显示在标签栏。"
         }
         L10nKey::SettingsReadingAgentConfig => "正在读取这台机器的 AI agent 配置…",
-        L10nKey::SettingsStatusNotInstalled => "未安装",
         L10nKey::SettingsStatusInstalled => "已安装",
-        L10nKey::SettingsStatusOutdated => "已过时",
         L10nKey::SettingsInstall => "安装",
         L10nKey::SettingsReinstall => "重新安装",
         L10nKey::SettingsUpdate => "更新",
@@ -618,20 +383,10 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSyncWithSystemDesc => "跟随操作系统外观，并分别使用浅色与深色主题。",
         L10nKey::SettingsLegiblePalette => "低对比度颜色纠偏",
         L10nKey::SettingsLegiblePaletteDesc => "自动调整在背景上看不清的亮色。",
-        L10nKey::SettingsChangeTheme => "更换主题",
-        L10nKey::SettingsThemes => "主题",
-        L10nKey::SettingsThemesCloseTooltip => "关闭主题面板 (Esc)",
-        L10nKey::SettingsThemePanelManual => "更改当前主题。",
-        L10nKey::SettingsThemePanelLight => "选择浅色模式的主题。",
-        L10nKey::SettingsThemePanelDark => "选择深色模式的主题。",
         L10nKey::SettingsCustom => "自定义",
         L10nKey::SettingsCustomValue => "自定义 ({value})",
-        L10nKey::SettingsBuiltIn => "内置",
         L10nKey::SettingsDark => "深色",
         L10nKey::SettingsLight => "浅色",
-        L10nKey::SettingsLightMode => "浅色模式",
-        L10nKey::SettingsDarkMode => "深色模式",
-        L10nKey::SettingsActive => "使用中",
         L10nKey::SettingsStartupWindow => "启动窗口",
         L10nKey::SettingsStartupWindowDesc => "tty7 启动时的窗口状态。",
         L10nKey::SettingsRememberWindowSize => "记住窗口大小与位置",
@@ -656,8 +411,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSidebarGroupingDesc => {
             "未固定的标签页按 git 仓库分组，SSH 标签页按主机分组。"
         }
-        L10nKey::DocumentDock => "停靠在终端旁",
-        L10nKey::DocumentFill => "铺满窗口",
         L10nKey::SettingsNotifications => "通知",
         L10nKey::SettingsNotifyOnCommandFinish => "命令完成时通知",
         L10nKey::SettingsNotifyOnCommandFinishDesc => "较长的前台命令完成后发出桌面提醒。",
@@ -675,20 +428,12 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsAtEnd => "末尾",
         L10nKey::SettingsTop => "顶部",
         L10nKey::SettingsLeft => "左侧",
-        L10nKey::SettingsPreset => "预设",
-        L10nKey::SettingsPresetDesc => "tmux 预设把操作映射为前缀键（如 Ctrl-B C）。",
         L10nKey::SettingsPrefix => "前缀",
-        L10nKey::SettingsPressKeys => "按下按键… · ⌫ 表示不设快捷键",
-        L10nKey::SettingsPauseToSaveEsc => "暂停以保存 · Esc",
         L10nKey::SettingsKeybindingsIntroDesc => {
             "点击快捷键后按新按键，连按可组成序列（如 Ctrl-B X）。Esc 取消，Backspace 清除。"
         }
-        L10nKey::SettingsPrefixNote => "单独按前缀键，约 1 秒后传给 shell。",
-        L10nKey::SettingsRestoreAllDefaults => "恢复全部默认值",
-        L10nKey::SettingsRestoreAllDefaultsBody => "你改过的每一个按键都会退回默认值，且无法撤销。",
         L10nKey::KeybindGoToTab => "跳到第 {n} 个标签页",
         L10nKey::KeybindGoToWorkspace => "跳到第 {n} 个工作区",
-        L10nKey::KeybindInsertNewline => "插入换行",
         L10nKey::KeybindForkSessionRight => "向右 Fork 会话",
         L10nKey::KeybindForkSessionLeft => "向左 Fork 会话",
         L10nKey::KeybindForkSessionDown => "向下 Fork 会话",
@@ -896,9 +641,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSearchHideMouseWhileTypingKeywords => {
             "输入时隐藏鼠标 隐藏鼠标 指针 自动隐藏 hide mouse typing cursor pointer autohide"
         }
-        L10nKey::SettingsSearchHistorySearchKeywords => {
-            "历史搜索 反向搜索 模糊搜索 ctrl-r fzf history search recall"
-        }
         L10nKey::SettingsSearchHostsKeywords => {
             "主机 SSH 连接 保存 主机配置 配置文件 导入 ssh_config 管理 添加 编辑 快速连接 hosts ssh profile import connect"
         }
@@ -927,9 +669,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSearchOpacityKeywords => {
             "不透明度 透明度 窗口 半透明 alpha opacity transparency translucent window"
-        }
-        L10nKey::SettingsSearchOpenFilesWithKeywords => {
-            "打开文件 链接 编辑器 命令 外部应用 路径 行号 列号 open files editor command path line column"
         }
         L10nKey::SettingsSearchOpencodeKeywords => {
             "OpenCode agent 集成 插件 安装 opencode agent integration plugin install"
@@ -977,9 +716,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSearchPiKeywords => {
             "Pi agent 集成 扩展 安装 pi agent integration extension install"
-        }
-        L10nKey::SettingsSearchPortForwardingKeywords => {
-            "端口转发 SSH 隧道 本地 远程 动态 SOCKS 转发 port forwarding ssh tunnel local remote"
         }
         L10nKey::SettingsSearchProgramKeywords => {
             "程序 shell 二进制 zsh bash fish nu nushell pwsh powershell 可执行文件 启动 program shell binary launch"
@@ -1029,14 +765,8 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSearchLegiblePaletteKeywords => {
             "颜色 低对比度 可读 纠偏 调色板 修正 contrast legible palette parameter"
         }
-        L10nKey::SettingsSearchPromptEditorKeywords => {
-            "提示符编辑器 提示符 编辑器 原生输入 行编辑 键位 快捷键 输入法 粘贴 prompt editor native shell input zle readline"
-        }
         L10nKey::SettingsSearchTabBarPositionKeywords => {
             "标签栏位置 标签栏 侧边栏 左侧 顶部 布局 tab bar position tabs sidebar left top"
-        }
-        L10nKey::SettingsSearchTabCompletionKeywords => {
-            "Tab补全 补全 菜单 建议 tab completion suggestions prompt"
         }
         L10nKey::SettingsSearchTerminalBellKeywords => {
             "终端铃声 铃声 提示音 闪烁 静音 两者 同时 beep bell terminal audible visual both"
@@ -1059,39 +789,8 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SwitcherNoMatch => "没有匹配的工作区或机器。",
         L10nKey::AddSshHost => "添加 SSH 主机…",
         L10nKey::RestartServer => "重启 tty7 server",
-        L10nKey::OtherMachines => "其他机器",
         L10nKey::Ok => "确定",
-        L10nKey::SftpNoTransfers => "还没有传输任务。",
-        L10nKey::SftpPanelTitleFiles => "文件",
-        L10nKey::SftpTooltipRefresh => "刷新",
-        L10nKey::SftpTooltipMore => "更多",
-        L10nKey::SftpMenuNewFolder => "新建文件夹",
-        L10nKey::SftpMenuNewFile => "新建文件",
-        L10nKey::SftpMenuUpload => "上传…",
-        L10nKey::SftpMenuGotoShellCwd => "转到 shell 目录",
-        L10nKey::SftpMenuHideTransferHistory => "隐藏传输历史",
-        L10nKey::SftpMenuTransferHistory => "传输历史",
-        L10nKey::SftpEditNewFolder => "新建文件夹",
-        L10nKey::SftpEditNewFile => "新建文件",
-        L10nKey::SftpEditRename => "重命名",
-        L10nKey::SftpEditPermissions => "权限 · {mode}",
-        L10nKey::SftpLoading => "加载中…",
-        L10nKey::SftpEmptyDirectory => "空文件夹。",
-        L10nKey::SftpContextOpen => "打开",
-        L10nKey::SftpContextEdit => "编辑",
-        L10nKey::SftpContextFollowSymlink => "跟随符号链接",
-        L10nKey::SftpContextRename => "重命名",
-        L10nKey::SftpContextChmod => "权限…",
-        L10nKey::SftpTransferSummaryRunning => "{count} 个传输中 · {pct}%",
-        L10nKey::SftpTransferSummaryFailed => "{count} 个失败",
-        L10nKey::SftpTransferSummaryIdle => "传输",
-        L10nKey::SftpTransferProgress => "{done} / {total} ({pct}%)",
-        L10nKey::SftpTransferDone => "完成",
-        L10nKey::SftpTransferCancelled => "已取消",
-        L10nKey::SftpTransferError => "错误",
-        L10nKey::SftpTransferListFailed => "无法获取传输状态：{error}",
         L10nKey::SftpPasteUploadFailed => "无法将 {name} 上传到 {host}：{error}",
-        L10nKey::LinkFileOpenFailed => "无法打开 {path}：{error}",
         L10nKey::ForwardDisconnected => "已断开",
         L10nKey::ForwardDisconnectedFrom => "与 {host} 的连接已断开",
         L10nKey::SshEditProfile => "编辑连接…",
@@ -1100,7 +799,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::ForwardTooltipTurnOn => "开启",
         L10nKey::ForwardTooltipTurnOff => "关闭——规则会保留",
         L10nKey::ForwardSwitchFailed => "无法切换这条转发——{error}",
-        L10nKey::SettingsFwdEnabled => "连接时开启这条规则",
         L10nKey::ForwardLocal => "本地",
         L10nKey::ForwardRemote => "远程",
         L10nKey::ForwardDynamic => "动态",
@@ -1114,188 +812,15 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::ForwardAdvancedToggle => "高级",
         L10nKey::ForwardSimpleToggle => "简单",
         L10nKey::ForwardRequestFailed => "联系不上这个会话——什么都没有改动。",
-        L10nKey::FileTreePlaceholderFileName => "文件名",
-        L10nKey::FileTreePlaceholderFolderName => "文件夹名",
-        L10nKey::FileTreePlaceholderNewName => "新名称",
-        L10nKey::FileTreeDeleteTitle => "删除“{name}”？",
-        L10nKey::FileTreeDeleteFolderBody => "该文件夹及其中的所有内容都将被删除，此操作无法撤销。",
-        L10nKey::FileTreeDeleteFileBody => "此操作无法撤销。",
-        L10nKey::SftpDeleteFolderBody => {
-            "该文件夹及其中所有内容将在 {host} 上被删除。远端没有回收站。"
-        }
-        L10nKey::SftpDeleteFileBody => "该文件将在 {host} 上被删除。远端没有回收站。",
-        L10nKey::FileTreeDeleteFailed => "无法删除 {name}",
-        L10nKey::FileTreeCreateFailed => "无法创建 {name}",
-        L10nKey::FileTreeRenameFailed => "无法重命名 {name}",
-        L10nKey::FileTreeDownloadFailed => "无法下载 {name}",
-        L10nKey::FileTreeDownloaded => "已下载到 {path}",
-        L10nKey::FileTreeDownloadTooLarge => "超过 {limit} MB，请改用 scp 或 rsync 下载。",
-        L10nKey::FileTreeContextOpen => "打开",
-        L10nKey::FileTreeContextCdHere => "cd 到此处",
-        L10nKey::FileTreeContextPinAsGroup => "固定为分组",
-        L10nKey::FileTreeContextInsertPath => "在终端中插入路径",
-        L10nKey::FileTreeContextAttachAgent => "附加到 agent",
-        L10nKey::FileTreeContextNewFile => "新建文件",
-        L10nKey::FileTreeContextNewFolder => "新建文件夹",
-        L10nKey::FileTreeContextRename => "重命名",
-        L10nKey::FileTreeContextCopyPath => "复制路径",
-        L10nKey::FileTreeContextHideDotfiles => "隐藏点文件",
-        L10nKey::FileTreeContextShowDotfiles => "显示点文件",
-        L10nKey::FileDropIntoItself => "文件夹不能复制到它自己里面。",
-        L10nKey::FileDropNotHere => "不在这台机器上。",
-        L10nKey::FileDropNameTaken => "同一次拖放里已经有另一项用了这个名字。",
-        L10nKey::FileDropTooDeep => "文件夹嵌套超过 {n} 层。",
-        L10nKey::FileDropTooLarge => "超过 {limit} MB，请改用 SFTP 传输。",
-        L10nKey::FileDropNoWorkingName => "旁边找不到可用的临时名称，无法先复制再替换。",
-        L10nKey::FileDropLeftAside => "未能完成替换，原有项目已在同一目录下重命名为“{name}”。",
-        L10nKey::FileDropReplaceTitle => "替换“{name}”？",
-        L10nKey::FileDropReplaceManyTitle => "替换 {n} 个项目？",
-        L10nKey::FileDropReplaceBody => "当前目录下已存在同名项目，替换后无法撤销。",
-        L10nKey::FileDropReplace => "替换",
-        L10nKey::FileDropFailed => "无法复制 {name}",
-        L10nKey::FileDropFailedMany => "无法复制 {name}，另有 {n} 个也失败了",
         L10nKey::SshPromptNewKey => "新 {fingerprint}",
         L10nKey::SshPromptOldKey => "旧 {old_fingerprint}",
         L10nKey::SshPromptHostKeyNewAlgorithm => {
             "此前已记录这台主机的 {previous_algorithm} 密钥。这是一把新的 {algorithm} 密钥，不会替换原有密钥。"
         }
         L10nKey::SshPromptTypeYesToOverride => "输入 yes 才能启用“覆盖”。",
-        L10nKey::EditorCantOpen => "无法打开 {path}：{e}",
-        L10nKey::EditorCantRead => "无法读取 {path}：{e}",
-        L10nKey::EditorNotUtf8 => "“{path}”不是有效的 UTF-8",
-        L10nKey::EditorSaveFailed => "保存 {name} 失败",
-        L10nKey::EditorUnsavedChanges => "“{name}”有未保存的更改",
-        L10nKey::EditorDiscard => "放弃",
-        L10nKey::EditorNoFileOpen => "没有打开的文件",
-        L10nKey::EditorStripSearch => "搜索 {n} 个打开的文件",
-        L10nKey::EditorStripAllFiles => "所有打开的文件",
-        L10nKey::EditorStripHidden => "已收起 · {n}",
-        L10nKey::EditorStripInBar => "在标签栏中",
-        L10nKey::EditorStripNoMatch => "没有匹配的打开文件",
-        L10nKey::EditorStripCloseSaved => "关闭已保存",
-        L10nKey::EditorStripCloseOthers => "关闭其他",
-        L10nKey::EditorBackToTerminal => "返回终端 (Esc)",
-        L10nKey::EditorLnCol => "行 {line}，列 {column}",
-        L10nKey::EditorSelections => "（{n} 个选区）",
-        L10nKey::EditorEdit => "编辑",
-        L10nKey::EditorPreview => "预览",
-        L10nKey::EditorWrapOn => "自动换行：开",
-        L10nKey::EditorWrapOff => "自动换行：关",
-        L10nKey::EditorFileTooLarge => "“{path}”太大，无法在编辑器中打开（{size} MB）",
-        L10nKey::EditorBinaryFile => "“{path}”看起来是二进制文件",
-        L10nKey::EditorUntitled => "未命名-{n}",
-        L10nKey::EditorUnsavedChangesMany => "{count} 个文件有未保存的更改",
-        L10nKey::EditorSaveAll => "全部保存",
-        L10nKey::EditorSaveConflictTitle => "“{name}”在磁盘上已被修改",
-        L10nKey::EditorSaveConflictBody => {
-            "打开之后，另一个程序修改了它。覆盖会用你的内容替换那些修改。"
-        }
-        L10nKey::EditorOverwrite => "覆盖",
-        L10nKey::EditorEncodeFailedTitle => "无法以 {encoding} 保存“{name}”",
-        L10nKey::EditorEncodeFailedBody => {
-            "其中包含 {encoding} 无法表示的字符“{ch}”。改为以 UTF-8 保存吗？"
-        }
-        L10nKey::EditorSaveAsUtf8 => "以 UTF-8 保存",
-        L10nKey::EditorAlreadyOpen => "“{path}”已在编辑器中打开",
-        L10nKey::EditorGoToLine => "跳转到行",
-        L10nKey::EditorGoToLineAction => "跳转到行…",
-        L10nKey::EditorGoToMatchingBracket => "跳转到匹配的括号",
-        L10nKey::EditorToggleComment => "切换注释",
-        L10nKey::EditorMoveLineUp => "上移行",
-        L10nKey::EditorMoveLineDown => "下移行",
-        L10nKey::EditorDuplicateLine => "复制行",
-        L10nKey::EditorDeleteLine => "删除行",
-        L10nKey::EditorCopyRelativePath => "复制相对路径",
-        L10nKey::EditorGitNextChange => "转到下一处更改",
-        L10nKey::EditorGitPrevChange => "转到上一处更改",
-        L10nKey::EditorGitRevertChange => "还原此处更改",
-        L10nKey::EditorGitToggleGutter => "切换 Git 更改标记",
-        L10nKey::EditorGitPeekRevert => "还原",
-        L10nKey::EditorGitPeekSummary => "与暂存版本相比 −{removed} +{added} 行",
-        L10nKey::EditorGitPeekAddedOnly => "这些是新增的行：暂存版本中此处没有内容。",
-        L10nKey::EditorGitPeekChange => "查看更改",
-        L10nKey::EditorGitPeekKeys => "回车还原 · Esc 关闭",
-        L10nKey::EditorProblemsTitle => "问题",
-        L10nKey::EditorProblemsToggle => "切换问题列表",
-        L10nKey::EditorProblemsNone => "打开的文件中没有问题。",
-        L10nKey::EditorProblemsMore => "……另有 {n} 项",
-        L10nKey::SettingsEditor => "编辑器",
-        L10nKey::SettingsEditorGitGutter => "Git 更改标记",
-        L10nKey::SettingsEditorGitGutterDesc => "在行号旁和滚动条上标出与暂存版本不同的行。",
-        L10nKey::SettingsEditorLsp => "语言服务器",
-        L10nKey::SettingsEditorLspDesc => {
-            "为支持的文件启动语言服务器，提供错误提示、补全和跳转到定义。仅限本机文件。"
-        }
-        L10nKey::SettingsEditorSoftWrap => "自动换行",
-        L10nKey::SettingsEditorSoftWrapDesc => {
-            "打开文件时启用自动换行。状态栏的换行按钮可单独切换某个文件。"
-        }
-        L10nKey::SettingsEditorMarkdownPreview => "以渲染形式打开 Markdown",
-        L10nKey::SettingsEditorMarkdownPreviewDesc => {
-            "打开 Markdown 文件时显示渲染后的预览而不是源码。"
-        }
-        L10nKey::SettingsSearchEditorGitGutterKeywords => {
-            "git 更改 标记 差异 暂存 修改 新增 删除 gutter diff"
-        }
-        L10nKey::SettingsSearchEditorLspKeywords => "lsp 语言服务器 诊断 错误 警告 补全 定义",
-        L10nKey::SettingsSearchEditorSoftWrapKeywords => "换行 自动换行 长行 wrap",
-        L10nKey::SettingsSearchEditorMarkdownPreviewKeywords => "markdown 预览 渲染 md",
-        L10nKey::EditorGoToLinePlaceholder => "行号，或 行:列（1–{total}）",
-        L10nKey::EditorGoToSymbolAction => "跳转到编辑器中的符号…",
-        L10nKey::EditorNavigateBack => "后退",
-        L10nKey::EditorNavigateForward => "前进",
-        L10nKey::EditorSplitRight => "向右拆分编辑器",
-        L10nKey::EditorFocusLeftGroup => "聚焦左侧编辑器组",
-        L10nKey::EditorFocusRightGroup => "聚焦右侧编辑器组",
-        L10nKey::EditorSplitSameFile => "已在另一组中打开 — 点击在此编辑",
-        L10nKey::CmdEditorGoToSymbol => "编辑器：跳转到符号…",
-        L10nKey::SearchHeadingReferences => "引用",
-        L10nKey::SearchSectionThisFile => "本文件",
-        L10nKey::SearchSectionProject => "项目",
-        L10nKey::SearchHeadingDefinitions => "定义",
-        L10nKey::CmdEditorGoBack => "编辑器：后退",
-        L10nKey::CmdEditorGoForward => "编辑器：前进",
-        L10nKey::CmdEditorSplitRight => "编辑器：向右拆分",
-        L10nKey::EditorSaveAs => "另存为",
-        L10nKey::EditorSaveAsAction => "另存为…",
-        L10nKey::EditorSaveAsPlaceholder => "要保存到的完整路径",
-        L10nKey::EditorReplaceExisting => "“{path}”已存在。要替换吗？",
-        L10nKey::EditorReplace => "替换",
-        L10nKey::EditorNewFile => "新建文件",
-        L10nKey::EditorOrphanAdopted => "未保存的“{name}”已从关闭的标签页移到这里",
-        L10nKey::EditorFileDeletedOnDisk => "此文件已在磁盘上被删除",
-        L10nKey::EditorIndentSpaces => "空格：{n}",
-        L10nKey::EditorIndentTabs => "Tab 宽度：{n}",
-        L10nKey::LspGoToDefinition => "转到定义",
-        L10nKey::LspQuickFix => "快速修复…",
-        L10nKey::LspFormatDocument => "格式化文档",
-        L10nKey::LspRenameSymbol => "重命名符号",
-        L10nKey::LspRenameSymbolAction => "重命名符号…",
-        L10nKey::LspRenamePlaceholder => "{name} 的新名称",
-        L10nKey::LspRenameFailed => "无法重命名 {name}",
-        L10nKey::LspServerMissing => "未安装 {name}",
-        L10nKey::LspServerStarting => "{name} 启动中…",
-        L10nKey::LspServerDown => "{name} 已停止",
-        L10nKey::LspProblemsTooltip => "{errors} 个错误，{warnings} 个警告",
-        L10nKey::SearchTabLocations => "位置",
-        L10nKey::SearchPlaceholderLocations => "筛选找到的位置…",
-        L10nKey::SearchLocationsNone => "未找到任何位置",
-        L10nKey::LspFindReferences => "查找所有引用",
-        L10nKey::PanelInfoTitle => "信息",
-        L10nKey::PanelChangesTitle => "更改",
-        L10nKey::PanelScmTitle => "更改",
-        L10nKey::PanelFilesTitle => "文件",
-        L10nKey::PanelSearchTitle => "搜索",
-        L10nKey::PanelGitHubTitle => "GitHub",
+        L10nKey::SettingsDiscard => "放弃",
         L10nKey::PanelNoSession => "没有活动会话。",
         L10nKey::PanelNoSessionHint => "打开一个标签页以在此处查看其 shell、目录和进程。",
-        L10nKey::PanelNoWorkingDirectory => "没有工作目录。",
-        L10nKey::PanelNoWorkingDirectoryHint => "此窗格尚未报告工作目录。",
-        L10nKey::PanelLoading => "加载中…",
-        L10nKey::PanelNotAGitRepo => "不是 git 仓库。",
-        L10nKey::PanelNotAGitRepoHint => "进入 git 仓库后，此标签页会列出未提交的变更。",
-        L10nKey::PanelNoChanges => "没有未提交的变更。",
-        L10nKey::PanelNoChangesHint => "worktree 是干净的。",
         L10nKey::PanelSessionSubtitle => "会话",
         L10nKey::PanelProcessesSubtitle => "进程",
         L10nKey::PanelProcessesTotal => "合计",
@@ -1309,107 +834,12 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::PanelCwd => "工作目录",
         L10nKey::PanelShell => "shell",
         L10nKey::PanelSsh => "ssh",
-        L10nKey::PanelBranch => "分支",
-        L10nKey::PanelChangesRow => "变更",
         L10nKey::PanelAgentWorking => "进行中",
         L10nKey::PanelAgentWaiting => "等待中",
         L10nKey::PanelAgentDone => "已完成",
         L10nKey::PanelRevealInFinder => "在访达中显示",
         L10nKey::PanelOpenFolder => "打开文件夹",
         L10nKey::PanelOpenInBrowser => "在浏览器中打开",
-        L10nKey::ScmGroupMerge => "合并冲突",
-        L10nKey::ScmGroupStaged => "暂存的更改",
-        L10nKey::ScmGroupChanges => "更改",
-        L10nKey::ScmGroupUntracked => "未跟踪",
-        L10nKey::ScmCommitPlaceholder => "说说改了什么…",
-        L10nKey::ScmCommitButton => "提交",
-        L10nKey::ScmCommitAllButton => "提交全部",
-        L10nKey::ScmCommitAmendButton => "提交（修订）",
-        L10nKey::ScmCommitAndPush => "提交并推送",
-        L10nKey::ScmCommitAndSync => "提交并同步",
-        L10nKey::ScmAmendLastCommit => "修订上一次提交",
-        L10nKey::ScmCommitStaged => "提交已暂存的更改",
-        L10nKey::ScmStashAll => "全部贮藏",
-        L10nKey::ScmNothingToCommit => "没有可提交的内容",
-        L10nKey::ScmNetworkBusy => "这个仓库还有一个网络操作在进行中",
-        L10nKey::ScmCommitNeedsMessage => "先写一条提交信息",
-        L10nKey::ScmDetailFilesFailed => "无法读取文件列表",
-        L10nKey::ScmTimeNow => "刚刚",
-        L10nKey::ScmTimeMinutes => "{n}分",
-        L10nKey::ScmTimeHours => "{n}时",
-        L10nKey::ScmTimeDays => "{n}天",
-        // "个月" 而不是 "月":"3月" 会被读成月份名。
-        L10nKey::ScmTimeMonths => "{n}个月",
-        L10nKey::ScmTimeYears => "{n}年",
-        L10nKey::ScmResetHardConfirm => {
-            "把分支重置到这个提交？之后的提交会从分支上消失，未提交的更改会被丢弃。"
-        }
-        L10nKey::ScmReset => "重置",
-        L10nKey::ScmChipStaged => "已暂存",
-        L10nKey::ScmStage => "暂存更改",
-        L10nKey::ScmStageAll => "暂存全部更改",
-        L10nKey::ScmUnstage => "取消暂存",
-        L10nKey::ScmUnstageAll => "取消暂存全部更改",
-        L10nKey::ScmDiscard => "放弃更改",
-        L10nKey::ScmDiscardAll => "放弃全部更改",
-        L10nKey::ScmDiscardConfirm => "放弃对 {path} 的更改？此操作无法撤销。",
-        L10nKey::ScmOpenConflict => "解决冲突",
-        L10nKey::ScmMarkResolved => "标记为已解决",
-        L10nKey::ScmUnrepresentablePath => "该路径不是合法的 UTF-8，无法传给 git，仅可查看。",
-        L10nKey::ScmPublishBranch => "发布分支",
-        L10nKey::ScmDetached => "游离头指针",
-        L10nKey::ScmPushDetached => "HEAD 游离——请先切换到一个分支再推送",
-        L10nKey::ScmPushNoCommits => "还没有可推送的提交",
-        L10nKey::ScmAmendBadge => "修订",
-        L10nKey::ScmSync => "同步更改",
-        L10nKey::ScmPush => "推送",
-        L10nKey::ScmPull => "拉取",
-        L10nKey::ScmFetch => "获取",
-        L10nKey::ScmCheckoutBranch => "切换到…",
-        L10nKey::ScmCreateBranch => "新建分支…",
-        L10nKey::ScmSearchBranches => "搜索分支…",
-        L10nKey::ScmStashAndSwitch => "贮藏并切换",
-        L10nKey::ScmGraphTitle => "提交历史",
-        L10nKey::ScmGraphLoadMore => "加载更多",
-        L10nKey::ScmGraphFilterPlaceholder => "筛选提交…",
-        L10nKey::ScmGraphAllBranches => "全部分支",
-        L10nKey::ScmGraphEmpty => "还没有提交",
-        L10nKey::ScmGraphCurrentBranch => "当前分支",
-        L10nKey::ScmCheckoutCommit => "检出此提交",
-        L10nKey::ScmCreateBranchHere => "在此创建分支…",
-        L10nKey::ScmResetSoft => "重置（保留暂存）",
-        L10nKey::ScmResetMixed => "重置（保留工作区）",
-        L10nKey::ScmResetHard => "重置（丢弃更改）",
-        L10nKey::ScmCommitDetailTitle => "提交",
-        L10nKey::ScmCopyCommitSha => "复制提交 SHA",
-        L10nKey::ScmCherryPick => "拣选提交",
-        L10nKey::ScmRevertCommit => "还原提交",
-        L10nKey::ScmResetToCommit => "重置到该提交",
-        L10nKey::ScmRefresh => "刷新",
-        L10nKey::ScmBackToChanges => "返回",
-        L10nKey::ScmCommitParents => "父提交",
-        L10nKey::ScmShowMore => "展开",
-        L10nKey::ScmShowLess => "收起",
-        L10nKey::ScmCommitNotFound => "本仓库中没有这个提交。",
-        L10nKey::ScmFilterChanges => "筛选变更文件…",
-        L10nKey::ScmViewAsTree => "以树形显示",
-        L10nKey::ScmViewAsList => "以列表显示",
-        L10nKey::ScmNoMatchingChanges => "没有匹配筛选的变更文件。",
-        L10nKey::ScmTooManyChanges => "改动过多，仅显示前 {shown} 项（共 {total} 项）。",
-        L10nKey::ScmOpenChanges => "查看改动",
-        L10nKey::ScmDiscardAllConfirm => {
-            "放弃所有未暂存的改动和未跟踪的文件？已暂存的改动会保留。此操作无法撤销。"
-        }
-        L10nKey::ScmAmendConfirm => {
-            "修补上一次提交？它会被一个新提交取代，已经获取旧提交的协作者需要自行同步。"
-        }
-        L10nKey::ScmOpMerge => "合并中",
-        L10nKey::ScmOpRebase => "变基中",
-        L10nKey::ScmOpCherryPick => "拣选中",
-        L10nKey::ScmOpRevert => "还原中",
-        L10nKey::ScmOpBisect => "二分查找中",
-        L10nKey::ScmOpAm => "应用补丁中",
-        L10nKey::ScmSwitchRepository => "切换仓库",
         L10nKey::WindowStop => "停止",
         L10nKey::WindowDelete => "删除",
         L10nKey::WindowThisWorkspace => "此工作区",
@@ -1420,44 +850,8 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::WindowStopShells => "{count} 个正在运行的 shell 将会被终止。",
         L10nKey::WindowDeleteShells => "{count} 个正在运行的 shell 将会被终止，布局也将被清除。",
-        L10nKey::DiffReading => "正在读取 diff…",
-        L10nKey::DiffNotARepo => "不是 git 仓库",
-        L10nKey::DiffReadFailed => "无法读取 worktree diff——下次刷新时重试。",
-        L10nKey::DiffWorkingTreeClean => "worktree 干净",
-        L10nKey::DiffCloseTooltip => "关闭 diff (Esc)",
-        L10nKey::DiffChangedFiles => "{count} 个变更文件",
-        L10nKey::DiffUntrackedCount => " · {count} 个未跟踪文件",
-        L10nKey::DiffMoreFiles => "…还有 {count} 个变更文件——在终端中运行 git diff 查看。",
-        L10nKey::DiffOversizedNotice => {
-            "此 worktree 太大，渲染不动（{summary}）。每个文件都已折叠——可逐个展开，或在终端运行 git diff。"
-        }
-        L10nKey::DiffTruncatedPerFile => {
-            "diff 在 {limit} 行处截断——在终端中运行 git diff 查看其余部分。"
-        }
-        L10nKey::DiffTruncatedBudget => {
-            "内容未加载——已超出 tty7 的 diff 预算。在终端运行 git diff 查看此文件。"
-        }
-        L10nKey::DiffUntrackedHeader => "未跟踪文件 ({count})",
-        L10nKey::DiffMoreUntracked => "…还有 {count} 个——在终端中运行 git status 查看。",
-        L10nKey::DiffLines => "{count} 行 diff",
-        L10nKey::DiffChangedLines => "{total} 行变更，在 {cap} 截断前已加载 {loaded} 行 diff",
-        L10nKey::DiffBudgetAndCap => "tty7 的预算和单文件上限",
-        L10nKey::DiffBudget => "tty7 的预算",
-        L10nKey::DiffPerFileCap => "单文件上限",
-        L10nKey::DiffUntrackedSummary => "{count} 个未跟踪",
-        L10nKey::DiffViewSplit => "并排",
-        L10nKey::DiffViewUnified => "统一",
-        L10nKey::DiffCopySelection => "复制选中的行",
         L10nKey::PendingConnecting => "正在连接 {machine}…",
         L10nKey::PendingUnreachable => "无法连接到 {machine}",
-        L10nKey::WorktreePromptNeedsName => "worktree 需要一个名称",
-        L10nKey::WorktreePromptTitle => "新建 worktree 标签页",
-        L10nKey::WorktreePromptName => "worktree 名称",
-        L10nKey::WorktreePromptBranch => "新分支",
-        L10nKey::WorktreePromptBase => "起始分支",
-        L10nKey::WorktreePromptCreating => "正在创建…",
-        L10nKey::WorktreePromptCreate => "创建",
-        L10nKey::AppNewWorktreeFailed => "新建 worktree 失败：{error}",
         L10nKey::HomeTimeJustNow => "刚刚",
         L10nKey::HomeTimeMinutesAgo => "{count} 分钟前",
         L10nKey::HomeTimeHourAgo => "1 小时前",
@@ -1562,9 +956,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::RemoteNoRouteToHost => "tty7 已无法到达 {machine}",
         L10nKey::RemoteMachineTreeUnexpectedReply => "获取机器树时收到意外响应：{reply}",
         L10nKey::RemoteMismatchVersionFromExe => "{version}（来自 {exe}）",
-        L10nKey::AppNoRunningCodingAgent => {
-            "未找到运行中的编码 agent——请先在某个窗格中启动一个（claude、codex 等）。"
-        }
         L10nKey::SwitcherThisComputer => "本机",
         L10nKey::SwitcherStartingServer => "正在启动 tty7 server…",
         L10nKey::SwitcherDownloadingServerWithTotal => "正在下载 tty7 server… {done} / {total}",
@@ -1576,7 +967,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SwitcherDisconnect => "断开连接",
         L10nKey::SwitcherEditHost => "编辑主机…",
         L10nKey::SwitcherSaveAsHost => "保存为 SSH 主机…",
-        L10nKey::SshSaveDroppedJumpHost => "未导入跳板机设置：跳板机必须是另一个已保存的主机。",
         L10nKey::SwitcherOpenInNewWindow => "在新窗口中打开",
         L10nKey::SwitcherRename => "重命名…",
         L10nKey::SwitcherPickAWorkspace => "选一个工作区查看它的标签页。",
@@ -1584,7 +974,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SwitcherNoTabMatch => "没有匹配的标签页。",
         L10nKey::SwitcherTabsAfterOpening => "打开这个工作区后才能看到它的标签页。",
         L10nKey::SwitcherOpenToManage => "打开这个工作区后才能重命名或停止它。",
-        L10nKey::SwitcherConnectToUse => "连接这台机器后才能在上面新建工作区。",
         L10nKey::SwitcherOrphanPanes => "后台窗格——仍在运行、但不属于任何窗口的 shell：",
         L10nKey::SwitcherTabCount => "{n} 个标签页",
         L10nKey::SwitcherTabCountOne => "1 个标签页",
@@ -1593,9 +982,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SwitcherTabToCrossColumns => "按 Tab 换到另一列",
         L10nKey::SwitcherHintNavigate => "导航",
         L10nKey::SwitcherHintOpen => "打开",
-        L10nKey::SearchHintNextScope => "下一个范围",
-        L10nKey::PanelFilesNameMatches => "文件名",
-        L10nKey::PanelSearchInContents => "文件内容",
         L10nKey::SwitcherHintNewWindow => "新窗口",
         L10nKey::SwitcherLocalHost => "本机",
         L10nKey::SwitcherConnectingTo => "正在连接 {machine}…",
@@ -1614,7 +1000,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SshPromptConnect => "连接",
         L10nKey::SshPromptUnlock => "解锁",
         L10nKey::SshPromptSubmit => "提交",
-        L10nKey::GitOpFailed => "git {op} 失败",
         L10nKey::IoDenied => "没有权限。",
         L10nKey::IoGone => "文件或目录已不存在。",
         L10nKey::IoNoSpace => "磁盘没有空间了。",
@@ -1622,24 +1007,17 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::IoBusy => "它正被其他程序占用。",
         L10nKey::IoTimedOut => "对方没有在规定时间内响应。",
         L10nKey::TreeWindowOpenedEmpty => {
-            "tty7 server 尚未返回这个窗口的标签页，所以窗口暂时是空的。会话没有丢失，server 响应后会自动恢复；如果长时间没有恢复，请在命令面板中执行“重启 tty7 server”。"
+            "tty7 server 尚未返回这个窗口的标签页，所以窗口暂时是空的。会话没有丢失，server 响应后会自动恢复；如果长时间没有恢复，请在“设置 → 关于”中重启本机 tty7 server，或更新对应的远程 server。"
         }
         L10nKey::CmdGroupTabsPanes => "标签页与窗格",
         L10nKey::CmdGroupWorkspaces => "工作区",
         L10nKey::CmdGroupView => "视图",
-        L10nKey::CmdGroupGit => "Git",
         L10nKey::CmdGroupTerminal => "终端",
         L10nKey::CmdGroupSsh => "SSH",
         L10nKey::CmdGroupAgents => "Agents",
         L10nKey::CmdGroupApplication => "应用",
         L10nKey::CmdNewTab => "新标签页",
         L10nKey::CmdNewWindow => "新建窗口",
-        L10nKey::CmdNewWorktreeTab => "新建 worktree 标签页…",
-        L10nKey::CmdNewWorktreeTabSubtitle => "在全新分支上独立检出",
-        L10nKey::CmdNewGroup => "新建分组",
-        L10nKey::CmdNewGroupSubtitle => "在侧栏新建一个空的固定分组",
-        L10nKey::CmdOpenFolderAsGroup => "将文件夹作为分组打开…",
-        L10nKey::CmdOpenFolderAsGroupSubtitle => "固定一个文件夹；在其中打开的标签页会加入",
         L10nKey::CmdRenameTab => "重命名标签页…",
         L10nKey::CmdSplitRight => "向右分屏",
         L10nKey::CmdSplitDown => "向下分屏",
@@ -1664,13 +1042,8 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::CmdRecentTabSwitcherReverse => "最近标签页切换器（反向）",
         L10nKey::CmdCopyWorkingDirectory => "复制工作目录",
         L10nKey::CmdCopySessionId => "复制会话 ID",
-        L10nKey::CmdCopySessionIdSubtitle => "编码 agent 自身的会话 ID",
         L10nKey::CmdNewAgentTab => "新建 Agent 标签页",
-        L10nKey::CmdNewAgentTabSubtitle => "在新标签页中打开上次使用的编码 agent",
         L10nKey::CmdNextAgentNeedingAttention => "Agent：跳到下一个需要处理的 agent",
-        L10nKey::CmdNextAgentNeedingAttentionSubtitle => {
-            "先是等待中的 agent（等得最久的在前），再是未读的已完成回合"
-        }
         L10nKey::AppNoAgentNeedsAttention => "已打开的窗口中没有需要你处理的 agent。",
         L10nKey::AgentWaitingFor => "已等待 {age}",
         L10nKey::AgeUnderMinute => "不到 1 分钟",
@@ -1678,13 +1051,10 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::AgeHours => "{count} 小时",
         L10nKey::AgeDays => "{count} 天",
         L10nKey::CmdForkSession => "Fork 会话",
-        L10nKey::CmdForkSessionSubtitle => "将此 agent 会话 fork 到新标签页",
         L10nKey::CmdMarkTabAsUnread => "将标签页标记为未读",
         L10nKey::CmdHibernateTab => "休眠标签页",
-        L10nKey::CmdHibernateTabSubtitle => "停止其中的进程以释放内存，选中即可唤醒",
         L10nKey::CmdClosePaneTab => "关闭窗格/标签页",
         L10nKey::CmdCloseWindow => "关闭窗口",
-        L10nKey::CmdCloseWindowSubtitle => "shell 保持运行",
         L10nKey::CmdCloseOtherTabs => "关闭其他标签页",
         L10nKey::CmdCloseTabsToTheRight => "关闭右侧标签页",
         L10nKey::CmdReopenClosedTab => "重新打开已关闭标签页",
@@ -1692,53 +1062,10 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::CmdSwitchWorkspace => "切换工作区…",
         L10nKey::CmdRenameWorkspace => "重命名工作区…",
         L10nKey::CmdStopWorkspace => "停止工作区…",
-        L10nKey::CmdStopWorkspaceSubtitle => "结束其 shell，保留布局",
         L10nKey::CmdDeleteWorkspace => "删除工作区…",
-        L10nKey::CmdDeleteWorkspaceSubtitle => "结束其 shell，清除布局",
-        L10nKey::CmdShowLeftSidebar => "显示左侧边栏",
-        L10nKey::CmdHideLeftSidebar => "隐藏左侧边栏",
-        L10nKey::CmdHideRightPanel => "隐藏右侧面板",
-        L10nKey::CmdShowRightPanel => "显示右侧面板",
-        L10nKey::CmdShowCodePanel => "显示代码面板",
-        L10nKey::CmdTabBarMoveToTop => "标签栏：移到顶部",
-        L10nKey::CmdTabBarMoveToLeftSidebar => "标签栏：移到左侧边栏",
-        L10nKey::CmdRightPanelInfo => "右侧面板：信息",
-        L10nKey::CmdRightPanelChanges => "右侧面板：变更",
-        L10nKey::CmdRightPanelFiles => "右侧面板：文件",
-        L10nKey::CmdRightPanelSearch => "右侧面板：搜索",
-        L10nKey::CmdRightPanelGitHub => "右侧面板：GitHub",
-        L10nKey::CmdChangeTheme => "更改主题…",
         L10nKey::CmdResetFontSize => "重置字号",
         L10nKey::CmdEnterFullScreen => "进入全屏",
         L10nKey::CmdClearScrollback => "清除回滚内容",
-        L10nKey::CmdToggleDiffViewMode => "切换统一 / 并排差异视图",
-        L10nKey::CmdDocumentDock => "文档：停靠在终端旁",
-        L10nKey::CmdDocumentFill => "文档：铺满窗口",
-        L10nKey::CmdToggleDocumentFill => "切换文档铺满 / 停靠",
-        L10nKey::CmdDocumentWidthThird => "文档：三分之一宽",
-        L10nKey::CmdDocumentWidthHalf => "文档：一半宽",
-        L10nKey::CmdDocumentWidthTwoThirds => "文档：三分之二宽",
-        L10nKey::CmdToggleDocumentPreview => "文档：切换 Markdown 预览",
-        L10nKey::CmdToggleDocumentWrap => "文档：切换自动换行",
-        L10nKey::CmdEditorTransformUppercase => "文档：转换为大写",
-        L10nKey::CmdEditorTransformLowercase => "文档：转换为小写",
-        L10nKey::CmdEditorTransformTitleCase => "文档：转换为词首字母大写",
-        L10nKey::CmdEditorTrimTrailingWhitespace => "文档：删除行尾空白",
-        L10nKey::CmdEditorJoinLines => "文档：合并行",
-        L10nKey::CmdEditorRemoveSurroundingBrackets => "文档：删除外层括号",
-        L10nKey::CmdGitCommit => "Git：提交",
-        L10nKey::CmdGitStageAll => "Git：暂存全部更改",
-        L10nKey::CmdGitUnstageAll => "Git：取消暂存全部更改",
-        L10nKey::CmdGitDiscardAll => "Git：放弃全部更改",
-        L10nKey::CmdGitDiscardAllSubtitle => "丢弃工作区里所有未提交的更改。",
-        L10nKey::CmdGitCheckoutTo => "Git：切换到…",
-        L10nKey::CmdGitCreateBranch => "Git：新建分支…",
-        L10nKey::CmdGitSync => "Git：同步",
-        L10nKey::CmdGitSyncSubtitle => "先拉取，再推送。",
-        L10nKey::CmdGitPush => "Git：推送",
-        L10nKey::CmdGitPull => "Git：拉取",
-        L10nKey::CmdGitFetch => "Git：获取",
-        L10nKey::CmdGitToggleGraph => "Git：显示 / 隐藏提交历史",
         L10nKey::CmdFindInTerminal => "在终端中查找…",
         L10nKey::CmdToggleComposer => "切换消息输入框",
         L10nKey::ComposerModeDefault => "编辑前询问",
@@ -1757,29 +1084,17 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::ComposerSendTip => "发送（Enter）  ·  Shift+Enter 换行",
         L10nKey::ComposerAttach => "附加文件或图片",
         L10nKey::ComposerMenuCommands => "命令",
-        L10nKey::ComposerMenuFiles => "文件",
         L10nKey::ComposerCmdProject => "项目命令",
         L10nKey::ComposerCmdUser => "用户命令",
         L10nKey::ComposerAgentAsking => "{agent} 正在等你回答，请先在终端里回答再发送。",
         L10nKey::CmdFindNext => "查找下一个",
         L10nKey::CmdFindPrevious => "查找上一个",
         L10nKey::CmdCopy => "复制",
-        L10nKey::CmdCut => "剪切",
         L10nKey::CmdPaste => "粘贴",
         L10nKey::CmdAlternatePaste => "粘贴（全屏程序中除外）",
-        L10nKey::CmdSelectAll => "全选",
-        L10nKey::CmdSshAddConnection => "SSH：添加连接…",
         L10nKey::CmdSshManageProfiles => "SSH：管理主机配置…",
         L10nKey::CmdSshReconnect => "SSH：重新连接",
-        L10nKey::CmdSshRemoteFiles => "SSH：远程文件",
         L10nKey::CmdSshPortForwarding => "SSH：端口转发",
-        L10nKey::CmdSshSaveConnection => "SSH：将当前连接保存为主机…",
-        L10nKey::CmdSshSaveConnectionSubtitle => "把这条连接存成一个主机配置。",
-        L10nKey::CmdSshConnectWithInput => "SSH：连接 {input}",
-        L10nKey::CmdAgentSendSelection => "Agent：发送选区",
-        L10nKey::CmdAgentSendSelectionSubtitle => "选区 → 运行中的编码 agent",
-        L10nKey::CmdAgentSendGitDiffForReview => "Agent：发送 git diff 以供审查",
-        L10nKey::CmdAgentSendGitDiffSubtitle => "git diff → 运行中的编码 agent",
         L10nKey::CmdSettings => "设置…",
         L10nKey::CmdKeyboardShortcuts => "快捷键",
         L10nKey::CmdAboutTty7 => "关于 tty7",
@@ -1787,13 +1102,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::CmdDocumentation => "文档",
         L10nKey::CmdJoinDiscord => "加入 Discord",
         L10nKey::CmdReportIssue => "报告问题…",
-        L10nKey::CmdRestartServer => "重启 tty7 server…",
-        L10nKey::CmdRestartServerSubtitle => "结束所有运行中的 shell；保留布局",
         L10nKey::CmdQuitTty7 => "退出 tty7",
-        L10nKey::CmdQuitTty7Subtitle => "停止服务；结束所有运行中的 shell",
-        L10nKey::CmdQuickConnect => "连接到“{target}”",
-        L10nKey::CmdQuickConnectSaveProfile => "将“{target}”保存为主机配置…",
-        L10nKey::CmdRecent => "最近使用",
         L10nKey::AppRestartServerTitle => "重启 tty7 server？",
         L10nKey::AppRestartServerFailed => "无法重启 tty7 server：{error}",
         L10nKey::AppRestartServerMismatchDetail => {
@@ -1827,14 +1136,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::ConfigUnreadableReload => {
             "config.json 读取失败。tty7 保留了当前在用的设置，文件也原样保留。修好权限或内容后会自动重载；在此之前保存设置会覆盖它。"
         }
-        L10nKey::AppWorktreeRemoveDetailDirty => {
-            "位于 {path} 的已关闭标签页的 worktree 有未提交的变更。删除前会先存到 refs/tty7/trash/{name}。"
-        }
-        L10nKey::AppWorktreeRemoveDetailClean => "位于 {path} 的已关闭标签页的 worktree 是干净的。",
-        L10nKey::AppWorktreeRemoveTitle => "删除 worktree“{branch}”？",
-        L10nKey::AppWorktreeDiscardAndRemove => "放弃变更并删除",
-        L10nKey::AppWorktreeRemove => "删除 worktree",
-        L10nKey::AppWorktreeKeep => "保留",
         L10nKey::AppReopenTabFailed => "无法重新打开标签页：没有启动终端",
         L10nKey::AppOpenTerminalFailed => "无法打开终端：{error}",
         L10nKey::AppTabsNotRestored => "上次的 {count} 个标签页没能重新打开",
@@ -1847,25 +1148,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppSshReconnectFailed => "SSH 重新连接失败：{error}",
         L10nKey::AppSplitPaneFailed => "无法拆分窗格：{error}",
         L10nKey::PaneDragHandleTooltip => "拖动可把这个窗格挪到别处",
-        L10nKey::AppWorktreeRemoved => "已删除 worktree“{branch}”",
-        L10nKey::AppWorktreeRemoveFailed => "删除 worktree 失败：{error}",
-        L10nKey::WorktreePromptAgent => "启动",
-        L10nKey::WorktreePromptShell => "终端",
-        L10nKey::WorktreePromptTask => "任务",
-        L10nKey::WorktreePromptSetup => "先运行 .tty7/setup",
-        L10nKey::WorktreePromptSetupHint => {
-            "没有 .tty7/setup。加一个，新 worktree 就会先运行 `{command}`"
-        }
-        L10nKey::AppWorktreeSetupTitle => "运行这个仓库的 setup 脚本？",
-        L10nKey::AppWorktreeSetupDetail => {
-            "{path} 会在新标签页里最先运行。只在信任这个仓库时批准；脚本内容一变，tty7 会再问一次。"
-        }
-        L10nKey::AppWorktreeSetupRun => "运行",
-        L10nKey::AppWorktreeSetupSkip => "跳过",
-        L10nKey::AppWorktreeNotCarried => "未按 .worktreeinclude 复制：{paths}",
-        L10nKey::AppWorktreeRemovedBranchKept => {
-            "已删除 worktree；分支“{branch}”有未合并的提交，已保留"
-        }
         L10nKey::AppPaneNoCodingAgent => "此窗格未运行编码 agent",
         L10nKey::AppForkNoCommand => "tty7 没有用于 {name} 的 fork 命令",
         L10nKey::AppForkLocalOnly => "无法在 SSH 或 WSL 会话里 fork {name} 会话",
@@ -1874,10 +1156,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::AppForkSessionIdNotToken => "{name} 的会话 ID 格式异常（不是单个连续字符串）",
         L10nKey::AppForkMidTurn => "{name} 正在处理中——fork 不会包含进行中的这一轮",
-        L10nKey::AppTabNoWorkingDirectory => "此标签页还没有工作目录",
-        L10nKey::AppNothingSelected => "未选择任何内容——请先选择一些终端输出。",
-        L10nKey::AppPaneNoKnownDirectory => "此窗格没有已知的目录。",
-        L10nKey::AppNoUncommittedChanges => "{cwd} 中没有未提交的更改（或不是 git 仓库）。",
         L10nKey::AppCmdAgentLaunchTitle => "Agent：{name}",
         L10nKey::AppNoAgentOnPath => "在本机 PATH 中未找到编码 agent",
         L10nKey::AppNoAgentSeenHere => {
@@ -1885,12 +1163,9 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::AppAgentLaunchSaved => "{name} 以后将以此命令启动：{command}",
         L10nKey::AppAgentLaunchArgsUnknown => "{name} 未报告其启动参数",
-        L10nKey::AppCmdShellTitle => "Shell：{title}",
         L10nKey::AppPlaceholderDescription => "描述",
-        L10nKey::AppPlaceholderSshQuickConnect => "user@host  或  user@host:port",
         L10nKey::AppPlaceholderLoginShell => "登录 shell",
         L10nKey::AppPlaceholderNone => "无",
-        L10nKey::AppPlaceholderOpenInDefaultApp => "在默认应用中打开",
         L10nKey::AppThemeColorBackground => "背景",
         L10nKey::AppThemeColorForeground => "前景",
         L10nKey::AppThemeColorAccent => "强调色",
@@ -1937,36 +1212,14 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
             "{action} 占用了原属于 {previous} 的快捷键，{previous} 现在没有快捷键了。"
         }
         L10nKey::AppLocalServerName => "本地 server",
-        L10nKey::AppSshParseUnbalancedQuotes => "SSH 命令中的引号不匹配",
-        L10nKey::AppSshParseNoRemoteCommands => "此处不支持远程命令",
-        L10nKey::AppSshParseFlagNeedsValue => "-{flag} 需要一个值",
-        L10nKey::AppSshParseInvalidPort => "无效端口“{value}”",
-        L10nKey::AppSshParseUnsupportedOption => "不支持的选项“{option}”",
-        L10nKey::AppSshParseEnterHost => "输入要连接的主机",
-        L10nKey::AppSshParseBadHost => "无法解析主机“{host}”",
         L10nKey::AppMenuMinimize => "最小化",
         L10nKey::AppMenuZoom => "缩放",
-        L10nKey::SwitcherStatusRestarting => "正在重启…",
-        L10nKey::SwitcherStatusInstalling => "正在安装…",
-        L10nKey::SwitcherStatusConnecting => "正在连接…",
-        L10nKey::SwitcherStatusConnectFailed => "连接失败",
-        L10nKey::SwitcherStatusNotConnected => "未连接",
-        L10nKey::SwitcherStatusReconnecting => "正在重连…",
         L10nKey::SwitcherStatusTakenOver => "已被接管",
         L10nKey::SettingsFontDefault => "默认（匹配主字体）",
         L10nKey::SettingsUiFontDefault => "默认（系统界面字体）",
         L10nKey::ForwardDescriptionPlaceholder => "用途说明",
         L10nKey::SettingsShellDefaultLoginShell => "你的登录 shell",
-        L10nKey::SettingsShellDetected => "tty7 检测到的 shell",
-        L10nKey::SftpErrorUnexpectedReply => "意外回复：{reply}",
-        L10nKey::SftpErrorUnsafeRemoteName => "拒绝不安全的远程名称 {name}",
-        L10nKey::SftpErrorNoFreeLocalName => {
-            "下载目录里 {name} 已无可用名称——请先移走或删除旧的副本"
-        }
-        L10nKey::SftpReplaceTitle => "覆盖已有的文件？",
-        L10nKey::SftpReplaceBody => "{names} 在这个文件夹里已经存在，上传会覆盖它们。",
         L10nKey::Replace => "覆盖",
-        L10nKey::SftpErrorInvalidOctalMode => "无效的八进制模式",
         L10nKey::SettingsDaemonStaleDescInPlace => {
             "tty7 已更新。server 可原地替换，shell 不受影响；只有内置 SSH 的窗格会断开。"
         }
@@ -1979,14 +1232,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::PaneRestoredScreenBanner => {
             "已恢复的画面：下面是新的 shell，上面的内容都已不在运行"
         }
-        L10nKey::SettingsPerPaneHistory => "各窗格使用独立命令历史",
-        L10nKey::SettingsPerPaneHistoryDescription => "↑ 只翻本窗格的历史，仅限 bash 和 zsh。",
-        L10nKey::IntegrationNoticeBlocked => {
-            "“{wrapper}”截获了此窗格的 shell 上报，内联补全和 Ctrl+R 菜单不可用。shell 自带的历史搜索仍可使用。"
-        }
-        L10nKey::IntegrationNoticeNotEngaged => {
-            "此窗格的 tty7 shell 集成没生效，内联补全和 Ctrl+R 菜单不可用。常见原因：用自己参数启动的 shell、PTY 包装器，或不受支持的 shell。"
-        }
         L10nKey::PaneTitleDisconnected => "{title} — 已断开",
         L10nKey::PaneTitleProcessExited => "{title} — 进程已退出",
         L10nKey::LoopbackForwardFailed => "无法转发 :{port}——{error}",
@@ -1996,25 +1241,16 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::CursorShapeBar => "竖线",
         L10nKey::CursorShapeUnderline => "下划线",
         L10nKey::PromptCursorShapeFollow => "跟随",
-        L10nKey::PaletteTryDifferentSearch => "换个关键词试试。",
-        L10nKey::CompletionListingRemote => "正在列出远程目录…",
-        L10nKey::CompletionRemoteListingFailed => "远程目录列表失败——{error}",
-        L10nKey::CmdUpdateLocalServer => "更新本机的 tty7 server…",
-        L10nKey::CmdUpdateLocalServerSubtitle => "重启到当前应用的版本",
         L10nKey::CmdUpdateRemoteServer => "更新“{machine}”上的 tty7 server…",
         L10nKey::CmdUpdateRemoteServerSubtitle => {
             "在那台机器上重新安装当前版本的 server；结束其上所有会话"
         }
-        L10nKey::AppLocalServerAlreadyCurrent => "本机的 tty7 server 已经是当前版本（{build}）。",
         L10nKey::RemoteUpdateBody => {
             "tty7 会在 {machine} 上安装当前版本的 server（即使那里的 server 版本号相同也会覆盖），然后重启它。\n\n{machine} 上运行的所有会话都会结束，包括此窗口未连接的会话。"
         }
         L10nKey::RemoteUpdateNeedsLocalServer => {
             "本机的 tty7 server 版本过旧，无法更新 {machine} 上的 server。请先更新本机的 server，再重试。"
         }
-        L10nKey::PanelMoreChangedFiles => "…还有 {count} 个变更文件——运行 git diff 查看。",
-        L10nKey::ScmFilesChanged => "{count} 个文件改动",
-        L10nKey::ScmStagedFileCount => "已暂存 {count} 个文件",
         L10nKey::AppMenuAbout => "关于 tty7",
         L10nKey::AppMenuCheckForUpdates => "检查更新…",
         L10nKey::AppMenuSettings => "设置…",
@@ -2030,7 +1266,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppMenuHelp => "帮助",
         L10nKey::AppMenuNewTab => "新标签页",
         L10nKey::AppMenuNewWorkspace => "新工作区…",
-        L10nKey::AppMenuNewWorktreeTab => "新 worktree 标签页…",
         L10nKey::AppMenuSplitRight => "向右分屏",
         L10nKey::AppMenuSplitLeft => "向左分屏",
         L10nKey::AppMenuSplitDown => "向下分屏",
@@ -2056,23 +1291,16 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppMenuFind => "查找…",
         L10nKey::AppMenuFindNext => "查找下一个",
         L10nKey::AppMenuFindPrevious => "查找上一个",
-        L10nKey::AppMenuSearchEverywhere => "随处搜索…",
         L10nKey::AppMenuIncreaseFontSize => "增大字号",
         L10nKey::AppMenuDecreaseFontSize => "减小字号",
         L10nKey::AppMenuResetFontSize => "重置字号",
         L10nKey::AppMenuLeftSidebar => "左侧边栏",
         L10nKey::AppMenuRightPanel => "右侧面板",
-        L10nKey::AppMenuCodePanel => "代码面板",
         L10nKey::AppMenuTabBarPosition => "标签栏位置",
         L10nKey::AppMenuFocusNextPane => "聚焦下一个窗格",
         L10nKey::AppMenuFocusPreviousPane => "聚焦上一个窗格",
         L10nKey::AppMenuZoomPane => "缩放窗格",
         L10nKey::AppMenuClearScrollback => "清除回滚内容",
-        L10nKey::AppMenuOpenLink => "打开",
-        L10nKey::AppMenuOpenLinkWithDefaultApp => "用默认程序打开",
-        L10nKey::AppMenuRevealInFinder => "在访达中显示",
-        L10nKey::AppMenuRevealInFolder => "打开所在文件夹",
-        L10nKey::AppMenuCopyLinkPath => "复制路径",
         L10nKey::AppMenuDocumentation => "tty7 文档",
         L10nKey::AppMenuKeyboardShortcuts => "快捷键",
         L10nKey::AppMenuJoinDiscord => "加入 Discord",
@@ -2099,8 +1327,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::TabMenuLocalShells => "本地",
         L10nKey::TabMenuAddHost => "添加 SSH 主机…",
         L10nKey::TabMenuAllHosts => "所有 SSH 主机…",
-        L10nKey::TabMenuOtherShells => "其他 Shell…",
-        L10nKey::TabMenuOtherAgents => "其他 Agent…",
         L10nKey::TabMenuSplitHint => "按住 {key} 可分屏打开",
         L10nKey::TabUnnamedShell => "终端 {n}",
         L10nKey::ShellDefault => "默认",
@@ -2121,83 +1347,13 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::TabContextCloseTab => "关闭标签页",
         L10nKey::TerminalContextClear => "清屏",
         L10nKey::TabContextCloseTabsBelow => "关闭下方标签页",
-        L10nKey::AppAgentHooksOpFailed => "失败：{error}",
-        L10nKey::AppMenuEnterFullscreen => "进入全屏",
-        L10nKey::HomeTimeOverWeekAgo => "一周多前",
         L10nKey::Search => "搜索",
-        L10nKey::SettingsDaemonStaleRestart => "重启 tty7 server",
-        L10nKey::SettingsNoneLower => "无",
-        L10nKey::SettingsSearchCommandLineToolTitle => "命令行工具",
         L10nKey::TabContextMarkUnread => "标记为未读",
         L10nKey::TabContextHibernate => "休眠",
         L10nKey::TabContextWake => "唤醒",
         L10nKey::TabTooltipAsleep => "已休眠，选中即可唤醒",
         L10nKey::TabWakeFailed => "无法唤醒标签页：其中的窗格都无法启动",
         // ---- The right panel's GitHub tab ----
-        L10nKey::GitHubIssues => "议题",
-        L10nKey::GitHubPulls => "拉取请求",
-        L10nKey::GitHubOpen => "开放",
-        L10nKey::GitHubClosed => "已关闭",
-        L10nKey::GitHubMerged => "已合并",
-        L10nKey::GitHubDraft => "草稿",
-        L10nKey::GitHubNotPlanned => "不予计划",
-        L10nKey::GitHubRefresh => "刷新",
-        L10nKey::GitHubOpenOnGitHub => "在 GitHub 上打开",
-        L10nKey::GitHubShowRemote => "显示此远程的议题",
-        L10nKey::GitHubLoadMore => "加载更多",
-        L10nKey::GitHubNoRemote => "没有 GitHub 远程仓库",
-        L10nKey::GitHubNoRemoteHint => "此仓库的远程都不指向 github.com。",
-        L10nKey::GitHubNoIssues => "没有匹配的议题。",
-        L10nKey::GitHubNoPulls => "没有匹配的拉取请求。",
-        L10nKey::GitHubSignInHint => "在终端中运行 `gh auth login` 登录，然后刷新。",
-        L10nKey::GitHubNotFoundSignedOut => "GitHub 找不到此仓库。如果它是私有仓库，请先登录。",
-        L10nKey::GitHubNotFoundSignedIn => "GitHub 找不到此仓库，或 gh 登录的账户都无权查看。",
-        L10nKey::GitHubUnauthorized => "GitHub 拒绝了已保存的登录凭据。",
-        L10nKey::GitHubRateLimited => "GitHub 的请求额度已用完。",
-        L10nKey::GitHubRateLimitResetIn => "{n} 分钟后重置。",
-        L10nKey::GitHubRateLimitSignedOut => {
-            "未登录时 GitHub 每小时只允许 60 次请求。运行 `gh auth login` 登录可提高额度。"
-        }
-        L10nKey::GitHubForbidden => "GitHub 拒绝了该请求。",
-        L10nKey::GitHubNetworkError => "无法连接到 GitHub。",
-        L10nKey::GitHubHttpError => "GitHub 返回了错误（{code}）。",
-        L10nKey::GitHubDecodeError => "GitHub 返回了 tty7 无法解析的响应。",
-        L10nKey::GitHubMoreOnGitHub => "在 GitHub 上查看更多",
-        L10nKey::GitHubNoDescription => "未提供描述。",
-        L10nKey::GitHubFilterByLabel => "只显示此标签",
-        L10nKey::GitHubClearLabel => "清除标签筛选",
-        L10nKey::GitHubImage => "图片",
-        L10nKey::GitHubComments => "{count} 条评论",
-        L10nKey::GitHubCommits => "{count} 个提交",
-        L10nKey::GitHubOpenedAt => "创建 {when}",
-        L10nKey::GitHubUpdatedAt => "更新 {when}",
-        L10nKey::GitHubChecks => "检查",
-        L10nKey::GitHubChecksPassed => "{total} 项通过 {passed} 项",
-        L10nKey::GitHubChecksNoneCounted => "没有得出结果的检查",
-        L10nKey::GitHubCheckPassed => "通过",
-        L10nKey::GitHubCheckFailed => "失败",
-        L10nKey::GitHubCheckPending => "进行中",
-        L10nKey::GitHubCheckSkipped => "已跳过",
-        L10nKey::GitHubReviews => "审查",
-        L10nKey::GitHubReviewApproved => "已批准",
-        L10nKey::GitHubReviewChangesRequested => "要求修改",
-        L10nKey::GitHubReviewCommented => "已评论",
-        L10nKey::GitHubReviewRequested => "待审查",
-        L10nKey::GitHubReadyToMerge => "可以合并",
-        L10nKey::GitHubMergeConflicts => "有合并冲突",
-        L10nKey::GitHubReviewRequired => "需要审查",
-        L10nKey::GitHubBehindBase => "落后于目标分支",
-        L10nKey::GitHubMergeBlocked => "被分支保护规则阻止",
-        L10nKey::GitHubThisBranch => "当前分支",
-        L10nKey::GitHubChecksFailing => "{count} 项检查失败",
-        L10nKey::GitHubWaitingOnChecks => "等待 {count} 项检查",
-        L10nKey::GitHubShowLess => "收起",
-        L10nKey::GitHubShowAllFiles => "显示全部 {count} 个文件",
-        L10nKey::GitHubPassedCount => "{count} 项通过",
-        L10nKey::GitHubSkippedCount => "{count} 项跳过",
-        L10nKey::GitHubShowFullText => "展开全文",
-        L10nKey::GitHubShowHiddenComments => "显示另外 {count} 条评论",
-        L10nKey::GitHubShowAllReviewers => "显示全部 {count} 位审查人",
         L10nKey::CmdCopyRaw => "原样复制",
         L10nKey::SettingsSearchCopyJoinWrappedKeywords => {
             "剪贴板 复制 折行 合并 clipboard copy wrap unwrap join lines claude raw"
@@ -2214,12 +1370,6 @@ pub fn translate_variant_zh(key: L10nKey, branch: &'static str) -> Option<&'stat
         (L10nKey::SettingsMatchCount, "zero") => "没有结果",
         (L10nKey::SettingsMatchCount, "one") => "1 个结果",
         (L10nKey::SettingsMatchCount, "other") => "{count} 个结果",
-        (L10nKey::PanelSearchResultCount, "zero") => "没有结果",
-        (L10nKey::PanelSearchResultCount, "one") => "1 个结果",
-        (L10nKey::PanelSearchResultCount, "other") => "{count} 个结果",
-        (L10nKey::PanelSearchFileCount, "zero") => "0 个文件",
-        (L10nKey::PanelSearchFileCount, "one") => "1 个文件",
-        (L10nKey::PanelSearchFileCount, "other") => "{count} 个文件",
         (L10nKey::SettingsRestoreChanged, "zero") => "恢复修改",
         (L10nKey::SettingsRestoreChanged, "one") => "恢复 1 项修改",
         (L10nKey::SettingsRestoreChanged, "other") => "恢复 {count} 项修改",
@@ -2229,17 +1379,6 @@ pub fn translate_variant_zh(key: L10nKey, branch: &'static str) -> Option<&'stat
         (L10nKey::SettingsMoreAgents, "zero") => "没有更多 Agent",
         (L10nKey::SettingsMoreAgents, "one") => "还有 1 个可用 Agent",
         (L10nKey::SettingsMoreAgents, "other") => "还有 {count} 个可用 Agent",
-        (L10nKey::SettingsDeleteProfileCascade, "one") => {
-            "有 1 个已保存的远程工作区条目指向 {endpoint}，将随配置一并从本机清除；\
-             远端机器上的会话不受影响，新建配置连上同一台机器后即可在工作区列表找回。"
-        }
-        (L10nKey::SettingsDeleteProfileCascade, "other") => {
-            "有 {count} 个已保存的远程工作区条目指向 {endpoint}，将随配置一并从本机清除；\
-             远端机器上的会话不受影响，新建配置连上同一台机器后即可在工作区列表找回。"
-        }
-        (L10nKey::SettingsAliasesLinked, "zero") => "还没有关联别名。",
-        (L10nKey::SettingsAliasesLinked, "one") => "已关联 1 个别名。",
-        (L10nKey::SettingsAliasesLinked, "other") => "已关联 {count} 个别名。",
         (L10nKey::SettingsImportSummary, "zero") => {
             "没有新主机——更新 {updated} 个，{unchanged} 个已是最新"
         }
@@ -2256,9 +1395,6 @@ pub fn translate_variant_zh(key: L10nKey, branch: &'static str) -> Option<&'stat
         (L10nKey::SettingsImportIgnored, "other") => {
             "有 {count} 个选项在 tty7 中没有对应设置，仍留在文件里：{options}"
         }
-        (L10nKey::SettingsRulesOpenedWithConnection, "zero") => "0 条规则，随连接打开",
-        (L10nKey::SettingsRulesOpenedWithConnection, "one") => "1 条规则，随连接打开",
-        (L10nKey::SettingsRulesOpenedWithConnection, "other") => "{count} 条规则，随连接打开",
         (L10nKey::SettingsOfflineMachines, "zero") => {
             "还有 0 台已保存的机器未连接——在其中一台上打开工作区，即可在那台机器上安装 hook。"
         }
@@ -2268,14 +1404,6 @@ pub fn translate_variant_zh(key: L10nKey, branch: &'static str) -> Option<&'stat
         (L10nKey::SettingsOfflineMachines, "other") => {
             "还有 {count} 台已保存的机器未连接——在其中一台上打开工作区，即可在那台机器上安装 hook。"
         }
-        (L10nKey::SettingsForgetPasswordSharedBody, "one") => {
-            "还有 1 个主机配置同样使用 {endpoint}，那个连接也需要重新输入密码。"
-        }
-        (L10nKey::SettingsForgetPasswordSharedBody, "other") => {
-            "还有 {count} 个主机配置同样使用 {endpoint}，那些连接也需要重新输入密码。"
-        }
-        (L10nKey::SftpReplaceBody, "one") => "{names} 在这个文件夹里已经存在，上传会覆盖它。",
-        (L10nKey::SftpReplaceBody, "other") => "{names} 在这个文件夹里已经存在，上传会覆盖它们。",
         (L10nKey::CloseTabsTitle, "one") => "关闭 1 个标签页？",
         (L10nKey::CloseTabsTitle, "other") => "关闭 {count} 个标签页？",
         (L10nKey::AppTabsNotRestored, "one") => "上次的 1 个标签页没能重新打开",
@@ -2286,37 +1414,6 @@ pub fn translate_variant_zh(key: L10nKey, branch: &'static str) -> Option<&'stat
         (L10nKey::LaunchWorkspacesLeftRunning, "other") => {
             "只恢复了这个窗口——还有 {count} 个工作区在后台运行，可从侧边栏重新打开。"
         }
-        (L10nKey::PanelMoreChangedFiles, "zero") => "…还有 0 个变更文件——运行 git diff 查看。",
-        (L10nKey::PanelMoreChangedFiles, "one") => "…还有 1 个变更文件——运行 git diff 查看。",
-        (L10nKey::PanelMoreChangedFiles, "other") => {
-            "…还有 {count} 个变更文件——运行 git diff 查看。"
-        }
-        (L10nKey::ScmFilesChanged, "zero") => "没有文件改动",
-        (L10nKey::ScmFilesChanged, "one") => "1 个文件改动",
-        (L10nKey::ScmFilesChanged, "other") => "{count} 个文件改动",
-        (L10nKey::ScmStagedFileCount, "zero") => "没有暂存的更改",
-        (L10nKey::ScmStagedFileCount, "one") => "已暂存 1 个文件",
-        (L10nKey::ScmStagedFileCount, "other") => "已暂存 {count} 个文件",
-        (L10nKey::DiffChangedFiles, "zero") => "0 个变更文件",
-        (L10nKey::DiffChangedFiles, "one") => "1 个变更文件",
-        (L10nKey::DiffChangedFiles, "other") => "{count} 个变更文件",
-        (L10nKey::DiffUntrackedCount, "zero") => " · 0 个未跟踪文件",
-        (L10nKey::DiffUntrackedCount, "one") => " · 1 个未跟踪文件",
-        (L10nKey::DiffUntrackedCount, "other") => " · {count} 个未跟踪文件",
-        (L10nKey::DiffMoreFiles, "zero") => "…还有 0 个变更文件——在终端中运行 git diff 查看。",
-        (L10nKey::DiffMoreFiles, "one") => "…还有 1 个变更文件——在终端中运行 git diff 查看。",
-        (L10nKey::DiffMoreFiles, "other") => {
-            "…还有 {count} 个变更文件——在终端中运行 git diff 查看。"
-        }
-        (L10nKey::DiffUntrackedHeader, "zero") => "未跟踪文件 (0)",
-        (L10nKey::DiffUntrackedHeader, "one") => "未跟踪文件 (1)",
-        (L10nKey::DiffUntrackedHeader, "other") => "未跟踪文件 ({count})",
-        (L10nKey::DiffMoreUntracked, "zero") => "…还有 0 个——在终端中运行 git status 查看。",
-        (L10nKey::DiffMoreUntracked, "one") => "…还有 1 个——在终端中运行 git status 查看。",
-        (L10nKey::DiffMoreUntracked, "other") => "…还有 {count} 个——在终端中运行 git status 查看。",
-        (L10nKey::DiffUntrackedSummary, "zero") => "0 个未跟踪",
-        (L10nKey::DiffUntrackedSummary, "one") => "1 个未跟踪",
-        (L10nKey::DiffUntrackedSummary, "other") => "{count} 个未跟踪",
         (L10nKey::HomeTimeMinutesAgo, "one") => "1 分钟前",
         (L10nKey::HomeTimeMinutesAgo, "other") => "{count} 分钟前",
         (L10nKey::HomeTimeHoursAgo, "one") => "1 小时前",
@@ -2338,33 +1435,6 @@ pub fn translate_variant_zh(key: L10nKey, branch: &'static str) -> Option<&'stat
             "{count} 个正在运行的 shell 将会被终止，布局也将被清除。"
         }
         // ---- The right panel's GitHub tab ----
-        (L10nKey::GitHubComments, "zero") => "暂无评论",
-        (L10nKey::GitHubComments, "one") => "1 条评论",
-        (L10nKey::GitHubComments, "other") => "{count} 条评论",
-        (L10nKey::GitHubCommits, "zero") => "没有提交",
-        (L10nKey::GitHubCommits, "one") => "1 个提交",
-        (L10nKey::GitHubCommits, "other") => "{count} 个提交",
-        (L10nKey::GitHubChecksFailing, "zero") => "没有失败的检查",
-        (L10nKey::GitHubChecksFailing, "one") => "1 项检查失败",
-        (L10nKey::GitHubChecksFailing, "other") => "{count} 项检查失败",
-        (L10nKey::GitHubWaitingOnChecks, "zero") => "无需等待检查",
-        (L10nKey::GitHubWaitingOnChecks, "one") => "等待 1 项检查",
-        (L10nKey::GitHubWaitingOnChecks, "other") => "等待 {count} 项检查",
-        (L10nKey::GitHubShowAllFiles, "zero") => "没有文件",
-        (L10nKey::GitHubShowAllFiles, "one") => "显示 1 个文件",
-        (L10nKey::GitHubShowAllFiles, "other") => "显示全部 {count} 个文件",
-        (L10nKey::GitHubPassedCount, "zero") => "没有通过",
-        (L10nKey::GitHubPassedCount, "one") => "1 项通过",
-        (L10nKey::GitHubPassedCount, "other") => "{count} 项通过",
-        (L10nKey::GitHubSkippedCount, "zero") => "没有跳过",
-        (L10nKey::GitHubSkippedCount, "one") => "1 项跳过",
-        (L10nKey::GitHubSkippedCount, "other") => "{count} 项跳过",
-        (L10nKey::GitHubShowHiddenComments, "zero") => "没有更多评论",
-        (L10nKey::GitHubShowHiddenComments, "one") => "显示另外 1 条评论",
-        (L10nKey::GitHubShowHiddenComments, "other") => "显示另外 {count} 条评论",
-        (L10nKey::GitHubShowAllReviewers, "zero") => "没有审查人",
-        (L10nKey::GitHubShowAllReviewers, "one") => "显示 1 位审查人",
-        (L10nKey::GitHubShowAllReviewers, "other") => "显示全部 {count} 位审查人",
         _ => return None,
     };
     Some(res)

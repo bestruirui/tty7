@@ -14,8 +14,8 @@
 //! anchor is a column: a second notice stacks above the first instead of
 //! landing on it.
 
+use gpui::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui::{AnyElement, App, Div, Hsla, div, prelude::*, px};
-use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 
 /// Chrome for one floating notice. `accent` is the leading dot, and is the
 /// only thing that says how bad this one is; the rest of the pill is the same

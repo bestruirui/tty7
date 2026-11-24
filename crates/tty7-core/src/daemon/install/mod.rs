@@ -654,12 +654,14 @@ impl<'a> Installer<'a> {
         }
     }
 
+    #[cfg(test)]
     pub fn with_version(mut self, version: impl Into<String>) -> Self {
         self.version = version.into();
         self.dialect.build = self.version.clone();
         self
     }
 
+    #[cfg(test)]
     pub fn with_dialect(mut self, control: u32, protocol: u32) -> Self {
         self.dialect.control = control;
         self.dialect.protocol = protocol;
@@ -775,6 +777,7 @@ impl<'a> Installer<'a> {
             .is_some_and(|spoken| spoken.serves(&self.dialect)))
     }
 
+    #[cfg(test)]
     pub fn with_timeouts(mut self, startup: Duration, poll: Duration) -> Self {
         self.startup_timeout = startup;
         self.poll_interval = poll;
@@ -785,6 +788,7 @@ impl<'a> Installer<'a> {
     /// away. Its own knob rather than a third argument to `with_timeouts`,
     /// because the only caller that shortens it is the test that watches a
     /// stop fail, and every other caller wants the shipped ten seconds.
+    #[cfg(test)]
     pub fn with_shutdown_timeout(mut self, shutdown: Duration) -> Self {
         self.shutdown_timeout = shutdown;
         self
@@ -1705,7 +1709,7 @@ pub fn ensure_remote_server_labeled(conn: &Arc<SshConnection>, host: &str) -> io
     }
     proved_or_prove(&mut slot, || {
         let ops = ssh_ops::SshRemoteOps::new(conn.clone());
-        let fetch = default_fetcher();
+        let fetch = default_fetcher()?;
         let confirm = install_confirm();
         let source = BundledOrRelease::discover(fetch.as_ref());
         let installer = Installer::with_source(&ops, &source, confirm.as_ref(), host);
@@ -1788,7 +1792,7 @@ fn while_changing_the_server(
 pub fn restart_remote_daemon(conn: &Arc<SshConnection>) -> io::Result<()> {
     let host = connection_label(conn);
     let ops = ssh_ops::SshRemoteOps::new(conn.clone());
-    let fetch = default_fetcher();
+    let fetch = default_fetcher()?;
     let confirm = install_confirm();
     while_changing_the_server(conn, || {
         Installer::new(&ops, fetch.as_ref(), confirm.as_ref(), host).restart_daemon()?;
@@ -1809,7 +1813,7 @@ pub fn update_remote_server(conn: &Arc<SshConnection>) -> io::Result<()> {
 fn put_server_on_remote(conn: &Arc<SshConnection>, force: bool) -> io::Result<()> {
     let host = connection_label(conn);
     let ops = ssh_ops::SshRemoteOps::new(conn.clone());
-    let fetch = default_fetcher();
+    let fetch = default_fetcher()?;
     let confirm = install_confirm();
     let source = BundledOrRelease::discover(fetch.as_ref());
     while_changing_the_server(conn, || {
@@ -1824,15 +1828,17 @@ fn put_server_on_remote(conn: &Arc<SshConnection>, force: bool) -> io::Result<()
 }
 
 #[cfg(feature = "remote-install")]
-fn default_fetcher() -> Arc<dyn AssetFetcher> {
+fn default_fetcher() -> io::Result<Arc<dyn AssetFetcher>> {
     // Re-read rather than cache: the GUI writes `config.json` whenever the
     // proxy setting changes, and installs are rare enough for a file read.
     let manual = crate::core::config::Config::load().http_proxy;
-    Arc::new(download::HttpsFetcher::new(manual.as_deref()))
+    Ok(Arc::new(
+        download::HttpsFetcher::new(manual.as_deref()).map_err(io::Error::other)?,
+    ))
 }
 
 #[cfg(not(feature = "remote-install"))]
-fn default_fetcher() -> Arc<dyn AssetFetcher> {
+fn default_fetcher() -> io::Result<Arc<dyn AssetFetcher>> {
     struct NoFetcher;
     impl AssetFetcher for NoFetcher {
         fn get(&self, _url: &str) -> Result<Vec<u8>, String> {
@@ -1843,7 +1849,7 @@ fn default_fetcher() -> Arc<dyn AssetFetcher> {
             )
         }
     }
-    Arc::new(NoFetcher)
+    Ok(Arc::new(NoFetcher))
 }
 
 #[cfg(test)]

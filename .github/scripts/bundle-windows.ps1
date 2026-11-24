@@ -5,9 +5,8 @@
 #     (Program Files or per-user, Start Menu shortcut, "Apps" uninstall entry)
 #
 # Fonts are embedded via include_bytes! and the app icon is compiled into the
-# executable as a resource (see build.rs). So the payload is tty7-app.exe plus a
-# sibling completions\ dir (loaded at runtime — see terminal::signature), the
-# bundled ConPTY pair (loaded by the DLL search path — see below) and the
+# executable as a resource (see build.rs). The payload includes tty7-app.exe,
+# the bundled ConPTY pair (loaded by the DLL search path — see below) and the
 # license/readme. Windows release artifacts are intentionally unsigned. The
 # in-app updater verifies the published SHA-256 checksum and PE file version
 # before and after waiting for the GUI to exit.
@@ -39,8 +38,6 @@ if ($PackageUpdater) {
     # installed executable without colliding with Windows image locks.
     Copy-Item "target/$Target/release/tty7-updater.exe" "$Stage/tty7-updater.exe"
 }
-New-Item -ItemType Directory -Force -Path "$Stage/completions" | Out-Null
-Copy-Item "assets/completions/*.json" "$Stage/completions/"
 Copy-Item LICENSE "$Stage/LICENSE.txt"
 Copy-Item README.md "$Stage/README.md"
 

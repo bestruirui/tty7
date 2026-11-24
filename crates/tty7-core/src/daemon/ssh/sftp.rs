@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::path::{Component, Path};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -10,8 +10,7 @@ use russh_sftp::protocol::{FileAttributes, OpenFlags};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::daemon::protocol::{
-    SftpEntry, SftpEntryKind, SftpJobProgress, SftpJobState, SftpOp, SftpOpResult,
-    SftpTransferKind, SftpTransferSpec,
+    SftpEntry, SftpEntryKind, SftpJobProgress, SftpJobState, SftpOp, SftpOpResult, SftpTransferSpec,
 };
 
 use super::{ConnectionKey, SshConnection, SshManager};
@@ -29,17 +28,6 @@ pub fn remote_join(dir: &str, name: &str) -> String {
             dir.trim_end_matches('/'),
             name.trim_start_matches('/')
         )
-    }
-}
-
-pub fn remote_parent(path: &str) -> String {
-    let trimmed = path.trim_end_matches('/');
-    if trimmed.is_empty() {
-        return "/".to_string();
-    }
-    match trimmed.rfind('/') {
-        Some(0) | None => "/".to_string(),
-        Some(idx) => trimmed[..idx].to_string(),
     }
 }
 
@@ -78,18 +66,6 @@ pub fn safe_local_name(name: &str) -> bool {
     )
 }
 
-fn download_temp_path(lpath: &Path) -> PathBuf {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    let mut os = lpath.as_os_str().to_os_string();
-    os.push(format!(".tty7-download-{:x}{:x}", nanos, n));
-    PathBuf::from(os)
-}
-
 fn classify(attrs: &FileAttributes) -> SftpEntryKind {
     if attrs.is_symlink() {
         SftpEntryKind::Symlink
@@ -114,9 +90,7 @@ fn entry_from_attrs(name: &str, attrs: &FileAttributes) -> SftpEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobProgress {
     pub state: SftpJobState,
-    pub current: String,
     pub bytes_done: u64,
-    pub bytes_total: u64,
     pub error: Option<String>,
 }
 
@@ -124,27 +98,13 @@ impl JobProgress {
     pub fn new() -> Self {
         Self {
             state: SftpJobState::Running,
-            current: String::new(),
             bytes_done: 0,
-            bytes_total: 0,
             error: None,
         }
     }
 
     fn is_terminal(&self) -> bool {
         !matches!(self.state, SftpJobState::Running)
-    }
-
-    pub fn set_total(&mut self, total: u64) {
-        if !self.is_terminal() {
-            self.bytes_total = total;
-        }
-    }
-
-    pub fn set_current(&mut self, path: impl Into<String>) {
-        if !self.is_terminal() {
-            self.current = path.into();
-        }
     }
 
     pub fn add_bytes(&mut self, n: u64) {
@@ -165,12 +125,6 @@ impl JobProgress {
             self.error = Some(reason.into());
         }
     }
-
-    pub fn cancel(&mut self) {
-        if !self.is_terminal() {
-            self.state = SftpJobState::Cancelled;
-        }
-    }
 }
 
 impl Default for JobProgress {
@@ -182,27 +136,11 @@ impl Default for JobProgress {
 struct Job {
     id: u64,
     pane_id: u64,
-    kind: SftpTransferKind,
-    local: String,
-    remote: String,
-    cancel: AtomicBool,
     progress: Mutex<JobProgress>,
     done_at: Mutex<Option<Instant>>,
 }
 
 impl Job {
-    fn is_cancelled(&self) -> bool {
-        self.cancel.load(Ordering::SeqCst)
-    }
-
-    fn set_total(&self, total: u64) {
-        self.progress.lock().unwrap().set_total(total);
-    }
-
-    fn set_current(&self, path: impl Into<String>) {
-        self.progress.lock().unwrap().set_current(path);
-    }
-
     fn add_bytes(&self, n: u64) {
         self.progress.lock().unwrap().add_bytes(n);
     }
@@ -217,24 +155,13 @@ impl Job {
         *self.done_at.lock().unwrap() = Some(Instant::now());
     }
 
-    fn mark_cancelled(&self) {
-        self.progress.lock().unwrap().cancel();
-        *self.done_at.lock().unwrap() = Some(Instant::now());
-    }
-
     fn snapshot(&self) -> SftpJobProgress {
         let p = self.progress.lock().unwrap();
         SftpJobProgress {
             job_id: self.id,
-            pane_id: self.pane_id,
-            kind: self.kind,
             state: p.state,
-            current: p.current.clone(),
             bytes_done: p.bytes_done,
-            bytes_total: p.bytes_total,
             error: p.error.clone(),
-            local: self.local.clone(),
-            remote: self.remote.clone(),
         }
     }
 
@@ -330,35 +257,18 @@ impl SftpManager {
         let job = Arc::new(Job {
             id,
             pane_id: spec.pane_id,
-            kind: spec.kind,
-            local: spec.local.to_string_lossy().to_string(),
-            remote: spec.remote.clone(),
-            cancel: AtomicBool::new(false),
             progress: Mutex::new(JobProgress::new()),
             done_at: Mutex::new(None),
         });
         self.jobs.lock().unwrap().insert(id, job.clone());
 
         SshManager::global().handle().spawn(async move {
-            run_transfer(sftp, spec, job).await;
+            match upload(&sftp, &spec, &job).await {
+                Ok(()) => job.finish(),
+                Err(e) => job.fail(e),
+            }
         });
         Ok(id)
-    }
-
-    pub fn cancel(&self, job_id: u64) -> Vec<SftpJobProgress> {
-        let pane = {
-            let jobs = self.jobs.lock().unwrap();
-            if let Some(job) = jobs.get(&job_id) {
-                job.cancel.store(true, Ordering::SeqCst);
-                Some(job.pane_id)
-            } else {
-                None
-            }
-        };
-        match pane {
-            Some(pane_id) => self.list_jobs(pane_id),
-            None => Vec::new(),
-        }
     }
 
     pub fn list_jobs(&self, pane_id: u64) -> Vec<SftpJobProgress> {
@@ -648,16 +558,6 @@ async fn run_op(sftp: &SftpSession, op: &SftpOp) -> Result<SftpOpResult, String>
                 .map_err(|e| format!("{e}"))?;
             SftpOpResult::Done
         }
-        SftpOp::CreateFile { path } => {
-            let flags = OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::EXCLUDE;
-            let mut file = sftp
-                .open_with_flags(path.clone(), flags)
-                .await
-                .map_err(|e| format!("{e}"))?;
-            file.flush().await.ok();
-            file.shutdown().await.ok();
-            SftpOpResult::Done
-        }
         SftpOp::RemoveFile { path } => {
             sftp.remove_file(path.clone())
                 .await
@@ -695,68 +595,6 @@ async fn run_op(sftp: &SftpSession, op: &SftpOp) -> Result<SftpOpResult, String>
                 .await
                 .map_err(|e| format!("{e}"))?;
             SftpOpResult::Link(resolved)
-        }
-        SftpOp::ReadFile { path, max_bytes } => {
-            let attrs = sftp
-                .metadata(path.clone())
-                .await
-                .map_err(|e| format!("{e}"))?;
-            if attrs.is_dir() {
-                return Err("is a directory".to_string());
-            }
-            // Checked before the read, not after: a body clipped at the limit
-            // would round-trip through the editor and be saved back short.
-            let size = attrs.size.unwrap_or(0);
-            if size > *max_bytes {
-                return Err(format!(
-                    "file is {size} bytes, larger than the {max_bytes}-byte limit"
-                ));
-            }
-            let mut file = sftp.open(path.clone()).await.map_err(|e| format!("{e}"))?;
-            let mut bytes = Vec::with_capacity(size.min(*max_bytes) as usize);
-            let mut buf = vec![0u8; CHUNK];
-            loop {
-                let n = file.read(&mut buf).await.map_err(|e| format!("{e}"))?;
-                if n == 0 {
-                    break;
-                }
-                bytes.extend_from_slice(&buf[..n]);
-                // The size the stat reported is a moment old; the file may
-                // have grown since. The limit holds either way.
-                if bytes.len() as u64 > *max_bytes {
-                    return Err(format!(
-                        "file grew past the {max_bytes}-byte limit mid-read"
-                    ));
-                }
-            }
-            SftpOpResult::File {
-                entry: entry_from_attrs(&remote_basename(path), &attrs),
-                bytes,
-            }
-        }
-        SftpOp::WriteFile { path, bytes } => {
-            // In place on purpose — truncate and rewrite the same inode. The
-            // temp-and-rename dance the transfer path does would hand the file
-            // fresh default permissions and ownership, and this op overwrites
-            // a file the user just had open in the editor, so its identity is
-            // worth more than crash-atomicity here.
-            let flags = OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE;
-            let mut file = sftp
-                .open_with_flags(path.clone(), flags)
-                .await
-                .map_err(|e| format!("{e}"))?;
-            for chunk in bytes.chunks(CHUNK) {
-                file.write_all(chunk).await.map_err(|e| format!("{e}"))?;
-            }
-            file.flush().await.map_err(|e| format!("{e}"))?;
-            file.shutdown().await.map_err(|e| format!("{e}"))?;
-            // The fresh stat is the editor's baseline for spotting external
-            // changes; without it every save would read as a conflict.
-            let attrs = sftp
-                .metadata(path.clone())
-                .await
-                .map_err(|e| format!("written, but stat after failed: {e}"))?;
-            SftpOpResult::Stat(entry_from_attrs(&remote_basename(path), &attrs))
         }
     })
 }
@@ -807,139 +645,13 @@ async fn remove_dir_recursive(sftp: &SftpSession, path: &str) -> Result<(), Stri
     Ok(())
 }
 
-async fn run_transfer(sftp: Arc<SftpSession>, spec: SftpTransferSpec, job: Arc<Job>) {
-    let result = match spec.kind {
-        SftpTransferKind::Download => download(&sftp, &spec, &job).await,
-        SftpTransferKind::Upload => upload(&sftp, &spec, &job).await,
-    };
-    match result {
-        Ok(()) => job.finish(),
-        Err(_) if job.is_cancelled() => job.mark_cancelled(),
-        Err(e) => job.fail(e),
-    }
-}
-
-fn cancelled() -> String {
-    "cancelled".to_string()
-}
-
-async fn download(sftp: &SftpSession, spec: &SftpTransferSpec, job: &Job) -> Result<(), String> {
-    let total = remote_size(sftp, &spec.remote, spec.recursive, job).await?;
-    job.set_total(total);
-
-    let root_attrs = sftp
-        .metadata(spec.remote.clone())
-        .await
-        .map_err(|e| format!("{e}"))?;
-    let mut stack = vec![(spec.remote.clone(), spec.local.clone(), root_attrs)];
-    while let Some((rpath, lpath, attrs)) = stack.pop() {
-        if job.is_cancelled() {
-            return Err(cancelled());
-        }
-        if attrs.is_dir() {
-            if !spec.recursive {
-                return Err("remote path is a directory (enable recursive)".to_string());
-            }
-            tokio::fs::create_dir_all(&lpath)
-                .await
-                .map_err(|e| format!("create local dir: {e}"))?;
-            let read_dir = sftp
-                .read_dir(rpath.clone())
-                .await
-                .map_err(|e| format!("{e}"))?;
-            for entry in read_dir {
-                let name = entry.file_name();
-                if name == "." || name == ".." {
-                    continue;
-                }
-                if !safe_local_name(&name) {
-                    log::warn!(
-                        "sftp download: skipping remote entry with unsafe name {name:?} under {rpath}"
-                    );
-                    continue;
-                }
-                let cattrs = entry.metadata();
-                if cattrs.is_symlink() {
-                    log::debug!("sftp download: skipping symlink {name:?} under {rpath}");
-                    continue;
-                }
-                stack.push((remote_join(&rpath, &name), lpath.join(&name), cattrs));
-            }
-        } else {
-            download_file(sftp, &rpath, &lpath, attrs.permissions, job).await?;
-        }
-    }
-    Ok(())
-}
-
-async fn download_file(
-    sftp: &SftpSession,
-    rpath: &str,
-    lpath: &Path,
-    mode: Option<u32>,
-    job: &Job,
-) -> Result<(), String> {
-    job.set_current(rpath.to_string());
-    if let Some(parent) = lpath.parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    let temp = download_temp_path(lpath);
-    let result: Result<(), String> = async {
-        let mut remote = sftp
-            .open(rpath.to_string())
-            .await
-            .map_err(|e| format!("{e}"))?;
-        let mut local = tokio::fs::File::create(&temp)
-            .await
-            .map_err(|e| format!("create {}: {e}", temp.display()))?;
-        let mut buf = vec![0u8; CHUNK];
-        loop {
-            if job.is_cancelled() {
-                return Err(cancelled());
-            }
-            let n = remote.read(&mut buf).await.map_err(|e| format!("{e}"))?;
-            if n == 0 {
-                break;
-            }
-            local
-                .write_all(&buf[..n])
-                .await
-                .map_err(|e| format!("write local: {e}"))?;
-            job.add_bytes(n as u64);
-        }
-        local
-            .flush()
-            .await
-            .map_err(|e| format!("write local: {e}"))?;
-        Ok(())
-    }
-    .await;
-
-    if let Err(e) = result {
-        let _ = tokio::fs::remove_file(&temp).await;
-        return Err(e);
-    }
-    if let Err(e) = tokio::fs::rename(&temp, lpath).await {
-        let _ = tokio::fs::remove_file(&temp).await;
-        return Err(format!("rename into {}: {e}", lpath.display()));
-    }
-    preserve_mode(lpath, mode);
-    Ok(())
-}
-
 async fn upload(sftp: &SftpSession, spec: &SftpTransferSpec, job: &Job) -> Result<(), String> {
-    let total = local_size(&spec.local, spec.recursive, job).await?;
-    job.set_total(total);
-
     let root_is_dir = tokio::fs::metadata(&spec.local)
         .await
         .map_err(|e| format!("stat {}: {e}", spec.local.display()))?
         .is_dir();
     let mut stack = vec![(spec.local.clone(), spec.remote.clone(), root_is_dir)];
     while let Some((lpath, rpath, is_dir)) = stack.pop() {
-        if job.is_cancelled() {
-            return Err(cancelled());
-        }
         if is_dir {
             if !spec.recursive {
                 return Err("local path is a directory (enable recursive)".to_string());
@@ -977,7 +689,6 @@ async fn upload_file(
     rpath: &str,
     job: &Job,
 ) -> Result<(), String> {
-    job.set_current(rpath.to_string());
     let temp = upload_temp_name(rpath);
     let mut local = tokio::fs::File::open(lpath)
         .await
@@ -990,9 +701,6 @@ async fn upload_file(
     let mut buf = vec![0u8; CHUNK];
     let result: Result<(), String> = async {
         loop {
-            if job.is_cancelled() {
-                return Err(cancelled());
-            }
             let n = local.read(&mut buf).await.map_err(|e| format!("{e}"))?;
             if n == 0 {
                 break;
@@ -1025,94 +733,6 @@ async fn upload_file(
     }
     Ok(())
 }
-
-async fn remote_size(
-    sftp: &SftpSession,
-    root: &str,
-    recursive: bool,
-    job: &Job,
-) -> Result<u64, String> {
-    let mut total = 0u64;
-    let root_attrs = match sftp.metadata(root.to_string()).await {
-        Ok(a) => a,
-        Err(_) => return Ok(0),
-    };
-    let mut stack = vec![(root.to_string(), root_attrs)];
-    while let Some((path, attrs)) = stack.pop() {
-        if job.is_cancelled() {
-            return Err(cancelled());
-        }
-        if attrs.is_dir() {
-            if !recursive {
-                continue;
-            }
-            if let Ok(read_dir) = sftp.read_dir(path.clone()).await {
-                for entry in read_dir {
-                    let name = entry.file_name();
-                    if name == "." || name == ".." {
-                        continue;
-                    }
-                    if !safe_local_name(&name) {
-                        continue;
-                    }
-                    let cattrs = entry.metadata();
-                    if cattrs.is_symlink() {
-                        continue;
-                    }
-                    stack.push((remote_join(&path, &name), cattrs));
-                }
-            }
-        } else {
-            total = total.saturating_add(attrs.size.unwrap_or(0));
-        }
-    }
-    Ok(total)
-}
-
-async fn local_size(root: &Path, recursive: bool, job: &Job) -> Result<u64, String> {
-    let mut total = 0u64;
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(path) = stack.pop() {
-        if job.is_cancelled() {
-            return Err(cancelled());
-        }
-        let meta = match tokio::fs::metadata(&path).await {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        if meta.is_dir() {
-            if !recursive {
-                continue;
-            }
-            if let Ok(mut rd) = tokio::fs::read_dir(&path).await {
-                while let Ok(Some(child)) = rd.next_entry().await {
-                    match child.file_type().await {
-                        Ok(t) if t.is_symlink() => continue,
-                        Ok(_) => stack.push(child.path()),
-                        Err(_) => continue,
-                    }
-                }
-            }
-        } else {
-            total = total.saturating_add(meta.len());
-        }
-    }
-    Ok(total)
-}
-
-#[cfg(unix)]
-fn preserve_mode(path: &Path, mode: Option<u32>) {
-    use std::os::unix::fs::PermissionsExt;
-    if let Some(mode) = mode {
-        let bits = mode & 0o777;
-        if bits != 0 {
-            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(bits));
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn preserve_mode(_path: &Path, _mode: Option<u32>) {}
 
 #[cfg(test)]
 mod tests {
@@ -1173,16 +793,6 @@ mod tests {
     }
 
     #[test]
-    fn remote_parent_walks_up_and_stops_at_root() {
-        assert_eq!(remote_parent("/home/deploy/src"), "/home/deploy");
-        assert_eq!(remote_parent("/home"), "/");
-        assert_eq!(remote_parent("/"), "/");
-        assert_eq!(remote_parent(""), "/");
-        assert_eq!(remote_parent("/a/b/"), "/a");
-        assert_eq!(remote_parent("/项目/子"), "/项目");
-    }
-
-    #[test]
     fn remote_basename_extracts_final_component() {
         assert_eq!(remote_basename("/a/b/c"), "c");
         assert_eq!(remote_basename("/a/b/"), "b");
@@ -1212,21 +822,6 @@ mod tests {
         assert!(safe_local_name("项目"));
         assert!(safe_local_name("a.tar.gz"));
         assert!(safe_local_name(".hidden"));
-    }
-
-    #[test]
-    fn download_temp_path_is_sibling_and_distinct() {
-        let target = Path::new("/dest/dir/file.bin");
-        let a = download_temp_path(target);
-        let b = download_temp_path(target);
-        assert_eq!(a.parent(), target.parent());
-        assert!(
-            a.file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("file.bin.tty7-download-")
-        );
-        assert_ne!(a, b);
     }
 
     #[test]
@@ -1280,33 +875,22 @@ mod tests {
         let mut p = JobProgress::new();
         assert_eq!(p.state, SftpJobState::Running);
 
-        p.set_total(1000);
-        p.set_current("a.bin");
         p.add_bytes(400);
         p.add_bytes(200);
-        assert_eq!(p.bytes_total, 1000);
         assert_eq!(p.bytes_done, 600);
-        assert_eq!(p.current, "a.bin");
 
         p.finish();
         assert_eq!(p.state, SftpJobState::Done);
 
         p.add_bytes(999);
         p.fail("late error");
-        p.cancel();
         assert_eq!(p.state, SftpJobState::Done);
         assert_eq!(p.bytes_done, 600);
         assert_eq!(p.error, None);
     }
 
     #[test]
-    fn job_progress_cancel_and_fail_paths_latch() {
-        let mut c = JobProgress::new();
-        c.cancel();
-        assert_eq!(c.state, SftpJobState::Cancelled);
-        c.finish();
-        assert_eq!(c.state, SftpJobState::Cancelled);
-
+    fn job_progress_fail_path_latches() {
         let mut f = JobProgress::new();
         f.fail("boom");
         assert_eq!(f.state, SftpJobState::Error);
@@ -1320,24 +904,14 @@ mod tests {
         let job = Job {
             id: 7,
             pane_id: 3,
-            kind: SftpTransferKind::Download,
-            local: "/l".into(),
-            remote: "/r".into(),
-            cancel: AtomicBool::new(false),
             progress: Mutex::new(JobProgress::new()),
             done_at: Mutex::new(None),
         };
-        job.set_total(500);
-        job.set_current("f");
         job.add_bytes(120);
         let snap = job.snapshot();
         assert_eq!(snap.job_id, 7);
-        assert_eq!(snap.pane_id, 3);
-        assert_eq!(snap.kind, SftpTransferKind::Download);
         assert_eq!(snap.state, SftpJobState::Running);
-        assert_eq!(snap.bytes_total, 500);
         assert_eq!(snap.bytes_done, 120);
-        assert_eq!(snap.current, "f");
 
         job.finish();
         assert_eq!(job.snapshot().state, SftpJobState::Done);

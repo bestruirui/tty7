@@ -1,4 +1,4 @@
-//! Keyboard shortcuts: every action in the palette's groups, each with its
+//! Keyboard shortcuts: actions grouped by purpose, each with its
 //! keys as keycaps. Click the keys to record new ones; a chord another action
 //! already has asks before it is taken over.
 
@@ -112,9 +112,8 @@ impl Tty7App {
             })
             .into_any_element();
 
-        // The rows, in the palette's groups.
         let mut grouped: Vec<(
-            crate::ui::search::CommandGroup,
+            crate::ui::keymap::CommandGroup,
             Vec<(String, Vec<String>, String)>,
         )> = Vec::new();
         for (action, keys) in effective {
@@ -131,7 +130,7 @@ impl Tty7App {
             }
         }
         grouped.sort_by_key(|(g, _)| {
-            crate::ui::search::CommandGroup::ORDER
+            crate::ui::keymap::CommandGroup::ORDER
                 .iter()
                 .position(|o| o == g)
                 .unwrap_or(usize::MAX)

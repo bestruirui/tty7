@@ -405,18 +405,6 @@ async fn upload(
         .map_err(err)
 }
 
-/// What has changed in the repository a pane's directory is in.
-#[tauri::command]
-async fn diff(
-    state: State<'_, Arc<AppState>>,
-    host_id: String,
-    machine: Option<String>,
-    cwd: String,
-) -> CmdResult<tty7_mobile_proto::Diff> {
-    let session = state.session(&host_id).await?;
-    session.diff(machine.as_deref(), &cwd).await.map_err(err)
-}
-
 /// Undoes `encodeURIComponent`. A malformed escape is kept as written.
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -645,7 +633,6 @@ pub fn run() {
             tab_close,
             pane_kill,
             upload,
-            diff,
             pane_open,
             pane_input,
             pane_lease,

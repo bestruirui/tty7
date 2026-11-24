@@ -1,7 +1,3 @@
-//! Chrome for the small modal cards the app draws itself — the SSH sheet, the
-//! worktree prompt — and the buttons and key hints the home page shares with
-//! them.
-//!
 //! The workspace switcher is the reference: the same 12px card, 48px header
 //! row with an `esc` cap, hairline-divided footer and faint keycaps. Each of
 //! these cards used to spell its own padding, title weight and button variants
@@ -9,12 +5,12 @@
 //! semibold title there, the accent-filled primary everywhere. One place now,
 //! so two sheets on screen at once cannot disagree about what a dialog is.
 
+use gpui::component::input::Input;
+use gpui::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui::{
     App, ClickEvent, Div, ElementId, Hsla, SharedString, Stateful, Window, div, prelude::*, px,
     rems,
 };
-use gpui_component::input::Input;
-use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 
 use crate::ui::presets::Surface;
 use crate::ui::right_panel::{HEADING, TAB_TEXT, TEXT};
@@ -39,9 +35,6 @@ pub(crate) const INSET: f32 = 18.;
 /// shape. The field's own `.small()` padding (8px) is what sets the text in.
 pub(crate) const FIELD_H: f32 = 28.;
 
-/// Space between a field's label and its well, and between one field and the
-/// next. Four-pixel grid: tight inside a pair, a step wider between pairs.
-const LABEL_GAP: f32 = 6.;
 const FIELD_GAP: f32 = 14.;
 
 /// A button: the field's height and the field's corner — the v5 confirm
@@ -162,44 +155,6 @@ pub(crate) fn field(input: Input, cx: &App) -> Div {
         )
 }
 
-/// A label over its field.
-pub(crate) fn labelled(name: impl IntoElement, input: Input, cx: &App) -> Div {
-    v_flex()
-        .gap(px(LABEL_GAP))
-        .child(label(name, cx))
-        .child(field(input, cx))
-}
-
-/// A label over a control that is not a text field.
-pub(crate) fn labelled_control(name: impl IntoElement, control: impl IntoElement, cx: &App) -> Div {
-    v_flex()
-        .gap(px(LABEL_GAP))
-        .child(label(name, cx))
-        .child(control)
-}
-
-/// A dropdown's closed face, in the same well as a text field, so a form of
-/// fields and choices still reads as one column.
-pub(crate) fn select_well(
-    id: impl Into<gpui::ElementId>,
-    value: impl Into<gpui::SharedString>,
-    cx: &App,
-) -> gpui::Stateful<Div> {
-    let tk = crate::ui::settings::kit::Tk::of(cx);
-    h_flex()
-        .id(id)
-        .h(px(FIELD_H))
-        .pl(px(10.))
-        .pr(px(9.))
-        .gap(px(8.))
-        .items_center()
-        .rounded(crate::ui::rounding::ROW_RADIUS)
-        .bg(well_fill(cx))
-        .cursor_pointer()
-        .child(div().flex_1().min_w_0().truncate().child(value.into()))
-        .child(crate::ui::settings::kit::chevron_down(&tk))
-}
-
 /// A block of read-only detail — a host and its key — set on the field's
 /// fill, so it reads as a value to check rather than a line of prose.
 pub(crate) fn well(cx: &App) -> Div {
@@ -231,9 +186,8 @@ pub(crate) fn keycap(label: impl Into<SharedString>, cx: &App) -> gpui::AnyEleme
         .into_any_element()
 }
 
-/// A key combination as one cap per key — `⌘` `T`, never `⌘T` in one. The
-/// way Search Everywhere and the shortcut editor spell a chord; the home page
-/// and the switcher's footer had each packed theirs into a single cap.
+/// A key combination as one cap per key — `⌘` `T`, never `⌘T` in one. The way
+/// the home page's shortcut list spells a chord.
 pub(crate) fn chord(tokens: impl IntoIterator<Item = impl Into<SharedString>>, cx: &App) -> Div {
     h_flex()
         .flex_shrink_0()

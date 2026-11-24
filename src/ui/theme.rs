@@ -1,9 +1,9 @@
+use gpui::component::scroll::ScrollbarMode;
+use gpui::component::{ActiveTheme, Theme, ThemeMode};
 use gpui::{
     App, Background, Hsla, Menu, MenuItem, OsAction, Pixels, Point, Styled, SystemMenuType, Window,
     WindowBackgroundAppearance, linear_color_stop, linear_gradient, point, px, rgb,
 };
-use gpui_component::scroll::ScrollbarShow;
-use gpui_component::{ActiveTheme, Theme, ThemeMode};
 
 use crate::core::actions::*;
 use crate::core::config::{Config, WindowBackdrop};
@@ -69,12 +69,10 @@ pub(crate) fn set_menus(cx: &mut App) {
         Menu::new(t(L10nKey::AppMenuFile)).items([
             MenuItem::action(t(L10nKey::AppMenuNewTab), NewTab),
             MenuItem::action(t(L10nKey::AppMenuNewWorkspace), NewWorkspace),
-            MenuItem::action(t(L10nKey::AppMenuNewWorktreeTab), NewWorktreeTab),
             MenuItem::separator(),
             // SSH is one of the reasons to pick tty7 and it had no entry in the
-            // menu bar at all — the only routes were ⌘P and Settings, both of
-            // which you have to already know about. Same labels as the palette,
-            // so there is still one name per thing.
+            // menu bar at all — the only route was Settings, which you have to
+            // already know about.
             MenuItem::action(t(L10nKey::CmdSshManageProfiles), OpenSshProfiles),
             MenuItem::action(t(L10nKey::CmdSshReconnect), RestartSshSession),
             MenuItem::separator(),
@@ -116,23 +114,14 @@ pub(crate) fn set_menus(cx: &mut App) {
             MenuItem::action(t(L10nKey::AppMenuFindPrevious), FindPrevious),
         ]),
         Menu::new(t(L10nKey::AppMenuView)).items([
-            MenuItem::action(t(L10nKey::AppMenuSearchEverywhere), TogglePalette),
-            MenuItem::action(t(L10nKey::CmdGoToFile), QuickOpenFile),
-            MenuItem::action(t(L10nKey::EditorGoToSymbolAction), EditorGoToSymbol),
-            MenuItem::action(t(L10nKey::EditorNavigateBack), EditorNavigateBack),
-            MenuItem::action(t(L10nKey::EditorNavigateForward), EditorNavigateForward),
-            MenuItem::action(t(L10nKey::EditorSplitRight), EditorSplitRight),
-            MenuItem::separator(),
             MenuItem::action(t(L10nKey::AppMenuIncreaseFontSize), IncreaseFontSize),
             MenuItem::action(t(L10nKey::AppMenuDecreaseFontSize), DecreaseFontSize),
             MenuItem::action(t(L10nKey::AppMenuResetFontSize), ResetFontSize),
             MenuItem::separator(),
             MenuItem::action(t(L10nKey::AppMenuLeftSidebar), ToggleLeftPanel),
             MenuItem::action(t(L10nKey::AppMenuRightPanel), ToggleRightPanel),
-            MenuItem::action(t(L10nKey::AppMenuCodePanel), ToggleCodePanel),
             MenuItem::action(t(L10nKey::AppMenuTabBarPosition), ToggleTabSidebar),
             MenuItem::separator(),
-            MenuItem::action(t(L10nKey::CmdSshRemoteFiles), ToggleSftp),
             MenuItem::action(t(L10nKey::CmdSshPortForwarding), ShowSshForwards),
             MenuItem::separator(),
             MenuItem::action(t(L10nKey::AppMenuFocusNextPane), FocusNextPane),
@@ -143,8 +132,7 @@ pub(crate) fn set_menus(cx: &mut App) {
             // itself as ⇧⌘E, which is Code Panel's chord, and pressing it
             // opened the code panel. A menu item that teaches the wrong key and
             // points at another command is worse than no menu item. Zoom Pane
-            // keeps its place in ⌘P, in a pane's own menu (drawn by us, with
-            // the right chord), and on the Keybindings page.
+            // keeps its place on the Keybindings page.
             MenuItem::separator(),
             MenuItem::action(t(L10nKey::AppMenuClearScrollback), ClearScrollback),
             // No "Enter Full Screen" here: AppKit puts its own at the bottom of
@@ -238,8 +226,8 @@ pub(crate) fn workspace_background(cx: &App) -> Background {
     }
 }
 
-/// The fill for a full-window overlay (settings, the opened file, the diff
-/// view). Always opaque: the overlay covers the whole workspace, so window
+/// The fill for a full-window overlay (settings, and the settings window).
+/// Always opaque: the overlay covers the whole workspace, so window
 /// translucency and the backdrop material must stop at it instead of showing
 /// desktop through its text. Overlays pair this with
 /// `app::overlay_surface_layers`, because their own opaque fill hides the
@@ -363,10 +351,9 @@ pub(crate) fn windows_background_appearance(
         }
         WindowBackdrop::Acrylic => {
             if build >= 22_621 {
-                // Native acrylic (DWMSBT_TRANSIENTWINDOW) on Windows 11 22H2+.
-                WindowBackgroundAppearance::AcrylicBackdrop
+                // The native DWM Acrylic material is applied after GPUI configures transparency.
+                WindowBackgroundAppearance::Transparent
             } else if build >= 17_763 {
-                // Classic WCA acrylic (ACCENT_ENABLE_ACRYLICBLURBEHIND).
                 WindowBackgroundAppearance::Blurred
             } else {
                 WindowBackgroundAppearance::Transparent
@@ -462,9 +449,9 @@ pub(crate) fn resolved_background_appearance(
 
 /// Whether the resolved backdrop on this platform is actually a material —
 /// i.e. the window content sits over a blur/mica layer instead of plain
-/// transparency. Derived from `resolved_background_appearance` so the
-/// opacity defaulting and the appearance resolution can never disagree: on
-/// very old builds `Blur`/`Acrylic` fall back to `Transparent`, and a
+/// transparency. Native Acrylic is applied through the HWND; the other
+/// materials follow `resolved_background_appearance`. On very old builds
+/// `Blur`/`Acrylic` fall back to `Transparent`, and a
 /// see-through window with no material behind it gets no special opacity.
 ///
 /// `Auto` never counts, even when the legacy blur toggle resolves it to
@@ -474,6 +461,10 @@ pub(crate) fn resolved_background_appearance(
 /// see-through on first launch after an update. Only an explicit pick in
 /// the backdrop dropdown opts a window into the translucent defaults.
 pub(crate) fn material_active(backdrop: WindowBackdrop, blur: bool) -> bool {
+    #[cfg(target_os = "windows")]
+    if backdrop == WindowBackdrop::Acrylic && windows_build_number() >= 22_621 {
+        return true;
+    }
     cfg!(target_os = "windows")
         && backdrop != WindowBackdrop::Auto
         && matches!(
@@ -481,7 +472,6 @@ pub(crate) fn material_active(backdrop: WindowBackdrop, blur: bool) -> bool {
             WindowBackgroundAppearance::Blurred
                 | WindowBackgroundAppearance::MicaBackdrop
                 | WindowBackgroundAppearance::MicaAltBackdrop
-                | WindowBackgroundAppearance::AcrylicBackdrop
         )
 }
 
@@ -567,9 +557,9 @@ fn effective_window_opacity(config: &Config, theme: &presets::Theme, blur: bool)
 /// translucent one — so asking for `Transparent` (or the WCA blur) while
 /// painting every pixel at alpha 1 silently drops every glyph to grayscale
 /// antialiasing for nothing: nothing behind the window can show through
-/// anyway (#1120). The DWM materials (Mica / Mica Alt / Acrylic) are left as
-/// they are: switching away from one through `Opaque` would not clear the
-/// system backdrop type, and they default to a translucent fill regardless.
+/// anyway (#1120). DWM materials keep a translucent GPUI surface; native
+/// Acrylic bypasses this conversion in `window_appearance` because GPUI
+/// represents its surface as `Transparent`.
 pub(crate) fn windows_window_appearance(
     resolved: WindowBackgroundAppearance,
     opacity: f32,
@@ -590,6 +580,10 @@ fn window_appearance(
     opacity: f32,
 ) -> WindowBackgroundAppearance {
     let resolved = resolved_background_appearance(backdrop, blur);
+    #[cfg(target_os = "windows")]
+    if backdrop == WindowBackdrop::Acrylic && windows_build_number() >= 22_621 {
+        return resolved;
+    }
     if cfg!(target_os = "windows") {
         windows_window_appearance(resolved, opacity)
     } else {
@@ -609,32 +603,149 @@ pub(crate) fn background_appearance(cx: &App) -> WindowBackgroundAppearance {
 /// a `set_background_appearance` that would change nothing.
 ///
 /// Worth the bookkeeping because the call is no longer cheap: with a DWM
-/// material selected, gpui answers it by re-setting
+/// material selected, applying it means re-setting
 /// `DWMWA_SYSTEMBACKDROP_TYPE` and forcing a non-client frame recalculation
 /// (`SetWindowPos` with `SWP_FRAMECHANGED`). `apply_theme` runs on *every*
 /// `Config` mutation in *every* window, so dragging the opacity slider —
 /// which never changes the appearance — would otherwise recalc the frame
 /// once per mouse-move sample and visibly stutter the drag.
 #[derive(Default)]
-struct AppliedAppearance(std::collections::HashMap<gpui::WindowId, WindowBackgroundAppearance>);
+struct AppliedAppearance(
+    std::collections::HashMap<gpui::WindowId, (WindowBackgroundAppearance, WindowBackdrop)>, // The appearance and backdrop each window was last given.
+);
 
 impl gpui::Global for AppliedAppearance {}
 
-/// Records `appearance` for `window` and reports whether it differs from
-/// what that window was last given. Entries for closed windows are dropped
-/// first: window ids come from a slotmap and are reused, so a stale entry
-/// could otherwise suppress the very first call for a brand-new window.
-fn take_appearance_change(
+/// Applies `appearance` and the native backdrop only when either changes, and
+/// clears the previous composition state so the frame recalculates.
+/// Entries for closed windows are dropped first: window ids come from a
+/// slotmap and are reused, so a stale entry could otherwise suppress the very
+/// first call for a brand-new window.
+fn apply_background_appearance(
     window: &Window,
     appearance: WindowBackgroundAppearance,
+    backdrop: WindowBackdrop,
     cx: &mut App,
-) -> bool {
+) {
     let id = window.window_handle().window_id();
     let live: std::collections::HashSet<gpui::WindowId> =
         cx.windows().iter().map(|w| w.window_id()).collect();
     let applied = cx.default_global::<AppliedAppearance>();
     applied.0.retain(|known, _| live.contains(known));
-    applied.0.insert(id, appearance) != Some(appearance)
+    if applied.0.insert(id, (appearance, backdrop)) == Some((appearance, backdrop)) {
+        return;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        use windows_sys::Win32::Graphics::Dwm::{
+            DWMSBT_MAINWINDOW, DWMSBT_NONE, DWMSBT_TABBEDWINDOW, DWMSBT_TRANSIENTWINDOW,
+            DWMWA_SYSTEMBACKDROP_TYPE, DwmSetWindowAttribute,
+        };
+        use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+        };
+
+        if windows_build_number() < 22_621 {
+            window.set_background_appearance(appearance);
+            return;
+        }
+        let hwnd = match HasWindowHandle::window_handle(window).map(|handle| handle.as_raw()) {
+            Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get() as _,
+            _ => {
+                window.set_background_appearance(appearance);
+                log::warn!("cannot apply native window backdrop: no Win32 window handle");
+                return;
+            }
+        }; // The window's native handle.
+        let backdrop_type = match backdrop {
+            WindowBackdrop::Mica => DWMSBT_MAINWINDOW,
+            WindowBackdrop::MicaAlt => DWMSBT_TABBEDWINDOW,
+            WindowBackdrop::Acrylic => DWMSBT_TRANSIENTWINDOW,
+            _ => DWMSBT_NONE,
+        }; // The DWM backdrop-type constant it maps to.
+        let result = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_SYSTEMBACKDROP_TYPE as _,
+                (&DWMSBT_NONE as *const i32).cast(),
+                std::mem::size_of::<i32>() as _,
+            )
+        };
+        if result < 0 {
+            log::warn!("cannot clear native window backdrop: HRESULT 0x{result:08x}");
+        }
+        window.set_background_appearance(appearance);
+
+        if backdrop_type != DWMSBT_NONE {
+            /// The attribute-and-bytes payload `SetWindowCompositionAttribute` takes.
+            #[repr(C)]
+            struct WindowCompositionAttributeData {
+                attribute: u32,                // Which composition attribute this carries.
+                data: *const std::ffi::c_void, // Where its bytes are.
+                size: usize,                   // How many bytes they are.
+            }
+
+            let set_composition = unsafe {
+                GetProcAddress(
+                    GetModuleHandleA(c"user32.dll".as_ptr().cast()),
+                    c"SetWindowCompositionAttribute".as_ptr().cast(),
+                )
+            };
+            let Some(set_composition) = set_composition else {
+                log::warn!("cannot apply native window backdrop: composition API unavailable");
+                return;
+            };
+            let set_composition: unsafe extern "system" fn(
+                windows_sys::Win32::Foundation::HWND,
+                *const WindowCompositionAttributeData,
+            ) -> i32 = unsafe { std::mem::transmute(set_composition) };
+            let accent = [0u32, 2, 0, 0]; // Turns the legacy accent off, keeping the border flag the old path set.
+            let data = WindowCompositionAttributeData {
+                attribute: 0x13,
+                data: accent.as_ptr().cast(),
+                size: std::mem::size_of_val(&accent),
+            };
+            if unsafe { set_composition(hwnd, &data) } == 0 {
+                log::warn!(
+                    "cannot clear window accent: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+            let result = unsafe {
+                DwmSetWindowAttribute(
+                    hwnd,
+                    DWMWA_SYSTEMBACKDROP_TYPE as _,
+                    (&backdrop_type as *const i32).cast(),
+                    std::mem::size_of_val(&backdrop_type) as _,
+                )
+            };
+            if result < 0 {
+                log::warn!("cannot apply native window backdrop: HRESULT 0x{result:08x}");
+            }
+        }
+        if unsafe {
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+        } == 0
+        {
+            log::warn!(
+                "cannot refresh window frame: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    window.set_background_appearance(appearance);
 }
 
 /// The interface face gpui-component started out with, read once before
@@ -690,18 +801,14 @@ pub(crate) fn apply_theme(mut window: Option<&mut Window>, cx: &mut App) {
 
     if let Some(window) = window.as_deref_mut() {
         let appearance = window_appearance(backdrop, blur, fill_opacity);
-        if take_appearance_change(window, appearance, cx) {
-            window.set_background_appearance(appearance);
-        }
+        apply_background_appearance(window, appearance, backdrop, cx);
         // Opacity, blur and backdrop are app-wide settings, but they are
         // changed from whichever window the settings page is in — its own,
         // now. Hand the same appearance to every other window too. The one
         // being updated refuses a nested update, and was handled above.
         for other in cx.windows() {
             let _ = other.update(cx, |_, window, cx| {
-                if take_appearance_change(window, appearance, cx) {
-                    window.set_background_appearance(appearance);
-                }
+                apply_background_appearance(window, appearance, backdrop, cx);
             });
         }
     }
@@ -716,11 +823,6 @@ pub(crate) fn apply_theme(mut window: Option<&mut Window>, cx: &mut App) {
     cx.set_global(surfaces.clone());
     cx.set_global(interaction);
     cx.set_global(presets::ActiveAccent(m.accent));
-    // Same treatment as `Surfaces`: derived once here rather than recomputed
-    // in `render`, because the graph reads it once per visible row per frame
-    // and each entry costs a contrast bisection on three surfaces.
-    cx.set_global(presets::ActiveLanes(theme.lanes()));
-
     if !cx.has_global::<StockUiFont>() {
         let stock = Theme::global(cx).font_family.clone();
         cx.set_global(StockUiFont(stock));
@@ -922,7 +1024,7 @@ pub(crate) fn apply_theme(mut window: Option<&mut Window>, cx: &mut App) {
     // parked an opaque bar over the switcher's tab column for the whole time
     // the panel was open, with nothing to fade it out. Every list in the app
     // gets the same bar, so it fades everywhere or nowhere.
-    t.scrollbar_show = ScrollbarShow::Scrolling;
+    t.scrollbar_mode = ScrollbarMode::Scrolling;
 
     t.radius = px(8.);
 
@@ -985,33 +1087,7 @@ pub(crate) fn apply_theme(mut window: Option<&mut Window>, cx: &mut App) {
     // presets. It is an interaction highlight, so it belongs with the focus
     // ring and the on-switch.
     t.drag_border = rgb(m.accent).into();
-
-    // The code editor's gutter fill and current-line band do not come from
-    // `Theme` at all — gpui-component reads them off the *syntax* theme, which
-    // is still its stock one. So the editor painted a #0a0a0a strip down the
-    // line-number column and a #171717 band across the cursor's line, on top of
-    // a preset background that is nowhere near either. That is the black edge.
-    //
-    // Cleared to transparent rather than repainted with the preset's own fill:
-    // the code panel sits on the window background, which may be a gradient or
-    // a wallpaper image, and any flat colour would show as a seam against it.
-    // The current line and the invisibles become translucent ink for the same
-    // reason — they read correctly on light and dark presets alike.
-    //
-    // A transparent gutter is only safe because our gpui-component fork clips
-    // the editor's scrolling content to the right of the line-number column.
-    // Upstream leans on the opaque gutter fill to hide horizontally scrolled
-    // text, so on a stock build clearing this key lets the text run straight
-    // across the line numbers.
-    let ink: Hsla = rgb(m.foreground).into();
-    let mut highlight = (*t.highlight_theme).clone();
-    highlight.style.editor_background = Some(gpui::transparent_black());
-    highlight.style.editor_gutter_background = Some(gpui::transparent_black());
-    highlight.style.editor_active_line = Some(ink.opacity(0.06));
-    highlight.style.editor_line_number = Some(rgb(m.muted_foreground).into());
-    highlight.style.editor_active_line_number = Some(ink);
-    highlight.style.editor_invisible = Some(ink.opacity(0.25));
-    t.highlight_theme = std::sync::Arc::new(highlight);
+    Theme::sync_base(cx);
 
     #[cfg(target_os = "macos")]
     if let Some(window) = window.as_deref_mut() {
@@ -1039,12 +1115,6 @@ pub(crate) fn hairline(window: &Window) -> Pixels {
     px(1. / window.scale_factor().max(1.))
 }
 
-/// Tabular figures, so a column of counts, sizes and positions keeps its
-/// digits on one grid while the numbers change under it.
-pub(crate) fn tabular_figures() -> gpui::FontFeatures {
-    gpui::FontFeatures(std::sync::Arc::new(vec![("tnum".to_string(), 1)]))
-}
-
 /// The v4 primary button: an inverted neutral — body ink as the fill, the
 /// surface it sits on as the label — rather than the accent, which stays with
 /// focus and the things that are on. `surface` is the opaque fill under the
@@ -1053,9 +1123,9 @@ pub(crate) fn tabular_figures() -> gpui::FontFeatures {
 pub(crate) fn inverted_button(
     surface: Hsla,
     cx: &App,
-) -> gpui_component::button::ButtonCustomVariant {
+) -> gpui::component::button::ButtonCustomVariant {
     let ink = cx.theme().foreground;
-    gpui_component::button::ButtonCustomVariant::new(cx)
+    gpui::component::button::ButtonCustomVariant::new(cx)
         .color(ink)
         .foreground(surface)
         .hover(ink.blend(surface.opacity(0.14)))
@@ -1117,8 +1187,8 @@ mod tests {
         );
     }
 
-    /// The strip, editor header and search band start at the lead, so the
-    /// lights have to end, with their inset after them, before it does.
+    /// The strip starts at the lead, so the lights have to end, with their
+    /// inset after them, before it does.
     #[test]
     #[cfg(target_os = "macos")]
     fn the_title_bar_lead_clears_the_traffic_lights() {
@@ -1160,7 +1230,7 @@ mod tests {
         assert_eq!(windows_window_appearance(Transparent, 0.9), Transparent);
         assert_eq!(windows_window_appearance(Blurred, 0.82), Blurred);
         // DWM materials are never routed through Opaque.
-        for material in [MicaBackdrop, MicaAltBackdrop, AcrylicBackdrop] {
+        for material in [MicaBackdrop, MicaAltBackdrop] {
             assert_eq!(windows_window_appearance(material, 1.0), material);
         }
         // The untouched default — Auto, no blur, no opacity override — is the
@@ -1241,11 +1311,9 @@ mod tests {
             );
         }
 
-        // Acrylic uses the native DWMSBT_TRANSIENTWINDOW material on 22H2+,
-        // classic WCA acrylic from 1809 on, plain translucency below that.
         assert_eq!(
             a(WindowBackdrop::Acrylic, false, 22_621),
-            WindowBackgroundAppearance::AcrylicBackdrop
+            WindowBackgroundAppearance::Transparent
         );
         assert_eq!(
             a(WindowBackdrop::Acrylic, false, 22_620),
@@ -1374,15 +1442,16 @@ mod tests {
                 WindowBackdrop::Off,
             ]
         );
-        // Every offered preset must resolve to a distinct appearance, or the
+        // Every GPUI-backed preset must resolve to a distinct appearance, or the
         // dropdown is promising a difference the window cannot deliver.
         // `Auto` is exempt: it has no fixed appearance of its own, it mirrors
-        // whichever way the blur toggle happens to be set.
+        // whichever way the blur toggle happens to be set. Native Acrylic is
+        // applied directly to the HWND after GPUI configures transparency.
         for build in [22_621, 22_620, 17_763, 17_762] {
             let offered: Vec<_> = supported_backdrops_for(build)
                 .iter()
                 .copied()
-                .filter(|b| *b != WindowBackdrop::Auto)
+                .filter(|b| !matches!(b, WindowBackdrop::Auto | WindowBackdrop::Acrylic))
                 .collect();
             for (i, a) in offered.iter().enumerate() {
                 for b in &offered[i + 1..] {
@@ -1400,14 +1469,4 @@ mod tests {
             &[WindowBackdrop::Auto, WindowBackdrop::Off]
         );
     }
-}
-
-/// The text view's style for rendered Markdown, wherever tty7 shows it.
-///
-/// Inline `code` gets a faint neutral fill. The text view's own default is the
-/// theme's `accent`, which tty7 also paints selection with, so every code span
-/// read as selected text.
-pub(crate) fn markdown_style(cx: &gpui::App) -> gpui_component::text::TextViewStyle {
-    gpui_component::text::TextViewStyle::default()
-        .inline_code_background(cx.theme().foreground.opacity(0.08))
 }

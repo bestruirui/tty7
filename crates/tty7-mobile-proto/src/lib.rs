@@ -19,8 +19,6 @@
 //!   runs in it;
 //! - a one-shot [`Open::Upload`] stream that carries a file from the phone to
 //!   the machine and answers with where it landed, an [`Uploaded`];
-//! - a one-shot [`Open::Diff`] stream that answers with a git working tree's
-//!   changes, a [`Diff`].
 //!
 //! Every frame is `u32` little-endian length, a one-byte kind, then the
 //! payload — the same shape as the daemon's frames, so there is one framing
@@ -34,7 +32,7 @@ use serde::{Deserialize, Serialize};
 
 /// The ALPN both ends pass to iroh; a connection with any other is refused
 /// during the handshake, before a byte of this protocol is read.
-pub const ALPN: &[u8] = b"tty7/mobile/1";
+pub const ALPN: &[u8] = b"tty7/mobile/2";
 
 /// The mDNS service both ends use to find each other on a local network,
 /// whatever addresses the gateway has moved to since pairing.
@@ -42,7 +40,7 @@ pub const MDNS_SERVICE: &str = "tty7";
 
 /// Bumped when a message changes shape. Carried in [`OpenReply::Ok`] so an app
 /// can tell the user to update rather than misread a newer gateway.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// The largest file an [`Open::Upload`] may carry: photos, screenshots and
 /// small files, not a way to move a disk image.
@@ -111,17 +109,6 @@ pub enum Open {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         machine: Option<String>,
     },
-    /// What has changed in the git working tree `cwd` is in, against its last
-    /// commit: `Ok`, then a [`Diff`]. `Denied` when it is not in a repository.
-    ///
-    /// A gateway older than this variant cannot parse it and drops the stream
-    /// unanswered.
-    Diff {
-        cwd: String,
-        /// As on [`Open::Pane`].
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        machine: Option<String>,
-    },
     /// Close a pane, as closing it on the desktop does: it leaves its tab (the
     /// tab with it, when it was the last pane there) and whatever runs in it
     /// is ended. One-shot: `Ok` once it is closed, or `Denied` with what went
@@ -165,25 +152,6 @@ pub struct TabCreated {
     pub tab_id: String,
     pub pane_id: u64,
 }
-
-/// The answer on a [`Open::Diff`] stream.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Diff {
-    /// The repository's top directory.
-    pub root: String,
-    /// `git diff HEAD`: staged and unstaged together, as a unified diff.
-    pub patch: String,
-    /// Files git does not track yet (and does not ignore), by path from `root`.
-    #[serde(default)]
-    pub untracked: Vec<String>,
-    /// The patch was cut at [`MAX_DIFF`] bytes.
-    #[serde(default)]
-    pub truncated: bool,
-}
-
-/// The most of a patch a [`Diff`] carries: enough to review an agent's work
-/// on a phone, not a vendored dependency's.
-pub const MAX_DIFF: usize = 2 << 20;
 
 /// The answer on a [`Open::Upload`] stream once the file is written.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

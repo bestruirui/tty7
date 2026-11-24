@@ -428,6 +428,7 @@ pub struct RouteSetup {
 }
 
 impl RouteSetup {
+    #[cfg(test)]
     pub fn unattended(channel: RouteChannel) -> RouteSetup {
         RouteSetup {
             broker: PromptBroker::new(Box::new(|_| false)),

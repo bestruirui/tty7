@@ -203,15 +203,4 @@ export const upload = (hostId: string, machine: string | null, name: string, byt
     },
   });
 
-export interface Diff {
-  root: string;
-  patch: string;
-  untracked: string[];
-  truncated: boolean;
-}
-
-/** What has changed in the repository `cwd` is in. */
-export const diff = (hostId: string, machine: string | null, cwd: string) =>
-  invoke<Diff>("diff", { hostId, machine, cwd });
-
 export const paneClose = (handle: number) => invoke<void>("pane_close", { handle });

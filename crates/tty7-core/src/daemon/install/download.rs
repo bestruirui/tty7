@@ -5,7 +5,7 @@ use std::time::Duration;
 use super::AssetFetcher;
 use super::proxy;
 
-// `timeout_global` caps the whole request, so it has to be sized for the
+// `ClientBuilder::timeout` caps the whole request, so it has to be sized for the
 // largest asset over the slowest link anyone actually uses — not for a healthy
 // one. The old 180s meant a 28 MB release package needed a sustained 160 KB/s
 // just to finish, which a domestic connection to GitHub routinely misses: the
@@ -22,29 +22,24 @@ const MAX_ASSET_BYTES: u64 = 128 * 1024 * 1024;
 const READ_CHUNK: usize = 64 * 1024;
 
 pub struct HttpsFetcher {
-    agent: ureq::Agent,
+    client: reqwest::blocking::Client,
 }
 
 impl HttpsFetcher {
-    pub fn new(manual_proxy: Option<&str>) -> Self {
-        let mut builder = ureq::Agent::config_builder()
-            .timeout_global(Some(DOWNLOAD_TIMEOUT))
-            .timeout_connect(Some(CONNECT_TIMEOUT))
+    pub fn new(manual_proxy: Option<&str>) -> Result<Self, reqwest::Error> {
+        let mut builder = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(DOWNLOAD_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
             .user_agent(concat!("tty7/", env!("CARGO_PKG_VERSION")));
 
         if let Some(proxy) = proxy::resolve("https://github.com", manual_proxy) {
-            builder = builder.proxy(Some(proxy));
+            builder = builder.proxy(proxy);
         }
 
-        Self {
-            agent: builder.build().into(),
-        }
-    }
-}
-
-impl Default for HttpsFetcher {
-    fn default() -> Self {
-        Self::new(None)
+        Ok(Self {
+            client: builder.build()?,
+        })
     }
 }
 
@@ -91,10 +86,10 @@ impl HttpsFetcher {
         on_progress: &dyn Fn(u64, Option<u64>) -> ControlFlow<()>,
     ) -> Result<Vec<u8>, String> {
         let response = self
-            .agent
+            .client
             .get(url)
-            .call()
-            .map_err(|e| describe(url, &e.to_string()))?;
+            .send()
+            .map_err(|error| describe(url, &format!("{:#}", anyhow::Error::new(error))))?;
 
         let status = response.status().as_u16();
         if status == 404 {
@@ -113,14 +108,13 @@ impl HttpsFetcher {
             .and_then(|v| v.trim().parse::<u64>().ok())
             .filter(|n| *n <= MAX_ASSET_BYTES);
 
-        let mut body = response.into_body();
-        let mut reader = body.as_reader().take(MAX_ASSET_BYTES + 1);
+        let mut reader = response.take(MAX_ASSET_BYTES + 1);
         let mut bytes = Vec::with_capacity(declared.unwrap_or(0) as usize);
         let mut buf = vec![0u8; READ_CHUNK];
         loop {
             let n = reader
                 .read(&mut buf)
-                .map_err(|e| describe(url, &e.to_string()))?;
+                .map_err(|error| describe(url, &format!("{:#}", anyhow::Error::new(error))))?;
             if n == 0 {
                 break;
             }
@@ -156,14 +150,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_agent_builds() {
-        let _ = HttpsFetcher::default();
+    fn the_client_builds() {
+        let _ = HttpsFetcher::new(None).expect("HTTP client must initialize");
     }
 
     #[test]
     #[ignore = "needs the network"]
     fn talks_to_github() {
-        let fetcher = HttpsFetcher::default();
+        let fetcher = HttpsFetcher::new(None).expect("HTTP client must initialize");
         let bytes = fetcher
             .get("https://github.com/l0ng-ai/tty7/raw/main/README.md")
             .expect("github must be reachable over TLS");

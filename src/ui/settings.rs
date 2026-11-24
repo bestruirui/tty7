@@ -1,22 +1,22 @@
+use gpui::component::InteractiveElementExt as _;
+use gpui::component::color_picker::{ColorPicker, ColorPickerState};
+use gpui::component::input::{Input, InputEvent, InputState, TextareaState};
+use gpui::component::link::Link;
+use gpui::component::notification::{Notification, NotificationType};
+use gpui::component::{Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui::{
     AnyElement, App, Background, Context, Div, ElementId, Entity, Focusable as _, FontWeight,
     KeyDownEvent, MouseButton, SharedString, Stateful, Subscription, Window, div, prelude::*, px,
     rgb,
 };
-use gpui_component::InteractiveElementExt as _;
-use gpui_component::color_picker::{ColorPicker, ColorPickerState};
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::link::Link;
-use gpui_component::notification::{Notification, NotificationType};
-use gpui_component::{Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 use std::cell::{Cell, RefCell};
 
 use uuid::Uuid;
 
 use crate::core::config::{
-    BellMode, Config, ConfirmClose, CursorStyle, LinkFileOpen, MouseZoomModifier, NewTabPosition,
-    NotifyMode, PromptCursorStyle, TabBarPosition, UI_FONT_SIZE_DEFAULT, UpdateChannel,
-    WindowBackdrop,
+    BellMode, Config, ConfirmClose, CursorStyle, MouseRightClick, MouseZoomModifier,
+    NewTabPosition, NotifyMode, PromptCursorStyle, TabBarPosition, UI_FONT_SIZE_DEFAULT,
+    UpdateChannel, WindowBackdrop,
 };
 use crate::core::keychain::{
     CredentialRef, CredentialStore as _, OsCredentialStore, key_account_from_contents,
@@ -32,7 +32,6 @@ use crate::ui::i18n::{L10nKey, t, t_fmt, t_plural};
 use crate::ui::presets;
 
 mod agents;
-mod editor;
 mod hosts;
 pub(crate) mod kit;
 pub(crate) mod mobile;
@@ -49,8 +48,8 @@ const PAGE_PAD: f32 = 112.;
 /// beside its icon.
 ///
 /// Sized for the longest nav label in *any* locale, not the one the developer
-/// happens to be reading: at 140 the zh-CN "窗口与标签页" lost the right half
-/// of its last character. The widest is ja-JP "ウィンドウとタブ".
+/// happens to be reading: ja "キーボードショートカット" is 24 columns wide, so
+/// the floor has to clear it beside the icon.
 const NAV_W_MIN: f32 = 176.;
 
 /// The reading column every page caps itself at. Wider than this and a
@@ -168,7 +167,7 @@ fn group_thousands(n: usize) -> String {
 /// edge lets it bubble to the page.
 fn nested_list_wheel(
     scroll: gpui::ScrollHandle,
-) -> impl Fn(&gpui::ScrollWheelEvent, &mut Window, &mut App) + 'static {
+) -> impl Fn(&gpui::ScrollEvent, &mut Window, &mut App) + 'static {
     move |event, window, cx| {
         let delta = event.delta.pixel_delta(window.line_height());
         let dy = if delta.y == px(0.) { delta.x } else { delta.y };
@@ -307,11 +306,6 @@ fn settings_search_entries() -> &'static [SearchEntry] {
             keywords: SettingsSearchFontSizeKeywords,
         },
         SearchEntry {
-            section: Terminal,
-            title: SettingsPerPaneHistory,
-            keywords: SettingsSearchHistorySearchKeywords,
-        },
-        SearchEntry {
             section: KeyboardMouse,
             title: SettingsMouseZoom,
             keywords: SettingsSearchScrollSpeedKeywords,
@@ -320,11 +314,6 @@ fn settings_search_entries() -> &'static [SearchEntry] {
             section: Terminal,
             title: SettingsCustomPath,
             keywords: SettingsSearchStartInKeywords,
-        },
-        SearchEntry {
-            section: Terminal,
-            title: SettingsOpenFilesCommand,
-            keywords: SettingsSearchOpenFilesWithKeywords,
         },
         #[cfg(target_os = "macos")]
         SearchEntry {
@@ -505,6 +494,11 @@ fn settings_search_entries() -> &'static [SearchEntry] {
             keywords: SettingsSearchReportMouseToAppsKeywords,
         },
         SearchEntry {
+            section: KeyboardMouse,
+            title: SettingsMouseRightClick,
+            keywords: SettingsMouseRightClickDesc,
+        },
+        SearchEntry {
             section: Terminal,
             title: SettingsTerminalBell,
             keywords: SettingsSearchTerminalBellKeywords,
@@ -518,26 +512,6 @@ fn settings_search_entries() -> &'static [SearchEntry] {
             section: Terminal,
             title: ForwardSshLoopbackLinks,
             keywords: SettingsSearchForwardSshLoopbackLinksKeywords,
-        },
-        SearchEntry {
-            section: Terminal,
-            title: OpenFilesWith,
-            keywords: SettingsSearchOpenFilesWithKeywords,
-        },
-        SearchEntry {
-            section: Terminal,
-            title: SettingsPromptEditor,
-            keywords: SettingsSearchPromptEditorKeywords,
-        },
-        SearchEntry {
-            section: Terminal,
-            title: SettingsTabCompletion,
-            keywords: SettingsSearchTabCompletionKeywords,
-        },
-        SearchEntry {
-            section: Terminal,
-            title: SettingsHistorySearch,
-            keywords: SettingsSearchHistorySearchKeywords,
         },
         #[cfg(target_os = "macos")]
         SearchEntry {
@@ -737,26 +711,6 @@ fn settings_search_entries() -> &'static [SearchEntry] {
         },
         SearchEntry {
             section: General,
-            title: SettingsEditorGitGutter,
-            keywords: SettingsSearchEditorGitGutterKeywords,
-        },
-        SearchEntry {
-            section: General,
-            title: SettingsEditorLsp,
-            keywords: SettingsSearchEditorLspKeywords,
-        },
-        SearchEntry {
-            section: General,
-            title: SettingsEditorSoftWrap,
-            keywords: SettingsSearchEditorSoftWrapKeywords,
-        },
-        SearchEntry {
-            section: General,
-            title: SettingsEditorMarkdownPreview,
-            keywords: SettingsSearchEditorMarkdownPreviewKeywords,
-        },
-        SearchEntry {
-            section: General,
             title: SettingsNotifyOnCommandFinish,
             keywords: SettingsSearchNotifyOnCommandFinishKeywords,
         },
@@ -853,15 +807,10 @@ impl SearchEntry {
             L10nKey::SettingsConfirmClose => "confirm_close",
             L10nKey::SettingsTabBarPosition => "tab_bar_position",
             L10nKey::SettingsSidebarGrouping => "sidebar_auto_grouping",
-            L10nKey::SettingsEditorGitGutter => "editor_git_gutter",
-            L10nKey::SettingsEditorLsp => "editor_lsp",
-            L10nKey::SettingsEditorSoftWrap => "editor_soft_wrap",
-            L10nKey::SettingsEditorMarkdownPreview => "editor_markdown_preview",
             L10nKey::SettingsNotifyOnCommandFinish => "notify_on_command_finish",
             L10nKey::SettingsNotifyThreshold => "notify_threshold_secs",
             L10nKey::SettingsTerminalBell => "bell",
             L10nKey::SettingsRestoreLastLayout => "restore_session",
-            L10nKey::SettingsPerPaneHistory => "per_pane_history",
             L10nKey::SettingsShowTrayIcon => "show_tray_icon",
             L10nKey::SettingsOptionAsMeta => "macos_option_as_alt",
             L10nKey::SettingsHideMouseWhileTyping => "mouse_hide_while_typing",
@@ -870,13 +819,11 @@ impl SearchEntry {
             L10nKey::SettingsScrollSpeed => "mouse_scroll_multiplier",
             L10nKey::SettingsSmoothScroll => "smooth_scroll",
             L10nKey::SettingsMouseZoom => "mouse_zoom_modifier",
+            L10nKey::SettingsMouseRightClick => "mouse_right_click",
             L10nKey::SettingsTrimTrailingSpaces => "clipboard_trim_trailing_spaces",
             L10nKey::SettingsCopyJoinWrapped => "copy_join_wrapped",
             L10nKey::SettingsCopyOnSelect => "copy_on_select",
             L10nKey::SettingsSmartSelection => "smart_select",
-            L10nKey::SettingsPromptEditor => "prompt_editor",
-            L10nKey::SettingsTabCompletion => "tab_completion",
-            L10nKey::SettingsHistorySearch => "history_search",
             L10nKey::SettingsStartupWindow => "startup_mode",
             L10nKey::SettingsRememberWindowSize => "remember_window_size",
             L10nKey::SettingsCheckUpdatesOnLaunch => "check_for_updates",
@@ -908,8 +855,6 @@ impl SearchEntry {
             L10nKey::SettingsLegiblePalette => "theme_legible_palette",
             L10nKey::SettingsThemeIntroTitle => "theme_preset",
             L10nKey::SettingsAppHttpProxy => "http_proxy",
-            L10nKey::SettingsOpenFilesCommand => "link_file_command",
-            L10nKey::OpenFilesWith => "link_file_open",
             L10nKey::SettingsInstallCliOnPath => "install_cli_on_path",
             L10nKey::SettingsSearchKeybindingsTitle => "keybindings",
             L10nKey::SettingsHosts => "ssh_profiles",
@@ -955,10 +900,8 @@ impl SearchEntry {
             L10nKey::SettingsFocusFollowsMouse => t(L10nKey::SettingsFocusFollowsMouseDesc),
             L10nKey::SettingsHideMouseWhileTyping => t(L10nKey::SettingsHideMouseWhileTypingDesc),
             L10nKey::SettingsReportMouseToApps => t(L10nKey::SettingsReportMouseToAppsDesc),
+            L10nKey::SettingsMouseRightClick => t(L10nKey::SettingsMouseRightClickDesc),
             L10nKey::SettingsTerminalBell => t(L10nKey::SettingsTerminalBellDesc),
-            L10nKey::SettingsPromptEditor => t(L10nKey::SettingsPromptEditorDesc),
-            L10nKey::SettingsTabCompletion => t(L10nKey::SettingsTabCompletionDesc),
-            L10nKey::SettingsHistorySearch => t(L10nKey::SettingsHistorySearchDesc),
             L10nKey::SettingsOptionAsMeta => t(L10nKey::SettingsOptionAsMetaDesc),
             L10nKey::SettingsSmartSelection => t(L10nKey::SettingsSmartSelectionDesc),
             L10nKey::SettingsCopyOnSelect => t(L10nKey::SettingsCopyOnSelectDesc),
@@ -973,19 +916,13 @@ impl SearchEntry {
             L10nKey::SettingsConfirmClose => t(L10nKey::SettingsConfirmCloseDesc),
             L10nKey::SettingsTabBarPosition => t(L10nKey::SettingsTabBarPositionDesc),
             L10nKey::SettingsSidebarGrouping => t(L10nKey::SettingsSidebarGroupingDesc),
-            L10nKey::SettingsEditorGitGutter => t(L10nKey::SettingsEditorGitGutterDesc),
-            L10nKey::SettingsEditorLsp => t(L10nKey::SettingsEditorLspDesc),
-            L10nKey::SettingsEditorSoftWrap => t(L10nKey::SettingsEditorSoftWrapDesc),
-            L10nKey::SettingsEditorMarkdownPreview => t(L10nKey::SettingsEditorMarkdownPreviewDesc),
             L10nKey::SettingsNotifyOnCommandFinish => t(L10nKey::SettingsNotifyOnCommandFinishDesc),
             L10nKey::SettingsNotifyThreshold => t(L10nKey::SettingsNotifyThresholdDesc),
             L10nKey::SettingsAppHttpProxy => t(L10nKey::SettingsAppHttpProxyDesc),
             L10nKey::SettingsUpdateChannel => t(L10nKey::SettingsUpdateChannelDesc),
             L10nKey::SettingsAutoDownload => t(L10nKey::SettingsAutoDownloadDesc),
-            L10nKey::SettingsPerPaneHistory => t(L10nKey::SettingsPerPaneHistoryDescription),
             L10nKey::DetectUrls => t(L10nKey::SettingsDetectUrlsDesc),
             L10nKey::ForwardSshLoopbackLinks => t(L10nKey::SettingsForwardSshLoopbackLinksDesc),
-            L10nKey::OpenFilesWith => t(L10nKey::SettingsOpenFilesModeDesc),
             _ => "",
         }
     }
@@ -1026,12 +963,6 @@ impl SearchEntry {
             L10nKey::SettingsSidebarGrouping => {
                 cfg.sidebar_auto_grouping != defaults.sidebar_auto_grouping
             }
-            L10nKey::SettingsEditorGitGutter => cfg.editor_git_gutter != defaults.editor_git_gutter,
-            L10nKey::SettingsEditorLsp => cfg.editor_lsp != defaults.editor_lsp,
-            L10nKey::SettingsEditorSoftWrap => cfg.editor_soft_wrap != defaults.editor_soft_wrap,
-            L10nKey::SettingsEditorMarkdownPreview => {
-                cfg.editor_markdown_preview != defaults.editor_markdown_preview
-            }
             L10nKey::SettingsNotifyOnCommandFinish => {
                 cfg.notify_on_command_finish != defaults.notify_on_command_finish
             }
@@ -1040,7 +971,6 @@ impl SearchEntry {
             }
             L10nKey::SettingsTerminalBell => cfg.bell != defaults.bell,
             L10nKey::SettingsRestoreLastLayout => cfg.restore_session != defaults.restore_session,
-            L10nKey::SettingsPerPaneHistory => cfg.per_pane_history != defaults.per_pane_history,
             L10nKey::SettingsShowTrayIcon => cfg.show_tray_icon != defaults.show_tray_icon,
             L10nKey::SettingsMobileAccess => cfg.mobile_access != defaults.mobile_access,
             L10nKey::SettingsOptionAsMeta => {
@@ -1058,15 +988,13 @@ impl SearchEntry {
             }
             L10nKey::SettingsSmoothScroll => cfg.smooth_scroll != defaults.smooth_scroll,
             L10nKey::SettingsMouseZoom => cfg.mouse_zoom_modifier != defaults.mouse_zoom_modifier,
+            L10nKey::SettingsMouseRightClick => cfg.mouse_right_click != defaults.mouse_right_click,
             L10nKey::SettingsTrimTrailingSpaces => {
                 cfg.clipboard_trim_trailing_spaces != defaults.clipboard_trim_trailing_spaces
             }
             L10nKey::SettingsCopyJoinWrapped => cfg.copy_join_wrapped != defaults.copy_join_wrapped,
             L10nKey::SettingsCopyOnSelect => cfg.copy_on_select != defaults.copy_on_select,
             L10nKey::SettingsSmartSelection => cfg.smart_select != defaults.smart_select,
-            L10nKey::SettingsPromptEditor => cfg.prompt_editor != defaults.prompt_editor,
-            L10nKey::SettingsTabCompletion => cfg.tab_completion != defaults.tab_completion,
-            L10nKey::SettingsHistorySearch => cfg.history_search != defaults.history_search,
             L10nKey::SettingsStartupWindow => cfg.startup_mode != defaults.startup_mode,
             L10nKey::SettingsRememberWindowSize => {
                 cfg.remember_window_size != defaults.remember_window_size
@@ -1107,10 +1035,6 @@ impl SearchEntry {
                     || cfg.theme_preset_dark != defaults.theme_preset_dark
             }
             L10nKey::SettingsAppHttpProxy => cfg.http_proxy != defaults.http_proxy,
-            L10nKey::SettingsOpenFilesCommand => {
-                cfg.link_file_command != defaults.link_file_command
-            }
-            L10nKey::OpenFilesWith => cfg.link_file_open != defaults.link_file_open,
             L10nKey::SettingsSearchKeybindingsTitle => {
                 cfg.keybindings != defaults.keybindings
                     || cfg.keybinding_preset != defaults.keybinding_preset
@@ -1142,9 +1066,6 @@ fn entry_matches(entry: &SearchEntry, query: &str) -> bool {
                 L10nKey::SettingsMouseZoom => {
                     "zoom modifier scroll wheel 缩放 滚轮 修饰键 ズーム".contains(word)
                 }
-                L10nKey::SettingsPerPaneHistory => {
-                    "per pane shell history independent 独立 命令历史".contains(word)
-                }
                 L10nKey::SettingsServer => {
                     "daemon server background service 后台 服务".contains(word)
                 }
@@ -1166,7 +1087,7 @@ fn entry_matches(entry: &SearchEntry, query: &str) -> bool {
 ///
 /// The label is what the page shows and what someone searching for a feature
 /// will type; the action name is what the docs and `keybindings.json` spell, so
-/// `ScmSync` finds the row a reader arrived from the configuration page with.
+/// `ToggleComposer` finds the row a reader arrived from the configuration page with.
 pub(crate) fn keybinding_matches_query(action: &str, query: &str) -> bool {
     if query.is_empty() {
         return false;
@@ -1239,8 +1160,6 @@ pub(crate) fn best_matching_section(query: &str) -> Option<SettingsSection> {
 }
 
 pub(crate) struct ThemeEditor {
-    #[allow(dead_code)]
-    pub(crate) for_id: String,
     pub(crate) seed: Vec<(ThemeEdit, Entity<ColorPickerState>)>,
     pub(crate) ansi: Vec<(ThemeEdit, Entity<ColorPickerState>)>,
     pub(crate) _subs: Vec<Subscription>,
@@ -1272,7 +1191,6 @@ pub(crate) struct SettingsState {
     pub(crate) shell_program_input: Entity<InputState>,
     pub(crate) shell_args_input: Entity<InputState>,
     pub(crate) wd_path_input: Entity<InputState>,
-    pub(crate) link_file_command_input: Entity<InputState>,
     pub(crate) http_proxy_input: Entity<InputState>,
     pub(crate) theme_editor: Option<ThemeEditor>,
     pub(crate) theme_draft: Option<(presets::Theme, presets::Theme)>,
@@ -1456,7 +1374,7 @@ pub(crate) struct SshProfileForm {
     keepalive_interval: Entity<InputState>,
     keepalive_count: Entity<InputState>,
     connect_timeout: Entity<InputState>,
-    login_scripts: Entity<InputState>,
+    login_scripts: Entity<TextareaState>,
 
     agent_forward: bool,
     x11: bool,
@@ -1904,18 +1822,9 @@ fn seed_hinted(
     })
 }
 
-fn seed_input(
-    window: &mut Window,
-    cx: &mut Context<Tty7App>,
-    value: &str,
-    multi_line: bool,
-) -> Entity<InputState> {
+fn seed_input(window: &mut Window, cx: &mut Context<Tty7App>, value: &str) -> Entity<InputState> {
     let value = value.to_string();
-    cx.new(|cx| {
-        InputState::new(window, cx)
-            .multi_line(multi_line)
-            .default_value(value)
-    })
+    cx.new(|cx| InputState::new(window, cx).default_value(value))
 }
 
 /// A picked path written the way a config file spells it. `~/.ssh/id_ed25519`
@@ -2041,7 +1950,7 @@ impl Tty7App {
             Some(t(L10nKey::SettingsUnsavedBody)),
             &[
                 gpui::PromptButton::ok(t(L10nKey::SettingsSaveChanges)),
-                gpui::PromptButton::new(t(L10nKey::EditorDiscard)),
+                gpui::PromptButton::new(t(L10nKey::SettingsDiscard)),
                 gpui::PromptButton::cancel(t(L10nKey::SettingsKeepEditing)),
             ],
             cx,
@@ -2119,11 +2028,6 @@ impl Tty7App {
                     != crate::core::config::WdStrategy::Custom =>
             {
                 Some(L10nKey::SettingsStartIn)
-            }
-            Some(L10nKey::SettingsOpenFilesCommand)
-                if cx.global::<Config>().file_open_mode() != LinkFileOpen::Command =>
-            {
-                Some(L10nKey::OpenFilesWith)
             }
             other => other,
         };
@@ -2236,9 +2140,9 @@ impl Tty7App {
 
         let name = seed_hinted(window, cx, &profile.name, t(L10nKey::SettingsNameHint));
         let host = seed_hinted(window, cx, &profile.host, t(L10nKey::SettingsHostHint));
-        let port = seed_input(window, cx, &profile.port.to_string(), false);
+        let port = seed_input(window, cx, &profile.port.to_string());
         let user = seed_hinted(window, cx, &profile.user, t(L10nKey::SettingsUserHint));
-        let jump = seed_input(window, cx, &jump_name, false);
+        let jump = seed_input(window, cx, &jump_name);
         let forwards: Vec<ForwardRuleForm> = profile
             .forwards
             .iter()
@@ -2275,24 +2179,14 @@ impl Tty7App {
                 .placeholder(t(L10nKey::SettingsPasswordHint))
                 .default_value(loaded_passphrase.clone())
         });
-        let proxy_command = seed_input(
-            window,
-            cx,
-            profile.proxy_command.as_deref().unwrap_or(""),
-            false,
-        );
-        let socks = seed_input(window, cx, &host_port_text(&profile.socks_proxy), false);
-        let http = seed_input(window, cx, &host_port_text(&profile.http_proxy), false);
-        let kex = seed_input(window, cx, &profile.algorithms.kex.join(", "), false);
-        let cipher = seed_input(window, cx, &profile.algorithms.cipher.join(", "), false);
-        let mac = seed_input(window, cx, &profile.algorithms.mac.join(", "), false);
-        let hostkey = seed_input(window, cx, &profile.algorithms.hostkey.join(", "), false);
-        let compression = seed_input(
-            window,
-            cx,
-            &profile.algorithms.compression.join(", "),
-            false,
-        );
+        let proxy_command = seed_input(window, cx, profile.proxy_command.as_deref().unwrap_or(""));
+        let socks = seed_input(window, cx, &host_port_text(&profile.socks_proxy));
+        let http = seed_input(window, cx, &host_port_text(&profile.http_proxy));
+        let kex = seed_input(window, cx, &profile.algorithms.kex.join(", "));
+        let cipher = seed_input(window, cx, &profile.algorithms.cipher.join(", "));
+        let mac = seed_input(window, cx, &profile.algorithms.mac.join(", "));
+        let hostkey = seed_input(window, cx, &profile.algorithms.hostkey.join(", "));
+        let compression = seed_input(window, cx, &profile.algorithms.compression.join(", "));
         let keepalive_interval = seed_input(
             window,
             cx,
@@ -2300,7 +2194,6 @@ impl Tty7App {
                 .keepalive_interval_s
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
-            false,
         );
         let keepalive_count = seed_input(
             window,
@@ -2309,7 +2202,6 @@ impl Tty7App {
                 .keepalive_count_max
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
-            false,
         );
         let connect_timeout = seed_input(
             window,
@@ -2318,9 +2210,10 @@ impl Tty7App {
                 .connect_timeout_s
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
-            false,
         );
-        let login_scripts = seed_input(window, cx, &profile.login_scripts.join("\n"), true);
+        let login_scripts = cx.new(|cx| {
+            TextareaState::new(window, cx).default_value(profile.login_scripts.join("\n"))
+        });
 
         let mut subs = Vec::new();
         // The passphrase belongs to whichever key the field above names, so
@@ -2357,7 +2250,6 @@ impl Tty7App {
             &keepalive_interval,
             &keepalive_count,
             &connect_timeout,
-            &login_scripts,
         ];
         for row in &forwards {
             watch.extend(forward_row_inputs(row));
@@ -2372,6 +2264,16 @@ impl Tty7App {
                 }),
             );
         }
+        subs.push(cx.subscribe_in(
+            &login_scripts,
+            window,
+            |this, _i, ev: &InputEvent, _w, cx| {
+                if matches!(ev, InputEvent::Change) {
+                    let _ = this.ssh_form_mut();
+                    cx.notify();
+                }
+            },
+        ));
 
         let form = SshProfileForm {
             editing: profile.id,
@@ -2461,7 +2363,7 @@ impl Tty7App {
             skip_banner: form.skip_banner,
             shell_integration: form.shell_integration,
             remote_clipboard_write: form.remote_clipboard_write,
-            login_scripts: raw(&form.login_scripts),
+            login_scripts: form.login_scripts.read(cx).value().to_string(),
             x11: form.x11,
             kex: raw(&form.kex),
             cipher: raw(&form.cipher),
@@ -2945,11 +2847,6 @@ mod tests {
                     SettingsSection::KeyboardMouse,
                 ),
                 (
-                    "per_pane_history",
-                    L10nKey::SettingsPerPaneHistory,
-                    SettingsSection::Terminal,
-                ),
-                (
                     "ui_font_size",
                     L10nKey::SettingsUiFontSize,
                     SettingsSection::Appearance,
@@ -3057,7 +2954,7 @@ mod tests {
 
         // The action name is what the docs and `keybindings.json` spell, so a
         // reader arriving from either finds the row they read about.
-        assert!(keybinding_matches_query("ScmSync", "scmsync"));
+        assert!(keybinding_matches_query("ToggleComposer", "togglecomposer"));
 
         // An empty query matches no row, or clearing the box would filter the
         // page down to nothing rather than back to every row. (The count above
@@ -3407,13 +3304,10 @@ mod tests {
         let cases: Vec<(&str, SettingsSection)> = vec![
             ("opacity", Appearance),
             ("blur", Appearance),
-            ("completion", Terminal),
-            ("ctrl-r", Terminal),
             ("grouping", General),
             ("threshold", General),
             ("report mouse", KeyboardMouse),
             ("nushell", Terminal),
-            ("open files with", Terminal),
             ("bell", Terminal),
             ("known_hosts", Ssh),
             ("claude", Agents),
@@ -3470,10 +3364,7 @@ mod tests {
             "Restore last layout",
             "Terminal bell",
             "Report mouse to apps",
-            "Open files with",
             "Auto grouping",
-            "Tab completion",
-            "Command history search",
             "Dim inactive panes",
             "Show title bar buttons on hover",
             "Option (⌥) acts as Meta",
@@ -3794,14 +3685,14 @@ mod gpui_tests {
         crate::core::config::pin_test_config_dir();
         cx.executor().allow_parking();
         cx.update(|cx| {
-            gpui_component::init(cx);
+            gpui::component::init(cx);
             cx.set_global(Config::default());
             crate::ui::keymap::init(cx);
         });
         let window = cx.add_window(|window, cx| {
             let app =
                 cx.new(|cx| Tty7App::with_session(None, Some(Session::default()), window, cx));
-            gpui_component::Root::new(app, window, cx)
+            gpui::component::Root::new(app, window, cx)
         });
         cx.background_executor.run_until_parked();
         let app = window
@@ -3819,7 +3710,7 @@ mod gpui_tests {
     #[gpui::test]
     fn agent_list_scroll_hands_off_only_when_event_starts_at_edge(cx: &mut TestAppContext) {
         use crate::core::agent_hooks::{HookAgent, HooksState};
-        use gpui::{ScrollDelta, ScrollWheelEvent, point};
+        use gpui::{ScrollDelta, ScrollEvent, point};
 
         let (app, mut vcx) = harness(cx);
         app.update_in(&mut vcx, |app, window, cx| {
@@ -3860,11 +3751,12 @@ mod gpui_tests {
         let wheel = |vcx: &mut VisualTestContext, delta| {
             let bounds = inner.bounds().intersect(&outer.bounds());
             vcx.simulate_mouse_move(bounds.center(), None, Default::default());
-            vcx.simulate_event(ScrollWheelEvent {
+            vcx.simulate_event(ScrollEvent {
                 position: bounds.center(),
                 delta,
                 modifiers: Default::default(),
                 touch_phase: Default::default(),
+                source: Default::default(),
             });
             vcx.run_until_parked();
         };
@@ -3920,7 +3812,7 @@ mod gpui_tests {
     /// event that starts at its edge moves the page.
     #[gpui::test]
     fn ssh_host_list_scroll_stays_inside_the_list(cx: &mut TestAppContext) {
-        use gpui::{ScrollDelta, ScrollWheelEvent, point};
+        use gpui::{ScrollDelta, ScrollEvent, point};
 
         let (app, mut vcx) = harness(cx);
         let (inner, outer) = app.update_in(&mut vcx, |app, window, cx| {
@@ -3945,11 +3837,12 @@ mod gpui_tests {
         let wheel = |vcx: &mut VisualTestContext, dy| {
             let bounds = inner.bounds().intersect(&outer.bounds());
             vcx.simulate_mouse_move(bounds.center(), None, Default::default());
-            vcx.simulate_event(ScrollWheelEvent {
+            vcx.simulate_event(ScrollEvent {
                 position: bounds.center(),
                 delta: ScrollDelta::Pixels(point(px(0.), dy)),
                 modifiers: Default::default(),
                 touch_phase: Default::default(),
+                source: Default::default(),
             });
             vcx.run_until_parked();
         };
@@ -4079,7 +3972,9 @@ mod gpui_tests {
         });
         vcx.run_until_parked();
         assert!(vcx.has_pending_prompt());
-        vcx.simulate_prompt_answer(crate::ui::i18n::t(crate::ui::i18n::L10nKey::EditorDiscard));
+        vcx.simulate_prompt_answer(crate::ui::i18n::t(
+            crate::ui::i18n::L10nKey::SettingsDiscard,
+        ));
         vcx.run_until_parked();
         assert!(!vcx.has_pending_prompt());
         app.update_in(&mut vcx, |app, _, cx| {
@@ -4370,43 +4265,5 @@ mod gpui_tests {
         vcx.run_until_parked();
         let modifier = vcx.update(|_, cx| cx.global::<Config>().mouse_zoom_modifier);
         assert_eq!(modifier, MouseZoomModifier::Platform, "and the pick sticks");
-    }
-
-    /// The Input page paints with the prompt editor off — that is the state
-    /// where two of its rows are greyed out and their switches disabled — and
-    /// the cascade only *disables* those two. It must not rewrite what they
-    /// hold, or turning the editor back on would hand the user a completion
-    /// menu they had switched off.
-    #[gpui::test]
-    fn the_prompt_editor_greys_its_dependants_without_rewriting_them(cx: &mut TestAppContext) {
-        crate::core::config::pin_test_config_dir();
-        let (app, mut vcx) = harness(cx);
-        app.update_in(&mut vcx, |app, window, cx| {
-            app.open_settings_section(SettingsSection::Terminal, window, cx);
-            app.set_history_search(false, cx);
-            app.set_prompt_editor(false, cx);
-        });
-        vcx.simulate_resize(size(px(1100.), px(800.)));
-        vcx.run_until_parked();
-
-        let (prompt_editor, tab_completion, history_search) = vcx.update(|_, cx| {
-            let cfg = cx.global::<Config>();
-            (cfg.prompt_editor, cfg.tab_completion, cfg.history_search)
-        });
-        assert!(!prompt_editor, "the switch stuck");
-        assert!(
-            tab_completion,
-            "a greyed-out row keeps its value for when the editor comes back"
-        );
-        assert!(!history_search, "and one the user had turned off stays off");
-
-        app.update_in(&mut vcx, |app, _, cx| app.set_prompt_editor(true, cx));
-        vcx.run_until_parked();
-        let (prompt_editor, tab_completion) = vcx.update(|_, cx| {
-            let cfg = cx.global::<Config>();
-            (cfg.prompt_editor, cfg.tab_completion)
-        });
-        assert!(prompt_editor);
-        assert!(tab_completion, "the completion menu comes back with it");
     }
 }

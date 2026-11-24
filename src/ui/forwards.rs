@@ -1,7 +1,7 @@
+use gpui::component::button::{Button, ButtonVariants as _};
+use gpui::component::input::Input;
+use gpui::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, h_flex, v_flex};
 use gpui::{AnyElement, Context, Div, Entity, FontWeight, Stateful, div, prelude::*, px, rems};
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::Input;
-use gpui_component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _, h_flex, v_flex};
 
 use crate::core::ssh_profile::ForwardRule;
 use crate::daemon::protocol::{ForwardStatus, ManagedForward, SshForwardKind, SshForwardRule};
@@ -232,7 +232,7 @@ impl Tty7App {
                     .truncate()
                     .text_color(danger)
                     .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
+                        gpui::component::tooltip::Tooltip::new(full.clone()).build(window, cx)
                     })
                     .child(reason)
             }))
@@ -327,7 +327,7 @@ impl Tty7App {
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.edit_managed_forward(forward_for_edit.clone(), window, cx)
             }))
-            .child(crate::ui::right_panel::git_badge(
+            .child(crate::ui::right_panel::status_badge(
                 letter,
                 if errored { theme.danger } else { muted },
                 mono,
@@ -382,7 +382,7 @@ impl Tty7App {
                     .flex_shrink_0()
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(tip).build(window, cx)
+                        gpui::component::tooltip::Tooltip::new(tip).build(window, cx)
                     })
                     .child(
                         crate::ui::settings::kit::switch((
@@ -457,8 +457,8 @@ impl Tty7App {
         let needs_target = kind != SshForwardKind::Dynamic;
 
         let pair = |label: &'static str,
-                    host: &Entity<gpui_component::input::InputState>,
-                    port: &Entity<gpui_component::input::InputState>| {
+                    host: &Entity<gpui::component::input::InputState>,
+                    port: &Entity<gpui::component::input::InputState>| {
             h_flex()
                 .items_center()
                 .gap(px(4.))
@@ -481,8 +481,8 @@ impl Tty7App {
             .pt(px(6.))
             .pb(px(2.))
             .gap(px(5.))
-            // Escape backs out of the form, the way it backs out of the sftp
-            // edit box and every sheet the app puts up. Return is answered by
+            // Escape backs out of the form, the way it backs out of every sheet
+            // the app puts up. Return is answered by
             // the boxes themselves — see `arm_managed_forward_form` — because
             // an Input takes Return before it can bubble to here.
             .on_key_down(

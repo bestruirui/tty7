@@ -194,7 +194,6 @@ impl Tty7App {
                 cx,
             ),
             self.render_tabs_group(cx),
-            self.render_editor_group(cx),
             self.settings_group(
                 Some(t(L10nKey::SettingsNotifications)),
                 None,
@@ -908,19 +907,11 @@ impl Tty7App {
         let scroll_mult = cfg.mouse_scroll_multiplier;
         let smooth_scroll = cfg.smooth_scroll;
         let bell = cfg.bell;
-        let link_file_open = cfg.file_open_mode();
         // A bucket highlights only on an exact match; any other value gets a
         // "Custom (N)" cell so the highlight never claims a number the config
         // does not have (#550).
         let (scrollback_sel, scrollback_custom) =
             preset_choice(&SCROLLBACK_BUCKETS, cfg.scrollback_limit, group_thousands);
-        let Some(link_file_command_input) = self
-            .active_settings()
-            .map(|s| s.link_file_command_input.clone())
-        else {
-            return div().into_any_element();
-        };
-
         let link_switch = self.settings_switch("term-link-url", link_url, cx, |this, on, _, cx| {
             this.set_link_url(on, cx)
         });
@@ -930,50 +921,6 @@ impl Tty7App {
             cx,
             |this, on, _, cx| this.set_ssh_loopback_forward(on, cx),
         );
-        let link_file_open_radio = self.settings_choice(
-            "term-link-file-open",
-            &[
-                t(L10nKey::SettingsOpenFilesInternal),
-                t(L10nKey::SettingsOpenFilesSystem),
-                t(L10nKey::SettingsOpenFilesCommand),
-            ],
-            match link_file_open {
-                LinkFileOpen::Internal => 0,
-                LinkFileOpen::System => 1,
-                LinkFileOpen::Command => 2,
-            },
-            cx,
-            |this, ix, _w, cx| {
-                let mode = match ix {
-                    0 => LinkFileOpen::Internal,
-                    1 => LinkFileOpen::System,
-                    _ => LinkFileOpen::Command,
-                };
-                this.set_link_file_open(mode, cx);
-            },
-        );
-        // Only shown under `Command`: an empty box next to two working modes
-        // reads as "this is what file links do".
-        let link_file_command_row = (link_file_open == LinkFileOpen::Command).then(|| {
-            let control = self
-                .settings_text_input(&link_file_command_input, PATH_FIELD_W, false, cx)
-                .into_any_element();
-            self.settings_row(
-                t(L10nKey::SettingsOpenFilesCommand),
-                t_fmt(
-                    L10nKey::SettingsOpenFilesWithDesc,
-                    &[
-                        ("modifier", LINK_MODIFIER_LABEL),
-                        ("path", "{path}"),
-                        ("line", "{line}"),
-                        ("column", "{column}"),
-                    ],
-                ),
-                control,
-                cx,
-            )
-            .into_any_element()
-        });
         let scrollback = self.settings_choice_valued(
             "term-scrollback",
             &SCROLLBACK_LABELS,
@@ -1043,7 +990,6 @@ impl Tty7App {
 
         Self::settings_page([
             self.render_shell_group(cx),
-            self.render_prompt_group(cx),
             self.settings_group(
                 Some(t(L10nKey::SettingsScrolling)),
                 None,
@@ -1104,94 +1050,10 @@ impl Tty7App {
                         cx,
                     )
                     .into_any_element(),
-                    self.settings_row(
-                        t(L10nKey::OpenFilesWith),
-                        t_fmt(
-                            L10nKey::SettingsOpenFilesModeDesc,
-                            &[("modifier", LINK_MODIFIER_LABEL)],
-                        ),
-                        link_file_open_radio,
-                        cx,
-                    )
-                    .into_any_element(),
-                ]
-                .into_iter()
-                .chain(link_file_command_row),
+                ],
                 cx,
             ),
         ])
-    }
-
-    fn render_prompt_group(&self, cx: &mut Context<Self>) -> AnyElement {
-        let cfg = cx.global::<Config>();
-        let prompt_editor = cfg.prompt_editor;
-        let tab_completion = cfg.tab_completion;
-        let history_search = cfg.history_search;
-        let per_pane_history = cfg.per_pane_history;
-        // Tab completion and history search are menus tty7 opens *inside* its
-        // own prompt editor. With the editor off both keys belong to the
-        // shell, so the switches grey out and say why; their stored values
-        // are untouched and come back with it.
-        let gated = |desc: L10nKey| match prompt_editor {
-            true => t(desc).to_string(),
-            false => format!("{} {}", t(desc), t(L10nKey::SettingsNeedsPromptEditor)),
-        };
-        let editor = self.settings_switch(
-            "term-prompt-editor",
-            prompt_editor,
-            cx,
-            |this, on, _, cx| this.set_prompt_editor(on, cx),
-        );
-        let completion = kit::switch("term-tab-completion")
-            .checked(tab_completion)
-            .disabled(!prompt_editor)
-            .on_click(cx.listener(|this, on: &bool, _w, cx| this.set_tab_completion(*on, cx)))
-            .into_any_element();
-        let history = kit::switch("term-history-search")
-            .checked(history_search)
-            .disabled(!prompt_editor)
-            .on_click(cx.listener(|this, on: &bool, _w, cx| this.set_history_search(*on, cx)))
-            .into_any_element();
-        let per_pane = self.settings_switch(
-            "term-per-pane-history",
-            per_pane_history,
-            cx,
-            |this, on, _, cx| this.set_per_pane_history(on, cx),
-        );
-        self.settings_group(
-            Some(t(L10nKey::SettingsPrompt)),
-            Some(t(L10nKey::SettingsPromptIntro).to_string()),
-            [
-                self.settings_row(
-                    t(L10nKey::SettingsPromptEditor),
-                    t(L10nKey::SettingsPromptEditorDesc),
-                    editor,
-                    cx,
-                ),
-                self.settings_row_gated_when(
-                    t(L10nKey::SettingsTabCompletion),
-                    gated(L10nKey::SettingsTabCompletionDesc),
-                    completion,
-                    !prompt_editor,
-                    cx,
-                ),
-                self.settings_row_gated_when(
-                    t(L10nKey::SettingsHistorySearch),
-                    gated(L10nKey::SettingsHistorySearchDesc),
-                    history,
-                    !prompt_editor,
-                    cx,
-                ),
-                self.settings_row(
-                    t(L10nKey::SettingsPerPaneHistory),
-                    t(L10nKey::SettingsPerPaneHistoryDescription),
-                    per_pane,
-                    cx,
-                ),
-            ]
-            .map(IntoElement::into_any_element),
-            cx,
-        )
     }
 
     pub(crate) fn render_settings_input(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1219,6 +1081,24 @@ impl Tty7App {
             mouse_reporting,
             cx,
             |this, on, _, cx| this.set_mouse_reporting(on, cx),
+        );
+        let right_click = self.settings_choice(
+            "term-mouse-right-click",
+            &[
+                t(L10nKey::SettingsMouseRightClickMenu),
+                t(L10nKey::SettingsMouseRightClickCopyPaste),
+            ],
+            usize::from(cx.global::<Config>().mouse_right_click == MouseRightClick::CopyPaste),
+            cx,
+            |this, ix, _, cx| {
+                this.update_config(cx, |cfg| {
+                    cfg.mouse_right_click = if ix == 0 {
+                        MouseRightClick::Menu
+                    } else {
+                        MouseRightClick::CopyPaste
+                    };
+                });
+            },
         );
         let smart =
             self.settings_switch("term-smart-select", smart_select, cx, |this, on, _, cx| {
@@ -1373,6 +1253,12 @@ impl Tty7App {
                         t(L10nKey::SettingsReportMouseToApps),
                         t(L10nKey::SettingsReportMouseToAppsDesc),
                         report,
+                        cx,
+                    ),
+                    self.settings_row(
+                        t(L10nKey::SettingsMouseRightClick),
+                        t(L10nKey::SettingsMouseRightClickDesc),
+                        right_click,
                         cx,
                     ),
                     self.settings_row(
@@ -1711,9 +1597,9 @@ impl Tty7App {
                 .child(t(L10nKey::SettingsAboutDesc1))
                 .child(
                     Link::new("about-github")
-                        .href("https://github.com/l0ng-ai/tty7")
+                        .href("https://github.com/bestruirui/tty7")
                         .text_color(tk.k6)
-                        .child("github.com/l0ng-ai/tty7"),
+                        .child("github.com/bestruirui/tty7"),
                 )
                 .into_any_element(),
         );
@@ -1795,38 +1681,65 @@ impl Tty7App {
             ),
             None => t(L10nKey::SettingsServerDesc).to_string(),
         };
-        self.settings_group(
-            Some(t(L10nKey::SettingsUpdates)),
-            None,
-            [
+        let mut rows = vec![
+            self.settings_row(
+                t(L10nKey::SettingsAutoDownload),
+                t(L10nKey::SettingsAutoDownloadDesc),
+                auto,
+                cx,
+            )
+            .into_any_element(),
+            self.settings_row(
+                t(L10nKey::SettingsCheckUpdatesOnLaunch),
+                t(L10nKey::SettingsCheckUpdatesDesc),
+                check,
+                cx,
+            )
+            .into_any_element(),
+            self.settings_row(
+                t(L10nKey::SettingsUpdateChannel),
+                t(L10nKey::SettingsUpdateChannelDesc),
+                channel,
+                cx,
+            )
+            .into_any_element(),
+            self.settings_row(
+                t(L10nKey::SettingsAppHttpProxy),
+                t(L10nKey::SettingsAppHttpProxyDesc),
+                http_proxy,
+                cx,
+            )
+            .into_any_element(),
+            self.settings_row(t(L10nKey::SettingsServer), server_desc, restart, cx)
+                .into_any_element(),
+        ];
+        if let Some(remote) = crate::core::session::WorkspaceStore::remote_ref(cx, self.workspace)
+            .filter(|remote| remote.target.hosts_our_server())
+        {
+            let label = crate::ui::remote_connect::route_label(cx, &remote);
+            rows.push(
                 self.settings_row(
-                    t(L10nKey::SettingsAutoDownload),
-                    t(L10nKey::SettingsAutoDownloadDesc),
-                    auto,
+                    t_fmt(L10nKey::CmdUpdateRemoteServer, &[("machine", &label)]),
+                    t(L10nKey::CmdUpdateRemoteServerSubtitle),
+                    self.settings_button(
+                        "update-remote-server",
+                        t(L10nKey::SettingsUpdate),
+                        cx,
+                        move |this, window, cx| {
+                            this.confirm_update_remote_server(
+                                remote.target.clone(),
+                                label.clone(),
+                                window,
+                                cx,
+                            )
+                        },
+                    )
+                    .into_any_element(),
                     cx,
-                ),
-                self.settings_row(
-                    t(L10nKey::SettingsCheckUpdatesOnLaunch),
-                    t(L10nKey::SettingsCheckUpdatesDesc),
-                    check,
-                    cx,
-                ),
-                self.settings_row(
-                    t(L10nKey::SettingsUpdateChannel),
-                    t(L10nKey::SettingsUpdateChannelDesc),
-                    channel,
-                    cx,
-                ),
-                self.settings_row(
-                    t(L10nKey::SettingsAppHttpProxy),
-                    t(L10nKey::SettingsAppHttpProxyDesc),
-                    http_proxy,
-                    cx,
-                ),
-                self.settings_row(t(L10nKey::SettingsServer), server_desc, restart, cx),
-            ]
-            .map(IntoElement::into_any_element),
-            cx,
-        )
+                )
+                .into_any_element(),
+            );
+        }
+        self.settings_group(Some(t(L10nKey::SettingsUpdates)), None, rows, cx)
     }
 }

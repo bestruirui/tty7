@@ -18,11 +18,11 @@
 //! Escape the way the native dialogs did, which the call sites were written
 //! against.
 
+use gpui::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui::{
     App, Context, EventEmitter, FocusHandle, Focusable, PromptButton, PromptHandle, PromptLevel,
     PromptResponse, RenderablePromptHandle, Window, div, prelude::*, px, rems,
 };
-use gpui_component::{ActiveTheme as _, h_flex, v_flex};
 
 use crate::ui::dialog::{self, Tone};
 use crate::ui::right_panel::{TAB_TEXT, TEXT};

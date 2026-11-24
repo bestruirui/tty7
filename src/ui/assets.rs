@@ -4,34 +4,23 @@ use gpui::{AssetSource, Result, SharedString};
 
 pub struct Assets;
 
-const STOCK_PREFIX: &str = "stock/";
-
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        if let Some(downstream) = path.strip_prefix(STOCK_PREFIX) {
-            return gpui_component_assets::Assets.load(downstream);
-        }
         if let Some(bytes) = agent_icon(path) {
             return Ok(Some(Cow::Borrowed(bytes)));
         }
-        gpui_component_assets::Assets.load(path)
+        gpui::assets::Assets.load(path)
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-        gpui_component_assets::Assets.list(path)
+        gpui::assets::Assets.list(path)
     }
 }
 
 fn agent_icon(path: &str) -> Option<&'static [u8]> {
     let bytes: &'static [u8] = match path {
         "icons/terminal.svg" => include_bytes!("../../assets/icons/terminal.svg"),
-        "icons/git-branch.svg" => include_bytes!("../../assets/icons/git-branch.svg"),
         "icons/pin.svg" => include_bytes!("../../assets/icons/pin.svg"),
-        // Deliberately not `refresh.svg`: the panel header already carries a
-        // refresh tile, and the same glyph meaning two different things one row
-        // apart reads as a bug.
-        "icons/git-sync.svg" => include_bytes!("../../assets/icons/git-sync.svg"),
-        "icons/git-commit.svg" => include_bytes!("../../assets/icons/git-commit.svg"),
         "icons/panel-left.svg" => include_bytes!("../../assets/icons/panel-left.svg"),
         "icons/panel-right.svg" => include_bytes!("../../assets/icons/panel-right.svg"),
         "icons/panel-left-collapsed.svg" => {
@@ -42,23 +31,18 @@ fn agent_icon(path: &str) -> Option<&'static [u8]> {
         }
         "icons/plus.svg" => include_bytes!("../../assets/icons/plus.svg"),
         "icons/ellipsis.svg" => include_bytes!("../../assets/icons/ellipsis.svg"),
-        "icons/folder-closed.svg" => include_bytes!("../../assets/icons/folder-closed.svg"),
         "icons/folder-open.svg" => include_bytes!("../../assets/icons/folder-open.svg"),
         "icons/info.svg" => include_bytes!("../../assets/icons/info.svg"),
         "icons/eye.svg" => include_bytes!("../../assets/icons/eye.svg"),
         "icons/search.svg" => include_bytes!("../../assets/icons/search.svg"),
-        "icons/github.svg" => include_bytes!("../../assets/icons/github.svg"),
         "icons/copy.svg" => include_bytes!("../../assets/icons/copy.svg"),
-        "icons/folder.svg" => include_bytes!("../../assets/icons/folder.svg"),
         "icons/file.svg" => include_bytes!("../../assets/icons/file.svg"),
         "icons/image.svg" => include_bytes!("../../assets/icons/image.svg"),
-        "icons/circle-info.svg" => include_bytes!("../../assets/icons/circle-info.svg"),
         "icons/machine-local.svg" => include_bytes!("../../assets/icons/machine-local.svg"),
         "icons/machine-remote.svg" => include_bytes!("../../assets/icons/machine-remote.svg"),
         "icons/refresh.svg" => include_bytes!("../../assets/icons/refresh.svg"),
         "icons/power.svg" => include_bytes!("../../assets/icons/power.svg"),
-        "icons/list-tree.svg" => include_bytes!("../../assets/icons/list-tree.svg"),
-        "icons/list-flat.svg" => include_bytes!("../../assets/icons/list-flat.svg"),
+        "icons/setting.svg" => include_bytes!("../../assets/icons/setting.svg"),
         "icons/settings/about.svg" => include_bytes!("../../assets/icons/settings/about.svg"),
         "icons/settings/appearance.svg" => {
             include_bytes!("../../assets/icons/settings/appearance.svg")
@@ -113,31 +97,6 @@ fn agent_icon(path: &str) -> Option<&'static [u8]> {
         "icons/agents/codebuddy.svg" => {
             include_bytes!("../../assets/icons/agents/codebuddy.svg")
         }
-        // The GitHub tab's state glyphs: one shape per state, not one colour.
-        "icons/github/issue-open.svg" => include_bytes!("../../assets/icons/github/issue-open.svg"),
-        "icons/github/issue-closed.svg" => {
-            include_bytes!("../../assets/icons/github/issue-closed.svg")
-        }
-        "icons/github/issue-not-planned.svg" => {
-            include_bytes!("../../assets/icons/github/issue-not-planned.svg")
-        }
-        "icons/github/pr-open.svg" => include_bytes!("../../assets/icons/github/pr-open.svg"),
-        "icons/github/pr-closed.svg" => include_bytes!("../../assets/icons/github/pr-closed.svg"),
-        "icons/github/pr-merged.svg" => include_bytes!("../../assets/icons/github/pr-merged.svg"),
-        "icons/github/pr-draft.svg" => include_bytes!("../../assets/icons/github/pr-draft.svg"),
-        // …and its checks': passed, failed, running, skipped.
-        "icons/github/check-passed.svg" => {
-            include_bytes!("../../assets/icons/github/check-passed.svg")
-        }
-        "icons/github/check-failed.svg" => {
-            include_bytes!("../../assets/icons/github/check-failed.svg")
-        }
-        "icons/github/check-pending.svg" => {
-            include_bytes!("../../assets/icons/github/check-pending.svg")
-        }
-        "icons/github/check-skipped.svg" => {
-            include_bytes!("../../assets/icons/github/check-skipped.svg")
-        }
         _ => return None,
     };
     Some(bytes)
@@ -148,24 +107,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stock_prefix_bypasses_the_overrides() {
-        for name in ["search", "ellipsis"] {
-            let overridden = Assets
-                .load(&format!("icons/{name}.svg"))
-                .unwrap()
-                .expect("tty7 override present");
-            let stock = Assets
-                .load(&format!("{STOCK_PREFIX}icons/{name}.svg"))
-                .unwrap()
-                .expect("downstream glyph present");
-            assert_ne!(
-                overridden, stock,
-                "`{name}` should resolve to different art with and without `{STOCK_PREFIX}`"
-            );
-        }
-    }
-
-    #[test]
     fn every_agent_icon_resolves() {
         for agent in crate::core::cli_agent::CLIAgent::ALL {
             let path = agent.icon_path();
@@ -173,24 +114,6 @@ mod tests {
                 Assets.load(path).unwrap().is_some(),
                 "{} points at {path}, which nothing serves",
                 agent.display_name()
-            );
-        }
-    }
-
-    #[test]
-    fn every_git_icon_resolves() {
-        // An SVG on disk that nobody added to the match above silently renders
-        // as nothing, which is exactly the kind of miss no one notices.
-        for path in [
-            "icons/git-branch.svg",
-            "icons/git-sync.svg",
-            "icons/git-commit.svg",
-            "icons/list-tree.svg",
-            "icons/list-flat.svg",
-        ] {
-            assert!(
-                Assets.load(path).unwrap().is_some(),
-                "{path} is not registered in `agent_icon`"
             );
         }
     }
@@ -320,14 +243,6 @@ mod tests {
             (grid - grid.round()).abs() < 0.01,
             "plus.svg's cap tip lands at {tip} CSS px, which is not even a half \
              pixel"
-        );
-    }
-
-    #[test]
-    fn stock_prefix_works_for_unoverridden_glyphs() {
-        assert_eq!(
-            Assets.load("stock/icons/check.svg").unwrap(),
-            Assets.load("icons/check.svg").unwrap(),
         );
     }
 }
