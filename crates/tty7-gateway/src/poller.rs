@@ -17,6 +17,7 @@ pub type Fetched<T> = Result<T, String>;
 pub struct Poller<T> {
     shared: Arc<(Mutex<HashMap<String, Slot<T>>>, Condvar)>,
     next_generation: std::sync::atomic::AtomicU64,
+    workers: Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
 
 struct Slot<T> {
@@ -33,11 +34,22 @@ impl<T> Default for Poller<T> {
         Poller {
             shared: Arc::new((Mutex::new(HashMap::new()), Condvar::new())),
             next_generation: std::sync::atomic::AtomicU64::new(0),
+            workers: Mutex::new(Vec::new()),
         }
     }
 }
 
 impl<T: Clone + Send + 'static> Poller<T> {
+    pub(crate) fn finish(&self) {
+        let workers = std::mem::take(
+            &mut *self.workers.lock().unwrap_or_else(|e| e.into_inner()),
+        );
+        for worker in workers {
+            let _ = worker.join();
+        }
+        self.shared.0.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
     /// Starts a read of every machine in `reads` that has none running, waits
     /// up to `budget` for the running ones, and returns the latest result per
     /// machine: `None` for one never read yet. Machines not in `reads` are
@@ -83,9 +95,16 @@ impl<T: Clone + Send + 'static> Poller<T> {
                         }
                         done.notify_all();
                     });
-                if spawned.is_err() {
-                    slot.in_flight = false;
-                    slot.last = Some(Err("could not start a thread to read it".into()));
+                match spawned {
+                    Ok(worker) => {
+                        let mut workers = self.workers.lock().unwrap_or_else(|e| e.into_inner());
+                        workers.retain(|worker| !worker.is_finished());
+                        workers.push(worker);
+                    }
+                    Err(_) => {
+                        slot.in_flight = false;
+                        slot.last = Some(Err("could not start a thread to read it".into()));
+                    }
                 }
             }
         }

@@ -26,43 +26,55 @@ enum PaneEndpoint {
 #[derive(Clone, Debug, Default)]
 pub struct PaneClient {
     endpoint: PaneEndpoint,
+    request_timeout: Option<Duration>,
 }
 
 impl PaneClient {
     pub fn local() -> PaneClient {
         PaneClient {
             endpoint: PaneEndpoint::Local,
+            request_timeout: None,
         }
     }
 
     pub fn at(endpoint: impl Into<PathBuf>) -> PaneClient {
         PaneClient {
             endpoint: PaneEndpoint::At(endpoint.into()),
+            request_timeout: None,
         }
     }
 
     pub fn routed(target: RouteTarget) -> PaneClient {
         PaneClient {
             endpoint: PaneEndpoint::Routed(target),
+            request_timeout: None,
         }
     }
 
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
     fn open(&self) -> io::Result<transport::Stream> {
-        match &self.endpoint {
-            PaneEndpoint::Local => transport::connect(),
-            PaneEndpoint::At(path) => transport::connect_endpoint_at(path),
-            PaneEndpoint::Routed(target) => {
-                let mut stream = transport::connect()?;
-                let header = RouteHeader {
-                    target: target.clone(),
-                    server_command: None,
-                    channel: RouteChannel::Pane,
-                    action: RouteAction::Forward,
-                };
-                negotiate(&mut stream, &header)?;
-                Ok(stream)
-            }
+        let mut stream = match &self.endpoint {
+            PaneEndpoint::Local | PaneEndpoint::Routed(_) => transport::connect()?,
+            PaneEndpoint::At(path) => transport::connect_endpoint_at(path)?,
+        };
+        if let Some(timeout) = self.request_timeout {
+            stream.set_read_timeout(Some(timeout))?;
+            stream.set_write_timeout(Some(timeout))?;
         }
+        if let PaneEndpoint::Routed(target) = &self.endpoint {
+            let header = RouteHeader {
+                target: target.clone(),
+                server_command: None,
+                channel: RouteChannel::Pane,
+                action: RouteAction::Forward,
+            };
+            negotiate(&mut stream, &header)?;
+        }
+        Ok(stream)
     }
 
     pub fn list(&self) -> io::Result<Vec<PaneInfo>> {
@@ -110,7 +122,7 @@ impl PaneClient {
         }
         .encode(&mut stream)?;
         stream.flush()?;
-        let _ = stream.set_read_timeout(Some(OPEN_REPLY_WAIT));
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(60)));
         match DaemonMsg::read(&mut stream) {
             Err(_) => Ok(()),
             Ok(DaemonMsg::Error(message)) => Err(io::Error::other(message)),

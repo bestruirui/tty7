@@ -32,6 +32,12 @@ $Name  = "tty7-$Version-windows-$Arch"
 $Zip   = "dist/$Name.zip"
 $Setup = "dist/$Name-setup.exe"
 $Stage = "dist/$Name"
+$ServerTarget = switch ($Arch) {
+    'x86_64' { 'x86_64-pc-windows-msvc' }
+    'arm64' { 'aarch64-pc-windows-msvc' }
+    default { throw "unsupported server architecture: $Arch" }
+}
+$BuiltServer = "target/$ServerTarget/release/tty7-server.exe"
 
 $failures = New-Object System.Collections.Generic.List[string]
 function Fail([string]$message) { $failures.Add($message) }
@@ -47,6 +53,23 @@ function Assert-BinaryVersion([string]$path, [string]$label) {
     $actual = Get-ProductVersion $path
     if ($actual -ne $Version) {
         Fail "$label reports ProductVersion '$actual', expected '$Version'"
+    }
+}
+
+# The server has no PE version resource, and an ARM64 payload cannot be run on
+# this x64 builder. Compare it with the matching server built by this job.
+function Assert-ServerPayload([string]$directory, [string]$label) {
+    $server = Join-Path $directory 'tty7-server.exe'
+    if (-not (Test-Path -LiteralPath $server -PathType Leaf)) {
+        Fail "$label is missing tty7-server.exe"
+        return
+    }
+    if (-not (Test-Path -LiteralPath $BuiltServer -PathType Leaf)) {
+        Fail "the matching server build is missing: $BuiltServer"
+        return
+    }
+    if ((Get-FileHash -LiteralPath $server).Hash -ne (Get-FileHash -LiteralPath $BuiltServer).Hash) {
+        Fail "$label does not carry the server from this build"
     }
 }
 
@@ -115,7 +138,7 @@ if (-not (Test-Path -LiteralPath $Zip)) {
 
     # `validate_portable_relative_path` allows only these top-level names.
     $managed = @(
-        'tty7-app.exe', 'tty7.exe', 'tty7-updater.exe', '.tty7-portable',
+        'tty7-app.exe', 'tty7-server.exe', 'tty7.exe', 'tty7-updater.exe', '.tty7-portable',
         'server', 'LICENSE.txt', 'README.md',
         'conpty.dll', 'OpenConsole.exe', 'LICENSE-ConPTY.txt'
     )
@@ -140,9 +163,9 @@ if (-not (Test-Path -LiteralPath $Zip)) {
         [System.IO.Compression.ZipFile]::ExtractToDirectory(
             (Resolve-Path $Zip).Path, $unzipped)
 
-        # `verify_portable_payload`: every required member, then the marker
-        # content, then the complete version of both executables.
-        foreach ($required in @('tty7-app.exe', 'tty7.exe', 'tty7-updater.exe',
+        # Mirror `verify_portable_payload`'s members, marker and app/helper
+        # versions; the server's build hash replaces its runtime version probe.
+        foreach ($required in @('tty7-app.exe', 'tty7-server.exe', 'tty7.exe', 'tty7-updater.exe',
                                 '.tty7-portable', 'LICENSE.txt', 'README.md')) {
             if (-not (Test-Path -LiteralPath (Join-Path $unzipped $required) -PathType Leaf)) {
                 Fail "the portable archive is missing the required file $required"
@@ -160,6 +183,7 @@ if (-not (Test-Path -LiteralPath $Zip)) {
 
         Assert-BinaryVersion (Join-Path $unzipped 'tty7-app.exe') 'the portable tty7-app.exe'
         Assert-BinaryVersion (Join-Path $unzipped 'tty7-updater.exe') 'the portable tty7-updater.exe'
+        Assert-ServerPayload $unzipped 'the portable archive'
         Assert-ConptyPair $unzipped 'the portable archive'
         Assert-NoVcRuntime $unzipped 'the portable archive'
     } finally {
@@ -183,8 +207,12 @@ if (-not (Test-Path -LiteralPath $Stage -PathType Container)) {
     if (-not (Test-Path -LiteralPath (Join-Path $Stage 'tty7-updater.exe') -PathType Leaf)) {
         Fail "the Inno payload is missing tty7-updater.exe"
     }
+    if (-not (Test-Path -LiteralPath (Join-Path $Stage 'tty7-server.exe') -PathType Leaf)) {
+        Fail "the Inno payload is missing tty7-server.exe"
+    }
     Assert-BinaryVersion (Join-Path $Stage 'tty7-app.exe') 'the installed tty7-app.exe'
     Assert-BinaryVersion (Join-Path $Stage 'tty7-updater.exe') 'the installed tty7-updater.exe'
+    Assert-ServerPayload $Stage 'the Inno payload'
     Assert-ConptyPair $Stage 'the Inno payload'
     Assert-NoVcRuntime $Stage 'the Inno payload'
 }

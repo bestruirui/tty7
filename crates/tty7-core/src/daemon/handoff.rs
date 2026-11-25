@@ -181,6 +181,13 @@ pub fn take_over(
 
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("--daemon");
+    #[cfg(target_os = "linux")]
+    if let Err(e) = crate::daemon::spawn::appimage_environment(&mut cmd, exe) {
+        for fd in &kept {
+            let _ = close_on_exec_again(*fd);
+        }
+        return e;
+    }
     if let Some(dir) = crate::core::config::config_dir_path() {
         cmd.arg("--config-dir").arg(dir);
     }

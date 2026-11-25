@@ -27,7 +27,7 @@ const DIR_MODE: u32 = 0o700;
 
 const REMOTE_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const REMOTE_POLL_INTERVAL: Duration = Duration::from_millis(400);
-const REMOTE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+const REMOTE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecOutput {

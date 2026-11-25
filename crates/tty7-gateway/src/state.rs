@@ -1,5 +1,5 @@
-//! What the gateway keeps on disk: its own key, the phones it trusts, and the
-//! one pairing offer that may be open at a time.
+//! What the gateway keeps on disk: its access switch, its own key, the phones
+//! it trusts, and the one pairing offer that may be open at a time.
 //!
 //! Everything lives in `<config dir>/mobile/`, a directory only this user can
 //! read. The key is the gateway's identity — a phone that paired with it will
@@ -10,6 +10,7 @@
 use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, Result, anyhow};
@@ -26,6 +27,12 @@ const PORT_FILE: &str = "port";
 #[derive(Debug, Clone)]
 pub struct State {
     dir: PathBuf,
+    mutations: Arc<Mutex<()>>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct Config {
+    enabled: bool,
 }
 
 /// Proof that this process is the one `serve` for its state directory. The
@@ -36,14 +43,7 @@ pub struct ServeLock {
     _file: fs::File,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Device {
-    /// The phone's iroh endpoint id — its public key, which iroh has already
-    /// proven the peer holds by the time a stream reaches us.
-    pub id: String,
-    pub name: String,
-    pub paired_at: u64,
-}
+pub use tty7_core::daemon::mobile::Device;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Pairing {
@@ -88,7 +88,15 @@ impl State {
     pub fn open(dir: PathBuf) -> Result<State> {
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         restrict(&dir, 0o700)?;
-        Ok(State { dir })
+        Ok(State { dir, mutations: Arc::new(Mutex::new(())) })
+    }
+
+    pub(crate) fn enabled(&self) -> Result<bool> {
+        Ok(read_json::<Config>(&self.dir.join("config.json"))?.unwrap_or_default().enabled)
+    }
+
+    pub(crate) fn set_enabled(&self, enabled: bool) -> Result<()> {
+        write_json(&self.dir.join("config.json"), &Config { enabled })
     }
 
     pub fn secret_key(&self) -> Result<SecretKey> {
@@ -161,6 +169,7 @@ impl State {
     }
 
     pub fn add_device(&self, id: &str, name: &str) -> Result<()> {
+        let _mutation = self.mutations.lock().unwrap_or_else(|e| e.into_inner());
         let mut devices = self.devices()?;
         devices.retain(|d| d.id != id);
         devices.push(Device {
@@ -174,6 +183,7 @@ impl State {
     /// Removes every device whose id starts with `needle` or whose name is
     /// `needle`, returning what went.
     pub fn revoke(&self, needle: &str) -> Result<Vec<Device>> {
+        let _mutation = self.mutations.lock().unwrap_or_else(|e| e.into_inner());
         let (gone, kept): (Vec<Device>, Vec<Device>) = self
             .devices()?
             .into_iter()
@@ -186,6 +196,7 @@ impl State {
 
     /// Opens a pairing offer, replacing any earlier one, and returns its secret.
     pub fn open_pairing(&self, ttl_secs: u64) -> Result<String> {
+        let _mutation = self.mutations.lock().unwrap_or_else(|e| e.into_inner());
         let mut raw = [0u8; 16];
         getrandom::fill(&mut raw).map_err(|e| anyhow!("no randomness for a secret: {e}"))?;
         let secret: String = raw.iter().map(|b| format!("{b:02x}")).collect();
@@ -216,13 +227,15 @@ impl State {
 
     /// Withdraws the offer with `secret`, if it is still the open one. An
     /// offer someone else has opened since is theirs, and stays.
-    pub fn close_pairing(&self, secret: &str) {
+    pub fn close_pairing(&self, secret: &str) -> Result<()> {
+        let _mutation = self.mutations.lock().unwrap_or_else(|e| e.into_inner());
         let path = self.dir.join(PAIRING_FILE);
-        if let Ok(Some(p)) = read_json::<Pairing>(&path)
+        if let Some(p) = read_json::<Pairing>(&path)?
             && constant_time_eq(&p.secret, secret)
         {
-            let _ = fs::remove_file(&path);
+            fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
         }
+        Ok(())
     }
 
     /// Spends the pairing offer if `secret` matches it and it has not expired.
@@ -230,11 +243,14 @@ impl State {
     /// Any attempt at all closes the offer, right or wrong: a code is shown on
     /// one screen for one phone, so a second try means someone is guessing.
     pub fn take_pairing(&self, secret: &str) -> bool {
+        let _mutation = self.mutations.lock().unwrap_or_else(|e| e.into_inner());
         let path = self.dir.join(PAIRING_FILE);
         let Ok(Some(pairing)) = read_json::<Pairing>(&path) else {
             return false;
         };
-        let _ = fs::remove_file(&path);
+        if fs::remove_file(&path).is_err() {
+            return false;
+        }
         pairing.expires_at >= unix_now() && constant_time_eq(&pairing.secret, secret)
     }
 
@@ -387,7 +403,7 @@ mod tests {
         let (_tmp, state) = state();
         let secret = state.open_pairing(60).unwrap();
         assert!(state.pairing_is_open(&secret));
-        state.close_pairing(&secret);
+        state.close_pairing(&secret).unwrap();
         assert!(!state.pairing_is_open(&secret));
         assert!(!state.take_pairing(&secret));
     }
@@ -398,7 +414,7 @@ mod tests {
         let old = state.open_pairing(60).unwrap();
         let new = state.open_pairing(60).unwrap();
         assert!(!state.pairing_is_open(&old), "replaced");
-        state.close_pairing(&old);
+        state.close_pairing(&old).unwrap();
         assert!(state.pairing_is_open(&new));
     }
 

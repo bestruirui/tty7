@@ -280,10 +280,8 @@ where
         sink: Arc::clone(&sink),
         inflight: Mutex::new(HashMap::new()),
         pool: Pool::new(),
-        machine: services.machine.clone(),
+        services,
         machine_origin: machine_sub.as_ref().map(machine::Subscription::id),
-        attachments: Arc::clone(&services.attachments),
-        panes: services.panes.clone(),
         id: NEXT_CONN.fetch_add(1, Ordering::Relaxed),
         holder: Holder {
             token: hello.client_token.clone(),
@@ -296,7 +294,7 @@ where
     if hello.gui {
         // GUI registration starts only after a successful version handshake,
         // so an incompatible app can never be reported as a live receiver.
-        services
+        conn.services
             .attachments
             .register_gui(conn.id, Arc::clone(&sink));
     }
@@ -312,7 +310,7 @@ where
     conn.pool.close();
     conn.release_all_workspaces();
     // Every exit path converges here, including EOF and protocol errors.
-    conn.attachments.unregister_gui(conn.id);
+    conn.services.attachments.unregister_gui(conn.id);
     drop(machine_sub);
     sink.retire();
     let _ = shutdown.shutdown_link();
@@ -421,20 +419,20 @@ fn attach_workspace(
     workspace: &str,
     dedicated: bool,
 ) -> io::Result<Option<String>> {
-    if conn.machine.is_none() {
+    if conn.services.machine.is_none() {
         return Err(io::Error::other(
             "this server does not serve the machine tree",
         ));
     }
     let tree_id: Option<crate::core::session::WorkspaceId> = workspace.parse().ok();
     let (displaced, evicted) = {
-        let _handover = conn.attachments.handover();
+        let _handover = conn.services.attachments.handover();
         let attachment = Attachment::new(conn.holder.token.clone(), conn.holder.hostname.clone());
-        let displaced = match (&conn.machine, tree_id) {
+        let displaced = match (&conn.services.machine, tree_id) {
             (Some(machine), Some(id)) => machine.attach(id, attachment),
             _ => None,
         };
-        let evicted = conn
+        let evicted = conn.services
             .attachments
             .claim(workspace, conn.id, &conn.holder, dedicated);
         (displaced, evicted)
@@ -464,14 +462,14 @@ fn attach_workspace(
 }
 
 fn detach_workspace(conn: &Arc<Conn>, workspace: &str) -> io::Result<bool> {
-    if conn.machine.is_none() {
+    if conn.services.machine.is_none() {
         return Err(io::Error::other(
             "this server does not serve the machine tree",
         ));
     }
-    let _handover = conn.attachments.handover();
-    let released = conn.attachments.release(workspace, conn.id);
-    let forgotten = match (&conn.machine, workspace.parse().ok()) {
+    let _handover = conn.services.attachments.handover();
+    let released = conn.services.attachments.release(workspace, conn.id);
+    let forgotten = match (&conn.services.machine, workspace.parse().ok()) {
         (Some(machine), Some(id)) => machine.detach(id, &conn.holder.token),
         _ => false,
     };
@@ -541,9 +539,9 @@ fn run_job(conn: &Arc<Conn>, req_id: u64, req: ControlRequest, blob: Vec<u8>) {
     conn.finish(req_id, reply, out_blob, wants_blob);
 }
 
-fn machine_with_live_panes(conn: &Conn) -> io::Result<machine::Machine> {
-    let mut machine = conn.machine()?.machine();
-    let Some(panes) = conn.panes.as_ref().map(|p| p.panes()) else {
+fn machine_with_live_panes(services: &Services) -> io::Result<machine::Machine> {
+    let mut machine = services.machine()?.machine();
+    let Some(panes) = services.panes.as_ref().map(|p| p.panes()) else {
         return Ok(machine);
     };
     for info in panes {
@@ -620,20 +618,26 @@ fn run_request(
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::GuiOpen { path, workspace } => (
-            ReplyOk::Bool(conn.attachments.open_gui(path, workspace)),
+            ReplyOk::Bool(conn.services.attachments.open_gui(path, workspace)),
             Vec::new(),
         ),
 
-        ControlRequest::MachineGet => (
-            ReplyOk::MachineTree(Box::new(machine_with_live_panes(conn)?)),
+        req @ (ControlRequest::MachineGet
+            | ControlRequest::TabCreate { .. }
+            | ControlRequest::TabClose { .. }
+            | ControlRequest::TabCloseRemembered { .. }
+            | ControlRequest::PaneClose { .. }
+            | ControlRequest::AgentStates
+            | ControlRequest::Routes) => (
+            conn.services.request(req, conn.machine_origin)?,
             Vec::new(),
         ),
         ControlRequest::WorkspaceTree { workspace } => (
-            ReplyOk::WorkspaceTree(Box::new(conn.machine()?.workspace(workspace)?)),
+            ReplyOk::WorkspaceTree(Box::new(conn.services.machine()?.workspace(workspace)?)),
             Vec::new(),
         ),
         ControlRequest::WorkspaceCreate { name, workspace } => (
-            ReplyOk::WorkspaceTree(Box::new(conn.machine()?.workspace_create(
+            ReplyOk::WorkspaceTree(Box::new(conn.services.machine()?.workspace_create(
                 workspace,
                 name,
                 conn.machine_origin,
@@ -641,90 +645,38 @@ fn run_request(
             Vec::new(),
         ),
         ControlRequest::WorkspaceRename { workspace, name } => {
-            conn.machine()?
+            conn.services.machine()?
                 .workspace_rename(workspace, name, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::WorkspaceRemove { workspace } => {
-            let store = conn.machine()?;
+            let store = conn.services.machine()?;
             let panes = {
-                let _handover = conn.attachments.handover();
+                let _handover = conn.services.attachments.handover();
                 let panes = store.workspace_delete(workspace, conn.machine_origin)?;
-                conn.attachments.forget_workspace(&workspace.to_string());
+                conn.services.attachments.forget_workspace(&workspace.to_string());
                 panes
             };
             (ReplyOk::Panes(panes), Vec::new())
         }
         ControlRequest::WorkspaceTouch { workspace } => {
-            conn.machine()?
+            conn.services.machine()?
                 .workspace_touch(workspace, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::WorkspaceSetActiveTab { workspace, tab } => {
-            conn.machine()?
+            conn.services.machine()?
                 .workspace_set_active_tab(workspace, tab, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
-        ControlRequest::TabCreate {
-            workspace,
-            at,
-            pane,
-            tab,
-        } => (
-            ReplyOk::TabTree(Box::new(conn.machine()?.tab_create(
-                workspace,
-                at.map(clamp_usize),
-                pane,
-                tab,
-                conn.machine_origin,
-            )?)),
-            Vec::new(),
-        ),
-        ControlRequest::TabClose { workspace, tab } => (
-            ReplyOk::Panes(
-                conn.machine()?
-                    .tab_close(workspace, tab, conn.machine_origin)?,
-            ),
-            Vec::new(),
-        ),
-        ControlRequest::TabCloseRemembered {
-            workspace,
-            tab,
-            panes,
-        } => {
-            let Some(directory) = conn.panes.as_ref() else {
-                return Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "this peer serves no panes, so it cannot keep a closed tab to reopen",
-                ));
-            };
-            let closed = conn.machine()?.tab_close_remembered(
-                workspace,
-                tab,
-                &panes,
-                crate::core::machine::unix_now(),
-                conn.machine_origin,
-            )?;
-            // After the entry is in the tree, for the reason a sleeping tab's
-            // panes are stopped after its mark: a pane stopped first reads, to
-            // anyone looking in between, as one that died with nothing to
-            // restore it for — and the sweeps take its screen.
-            for pane in &closed.stopped {
-                directory.hibernate_pane(*pane);
-            }
-            for pane in closed.strays.iter().chain(&closed.dropped) {
-                directory.close_pane(*pane);
-            }
-            (ReplyOk::Panes(closed.stopped), Vec::new())
-        }
         ControlRequest::TabReopen { workspace, tab } => {
-            let (reopened, dropped) = conn.machine()?.tab_reopen(
+            let (reopened, dropped) = conn.services.machine()?.tab_reopen(
                 workspace,
                 tab,
                 crate::core::machine::unix_now(),
                 conn.machine_origin,
             )?;
-            if let Some(directory) = conn.panes.as_ref() {
+            if let Some(directory) = conn.services.panes.as_ref() {
                 for pane in &dropped {
                     directory.close_pane(*pane);
                 }
@@ -736,12 +688,12 @@ fn run_request(
             tab,
             name,
         } => {
-            conn.machine()?
+            conn.services.machine()?
                 .tab_rename(workspace, tab, name, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::TabMove { workspace, tab, to } => {
-            conn.machine()?
+            conn.services.machine()?
                 .tab_move(workspace, tab, clamp_usize(to), conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
@@ -751,12 +703,12 @@ fn run_request(
             group,
             last_auto,
         } => {
-            conn.machine()?
+            conn.services.machine()?
                 .tab_set_group(workspace, tab, group, last_auto, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::WorkspaceSetGroups { workspace, groups } => {
-            conn.machine()?
+            conn.services.machine()?
                 .workspace_set_groups(workspace, groups, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
@@ -765,13 +717,13 @@ fn run_request(
             tab,
             hibernated,
         } => {
-            let Some(directory) = conn.panes.as_ref() else {
+            let Some(directory) = conn.services.panes.as_ref() else {
                 return Err(io::Error::new(
                     io::ErrorKind::Unsupported,
                     "this peer serves no panes, so it cannot put a tab to sleep",
                 ));
             };
-            let panes = conn.machine()?.tab_set_hibernated(
+            let panes = conn.services.machine()?.tab_set_hibernated(
                 workspace,
                 tab,
                 hibernated,
@@ -796,7 +748,7 @@ fn run_request(
             new,
             first,
         } => {
-            conn.machine()?.pane_split(
+            conn.services.machine()?.pane_split(
                 workspace,
                 pane,
                 axis,
@@ -807,20 +759,13 @@ fn run_request(
             )?;
             (ReplyOk::Unit, Vec::new())
         }
-        ControlRequest::PaneClose { workspace, pane } => (
-            ReplyOk::Panes(
-                conn.machine()?
-                    .pane_close(workspace, pane, conn.machine_origin)?,
-            ),
-            Vec::new(),
-        ),
         ControlRequest::PaneSetRatio {
             workspace,
             tab,
             path,
             ratio,
         } => {
-            conn.machine()?
+            conn.services.machine()?
                 .pane_set_ratio(workspace, tab, path, ratio, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
@@ -831,7 +776,7 @@ fn run_request(
             axis,
             first,
         } => {
-            conn.machine()?
+            conn.services.machine()?
                 .pane_move(workspace, pane, to, axis, first, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
@@ -840,38 +785,25 @@ fn run_request(
             old,
             new,
         } => {
-            conn.machine()?
+            conn.services.machine()?
                 .pane_replace(workspace, old, new, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
 
-        ControlRequest::AgentStates => (
-            ReplyOk::AgentStates(
-                conn.panes
-                    .as_ref()
-                    .map(|p| p.agent_states())
-                    .unwrap_or_default(),
-            ),
-            Vec::new(),
-        ),
         ControlRequest::PaneProcs { pane_id } => (
             ReplyOk::PaneProcs(
-                conn.panes
+                conn.services.panes
                     .as_ref()
                     .map(|p| p.pane_procs(pane_id))
                     .unwrap_or_default(),
             ),
             Vec::new(),
         ),
-        ControlRequest::Routes => (
-            ReplyOk::Routes(crate::daemon::ssh::SshManager::global().routes()),
-            Vec::new(),
-        ),
         ControlRequest::Status => (
             ReplyOk::Status(ServerStatus {
                 pid: std::process::id(),
                 uptime_secs: server_started().elapsed().as_secs(),
-                panes: conn.panes.as_ref().map(|p| p.pane_count()).unwrap_or(0),
+                panes: conn.services.panes.as_ref().map(|p| p.pane_count()).unwrap_or(0),
                 control_version: CONTROL_VERSION,
                 protocol_version: crate::daemon::protocol::PROTOCOL_VERSION,
                 build: env!("CARGO_PKG_VERSION").to_string(),
@@ -879,7 +811,99 @@ fn run_request(
             }),
             Vec::new(),
         ),
+        req @ (ControlRequest::MobileStatus
+            | ControlRequest::MobileSetEnabled { .. }
+            | ControlRequest::MobilePair
+            | ControlRequest::MobileCancelPair { .. }
+            | ControlRequest::MobilePairing { .. }
+            | ControlRequest::MobileRevoke { .. }) => (
+            crate::daemon::mobile::request(req)?,
+            Vec::new(),
+        ),
     })
+}
+
+impl Services {
+    fn machine(&self) -> io::Result<&Arc<MachineStore>> {
+        self.machine
+            .as_ref()
+            .ok_or_else(|| io::Error::other("this server does not serve the machine tree"))
+    }
+
+    pub fn request(
+        &self,
+        req: ControlRequest,
+        origin: Option<machine::SubscriberId>,
+    ) -> io::Result<ReplyOk> {
+        Ok(match req {
+            ControlRequest::MachineGet => {
+                ReplyOk::MachineTree(Box::new(machine_with_live_panes(self)?))
+            },
+            ControlRequest::TabCreate {
+                workspace,
+                at,
+                pane,
+                tab,
+            } => {
+                ReplyOk::TabTree(Box::new(self.machine()?.tab_create(
+                    workspace,
+                    at.map(clamp_usize),
+                    pane,
+                    tab,
+                    origin,
+                )?))
+            },
+            ControlRequest::TabClose { workspace, tab } => ReplyOk::Panes(
+                self.machine()?.tab_close(workspace, tab, origin)?,
+            ),
+            ControlRequest::TabCloseRemembered {
+                workspace,
+                tab,
+                panes,
+            } => {
+                let Some(directory) = self.panes.as_ref() else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Unsupported,
+                        "this peer serves no panes, so it cannot keep a closed tab to reopen",
+                    ));
+                };
+                let closed = self.machine()?.tab_close_remembered(
+                    workspace,
+                    tab,
+                    &panes,
+                    crate::core::machine::unix_now(),
+                    origin,
+                )?;
+                // After the entry is in the tree, for the reason a sleeping tab's
+                // panes are stopped after its mark: a pane stopped first reads, to
+                // anyone looking in between, as one that died with nothing to
+                // restore it for — and the sweeps take its screen.
+                for pane in &closed.stopped {
+                    directory.hibernate_pane(*pane);
+                }
+                for pane in closed.strays.iter().chain(&closed.dropped) {
+                    directory.close_pane(*pane);
+                }
+                ReplyOk::Panes(closed.stopped)
+            }
+            ControlRequest::PaneClose { workspace, pane } => ReplyOk::Panes(
+                self.machine()?.pane_close(workspace, pane, origin)?,
+            ),
+            ControlRequest::AgentStates => ReplyOk::AgentStates(
+                self.panes
+                    .as_ref()
+                    .map(|p| p.agent_states())
+                    .unwrap_or_default(),
+            ),
+            ControlRequest::Routes => {
+                ReplyOk::Routes(crate::daemon::ssh::SshManager::global().routes())
+            },
+            _ => return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "this operation requires a control connection",
+            )),
+        })
+    }
 }
 
 #[cfg(unix)]
@@ -910,26 +934,18 @@ struct Conn {
     sink: Arc<Sink>,
     inflight: Mutex<HashMap<u64, bool>>,
     pool: Pool,
-    machine: Option<Arc<MachineStore>>,
+    services: Services,
     machine_origin: Option<machine::SubscriberId>,
-    attachments: Arc<AttachRegistry>,
-    panes: Option<Arc<dyn PaneDirectory>>,
     id: u64,
     holder: Holder,
 }
 
 impl Conn {
-    fn machine(&self) -> io::Result<&Arc<MachineStore>> {
-        self.machine
-            .as_ref()
-            .ok_or_else(|| io::Error::other("this server does not serve the machine tree"))
-    }
-
     fn release_all_workspaces(&self) {
-        let _handover = self.attachments.handover();
-        let released = self.attachments.release_conn(self.id);
+        let _handover = self.services.attachments.handover();
+        let released = self.services.attachments.release_conn(self.id);
         for workspace in released {
-            if let (Some(machine), Some(id)) = (&self.machine, workspace.parse().ok()) {
+            if let (Some(machine), Some(id)) = (&self.services.machine, workspace.parse().ok()) {
                 machine.detach(id, &self.holder.token);
             }
         }
@@ -1278,24 +1294,6 @@ mod sock {
         p.as_os_str().as_bytes().len() <= MAX_SOCKET_PATH_BYTES
     }
 
-    /// Whether a control server is answering at `path` right now.
-    ///
-    /// This, and not the errno a failed bind carries, is the question that
-    /// matters to a daemon whose listener would not open. [`bind_control_socket`]
-    /// does clear the ordinary leftover — it connects first and unlinks a socket
-    /// nobody is behind — but what it cannot clear it hands back as `AddrInUse`
-    /// all the same: a directory standing where the socket goes, a file owned by
-    /// another user. Those look exactly like a live server in the error, and
-    /// nothing is listening behind either. Only a connect that completes tells
-    /// them apart.
-    pub(crate) fn control_socket_answers(path: &Path) -> bool {
-        UnixStream::connect(path).is_ok()
-    }
-
-    pub fn control_endpoint_answers() -> bool {
-        control_socket_path().is_ok_and(|path| control_socket_answers(&path))
-    }
-
     pub fn bind_control_socket(path: &Path) -> io::Result<UnixListener> {
         let parent = path.parent().unwrap_or(Path::new("."));
         if !parent.exists() {
@@ -1387,7 +1385,7 @@ mod sock {
 pub(crate) use sock::socket_path_in;
 #[cfg(unix)]
 pub use sock::{
-    bind_control_socket, control_endpoint_answers, control_socket_path, serve_listener,
+    bind_control_socket, control_socket_path, serve_listener,
     serve_listener_with, spawn_control_listener, spawn_control_listener_with,
 };
 
@@ -1442,19 +1440,6 @@ mod wsock {
         spawn_control_listener_with(host, Services::none())
     }
 
-    /// See the unix arm: a bind that failed only means "serve panes only" when
-    /// something else is actually answering there.
-    ///
-    /// Gated on the pidfile the same way [`spawn_control_listener_with`] gates
-    /// its own probe, and for the same reason: a TCP connect that completes
-    /// proves only that *something* accepted on the recorded port, and a port a
-    /// dead daemon wrote can have been recycled by a stranger since. When the
-    /// daemon that wrote it is gone, nothing behind that port is ours.
-    pub fn control_endpoint_answers() -> bool {
-        !crate::daemon::spawn::recorded_daemon_is_dead()
-            && transport::connect_endpoint(CONTROL_PORT_FILE).is_ok()
-    }
-
     pub fn serve_listener_with(
         listener: TcpListener,
         token: transport::Token,
@@ -1498,7 +1483,7 @@ mod wsock {
 
 #[cfg(windows)]
 pub use wsock::{
-    CONTROL_PORT_FILE, connect_control, control_endpoint_answers, control_endpoint_path,
+    CONTROL_PORT_FILE, connect_control, control_endpoint_path,
     remove_control_endpoint, spawn_control_listener, spawn_control_listener_with,
 };
 
@@ -2762,16 +2747,9 @@ mod tests {
         assert!(err.to_string().contains(CONTROL_SOCK_ENV), "{err}");
     }
 
-    /// `run_daemon` keeps serving panes past a control listener it could not
-    /// open only when something else is answering there, and the errno cannot
-    /// make that call. `bind_control_socket` clears the leftovers it can, but a
-    /// path it cannot clear still comes back `AddrInUse` — indistinguishable
-    /// from a live server, with nothing listening behind it. A daemon that read
-    /// the error as "someone else is serving" stayed alive holding the
-    /// single-server lock, answering nothing, forever.
     #[cfg(unix)]
     #[test]
-    fn only_a_connect_tells_a_live_server_from_a_blocked_path() {
+    fn binding_refuses_live_and_blocked_paths() {
         let dir = tempfile::TempDir::new().unwrap();
 
         let sock = dir.path().join("s.sock");
@@ -2786,10 +2764,6 @@ mod tests {
             io::ErrorKind::AddrInUse,
             "a live server is in use"
         );
-        assert!(
-            sock::control_socket_answers(&sock),
-            "and it answers, which is what makes it live"
-        );
 
         // A directory where the socket goes. Nothing is listening, the connect
         // fails so there is nothing to unlink, and `bind` refuses it in the
@@ -2800,10 +2774,6 @@ mod tests {
             bind_control_socket(&blocked).unwrap_err().kind(),
             io::ErrorKind::AddrInUse,
             "same error, and no server anywhere near it"
-        );
-        assert!(
-            !sock::control_socket_answers(&blocked),
-            "which is the difference the daemon has to act on"
         );
     }
 

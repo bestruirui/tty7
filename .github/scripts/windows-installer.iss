@@ -50,8 +50,8 @@ OutputBaseFilename={#OutputName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-; The persistent daemon (tty7-app.exe --daemon) is a detached background process
-; that outlives the GUI and holds the running image of tty7-app.exe, so Windows
+; The persistent daemon (tty7-server.exe --daemon) is a detached background process
+; that outlives the GUI and holds the running image of tty7-server.exe, so Windows
 ; locks the file and an upgrade can't replace it. We stop it explicitly in
 ; PrepareToInstall below; keep the Restart Manager as a backstop but don't let
 ; it relaunch anything (the GUI respawns the daemon itself on next start).
@@ -86,6 +86,7 @@ Type: files; Name: "{app}\tty7.exe"
 
 [Files]
 Source: "{#StageDir}\tty7-app.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\tty7-server.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; The CLI. `core::cli_install` adds {app} to the user's PATH at first launch,
 ; so this is not registered as an [Env] change here — the portable zip has no
 ; installer to do it, and one code path serving both is one behaviour to debug.
@@ -98,7 +99,7 @@ Source: "{#StageDir}\.tty7-inno-install"; DestDir: "{app}"; Flags: ignoreversion
 ; Microsoft's redistributable ConPTY. It has to land in {app} rather than a
 ; subdirectory: `portable-pty` finds it through the DLL search path, which
 ; starts at the directory of the executable that loads it (the daemon is
-; {app}\tty7-app.exe). The two files are a matched pair — never update one
+; {app}\tty7-server.exe). The two files are a matched pair — never update one
 ; alone. See assets\windows\conpty\README.md.
 Source: "{#StageDir}\conpty.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\OpenConsole.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -143,7 +144,7 @@ Filename: "{app}\tty7-app.exe"; Parameters: "--register-explorer-menu"; Tasks: e
 Filename: "{app}\tty7-app.exe"; Description: "{cm:LaunchProgram,tty7}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; Stop the daemon before the uninstaller deletes tty7-app.exe — the running daemon
+; Stop the daemon before the uninstaller deletes tty7-server.exe — the running daemon
 ; is the locked image of that file, so removing it fails otherwise. Naming {app}
 ; widens the stop the same way PrepareToInstall's does: ConPTY hosts orphaned by
 ; a daemon that never got to shut down keep the installed images open, and their
@@ -153,7 +154,7 @@ Filename: "{app}\tty7-app.exe"; Description: "{cm:LaunchProgram,tty7}"; Flags: n
 ; binary is this version, which understands the flags; runhidden suppresses any
 ; flash and the call returns without opening a window. RunOnceId keys the entry
 ; so a repeated uninstall doesn't run it twice.
-Filename: "{app}\tty7-app.exe"; Parameters: "--stop-daemon --update-install-dir ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "StopDaemon"
+Filename: "{app}\tty7-server.exe"; Parameters: "--stop --update-install-dir ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "StopDaemon"
 ; Unconditional, and deliberately not gated on the task: an install that had the
 ; menu registered and was later upgraded without the box ticked still holds the
 ; keys, and verbs pointing at a deleted exe are worse than a no-op. Removing keys
@@ -161,11 +162,10 @@ Filename: "{app}\tty7-app.exe"; Parameters: "--stop-daemon --update-install-dir 
 Filename: "{app}\tty7-app.exe"; Parameters: "--unregister-explorer-menu"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterExplorerMenu"
 
 [Code]
-(* Gracefully stop the persistent daemon before we overwrite tty7-app.exe. We can't
-  run the *installed* binary here — on an upgrade from an older build it may not
-  understand --stop-daemon and would launch the GUI instead — so we extract the
-  *new* tty7-app.exe to {tmp} and run that. It connects to the running daemon, hangs
-  up every shell, waits for it to exit (releasing the file lock), then returns
+(* Gracefully stop the persistent daemon before we overwrite tty7-server.exe.
+  Extract the new server to {tmp}, since an installed build that runs its daemon
+  inside the GUI has no server executable to invoke. It connects to the running
+  daemon, hangs up every shell, waits for it to exit (releasing the file lock), then returns
   without opening a window. Naming {app} widens the stop into "make this directory
   replaceable": ConPTY hosts (OpenConsole.exe) orphaned by a daemon that never got
   to shut down keep the installed images open — invisible to the daemon stop, fatal
@@ -177,9 +177,9 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
-  ExtractTemporaryFile('tty7-app.exe');
-  Exec(ExpandConstant('{tmp}\tty7-app.exe'),
-       '--stop-daemon --update-install-dir "' + ExpandConstant('{app}') + '"', '',
+  ExtractTemporaryFile('tty7-server.exe');
+  Exec(ExpandConstant('{tmp}\tty7-server.exe'),
+       '--stop --update-install-dir "' + ExpandConstant('{app}') + '"', '',
        SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := '';
 end;

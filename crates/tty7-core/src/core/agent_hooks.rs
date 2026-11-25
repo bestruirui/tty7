@@ -882,14 +882,14 @@ pub struct HookTarget<'a> {
 
 impl<'a> HookTarget<'a> {
     pub fn local(host: &'a dyn Host) -> Option<HookTarget<'a>> {
-        Self::local_for_exe(host, std::env::current_exe().ok()?)
+        Self::local_for_exe(host, crate::daemon::spawn::server_executable().ok()?)
     }
 
     /// Build a local target for a known tty7 hook runner.
     ///
-    /// Most callers use [`Self::local`]. The standalone CLI is the exception:
-    /// it diagnoses hooks but never executes them, so it supplies the
-    /// `tty7-app` it would launch instead of comparing configs to `tty7`.
+    /// Most callers use [`Self::local`]. The standalone CLI diagnoses hooks
+    /// without running them, and supplies the server selected by its executable
+    /// override and search path instead of comparing configs to `tty7`.
     pub fn local_for_exe(host: &'a dyn Host, exe: PathBuf) -> Option<HookTarget<'a>> {
         Some(HookTarget {
             host,
@@ -3964,7 +3964,7 @@ mod tests {
 
         let local = local_host();
         let here = HookTarget::local(&*local).expect("home resolves in tests");
-        let exe = std::env::current_exe().unwrap();
+        let exe = crate::daemon::spawn::server_executable().unwrap();
         let command_exe = here
             .hook_command_exe()
             .unwrap_or_else(|| format!("\"{}\"", exe.display()));
@@ -4367,7 +4367,7 @@ mod tests {
 
     #[test]
     fn owned_file_contents_carry_marker_and_exe() {
-        let exe_raw = std::env::current_exe().unwrap().display().to_string();
+        let exe_raw = crate::daemon::spawn::server_executable().unwrap().display().to_string();
         let exe_json = serde_json::to_string(&exe_raw).unwrap();
         let exe = exe_json.trim_matches('"').to_string();
         let host = local_host();

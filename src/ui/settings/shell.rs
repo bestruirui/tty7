@@ -54,6 +54,38 @@ pub(crate) struct SearchOption {
 }
 
 impl Tty7App {
+    fn settings_entry_modified(&self, entry: &SearchEntry, cx: &App) -> bool {
+        if entry.title == L10nKey::SettingsMobileAccess
+            && let Some((enabled, _)) = self.active_settings().and_then(|s| s.mobile_status.as_ref())
+        {
+            return *enabled;
+        }
+        entry.modified(cx.global::<Config>())
+    }
+
+    /// Search results grouped by page, best match first within each.
+    fn search_result_order(
+        &self,
+        query: &str,
+        modified_only: bool,
+        cx: &App,
+    ) -> Vec<&'static SearchEntry> {
+        let mut matches: Vec<_> = settings_search_entries()
+            .iter()
+            .filter(|entry| {
+                entry_matches(entry, query)
+                    && (!modified_only || self.settings_entry_modified(entry, cx))
+            })
+            .collect();
+        matches.sort_by_key(|entry| {
+            (
+                SettingsSection::ALL.iter().position(|&s| s == entry.section).unwrap_or(0),
+                entry.rank(query),
+            )
+        });
+        matches
+    }
+
     // ── Popovers ─────────────────────────────────────────────────────────
 
     pub(crate) fn settings_menu_open(&self, id: &str) -> bool {
@@ -448,7 +480,7 @@ impl Tty7App {
         let entry = settings_search_entries()
             .iter()
             .find(|entry| t(entry.title) == label);
-        let modified = entry.is_some_and(|entry| entry.modified(cx.global::<Config>()));
+        let modified = entry.is_some_and(|entry| self.settings_entry_modified(entry, cx));
         let capture = self
             .active_settings()
             .is_some_and(|s| s.search_rows.borrow().is_some());
@@ -1139,11 +1171,10 @@ impl Tty7App {
         let section = s.section.navigation_section();
         let search = s.search.clone();
         let modified_only = s.modified_only;
-        let cfg = cx.global::<Config>();
         let modified_in = |target: SettingsSection| {
             settings_search_entries()
                 .iter()
-                .filter(|e| e.section == target && e.modified(cfg))
+                .filter(|e| e.section == target && self.settings_entry_modified(e, cx))
                 .count()
         };
         let counts: Vec<(SettingsSection, usize)> = SettingsSection::ALL
@@ -1335,7 +1366,7 @@ impl Tty7App {
             return;
         };
         let query = s.search.read(cx).value().trim().to_lowercase();
-        let entries = search_result_order(&query, s.modified_only, cx.global::<Config>());
+        let entries = self.search_result_order(&query, s.modified_only, cx);
         let actions = search_result_actions(&query, s.modified_only);
         let count = entries.len() + actions.len();
         if count > 0 {
@@ -1402,7 +1433,7 @@ impl Tty7App {
             if !settings_search_entries().iter().any(|entry| {
                 entry.section == section
                     && entry_matches(entry, &query)
-                    && (!modified_only || entry.modified(cx.global::<Config>()))
+                    && (!modified_only || self.settings_entry_modified(entry, cx))
             }) {
                 continue;
             }
@@ -1441,7 +1472,7 @@ impl Tty7App {
             .borrow_mut()
             .take()
             .unwrap_or_default();
-        let matches = search_result_order(&query, modified_only, cx.global::<Config>());
+        let matches = self.search_result_order(&query, modified_only, cx);
         let actions = search_result_actions(&query, modified_only);
 
         let mut groups: Vec<AnyElement> = Vec::new();
@@ -1629,29 +1660,6 @@ impl Tty7App {
                     )
             }))
     }
-}
-
-/// The search results in the order the page draws them: grouped by page in
-/// nav order, best match first within each.
-pub(crate) fn search_result_order<'a>(
-    query: &str,
-    modified_only: bool,
-    cfg: &Config,
-) -> Vec<&'a SearchEntry> {
-    let mut matches: Vec<&SearchEntry> = settings_search_entries()
-        .iter()
-        .filter(|entry| entry_matches(entry, query) && (!modified_only || entry.modified(cfg)))
-        .collect();
-    matches.sort_by_key(|entry| {
-        (
-            SettingsSection::ALL
-                .iter()
-                .position(|&s| s == entry.section)
-                .unwrap_or(0),
-            entry.rank(query),
-        )
-    });
-    matches
 }
 
 /// The shortcut actions a query names, after the settings it matched.

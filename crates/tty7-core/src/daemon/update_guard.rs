@@ -20,7 +20,7 @@
 //! Two kinds of holder:
 //! - the auto-updater (`tty7-updater.exe install`/`install-portable`) holds
 //!   for itself, from stopping the daemon until it relaunches the app;
-//! - the `--stop-daemon --update-install-dir` helper that Inno's
+//! - the `tty7-server --stop --update-install-dir` helper that Inno's
 //!   `PrepareToInstall`/`[UninstallRun]` runs holds for its *parent* — the
 //!   Setup or uninstaller that keeps replacing files long after the helper
 //!   returns. Nobody clears that one; it goes stale when Setup exits.

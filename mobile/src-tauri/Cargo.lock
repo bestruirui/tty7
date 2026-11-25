@@ -5840,7 +5840,7 @@ dependencies = [
 
 [[package]]
 name = "tty7-mobile-client"
-version = "26.10.0"
+version = "26.10.1"
 dependencies = [
  "anyhow",
  "iroh",
@@ -5852,7 +5852,7 @@ dependencies = [
 
 [[package]]
 name = "tty7-mobile-proto"
-version = "26.10.0"
+version = "26.10.1"
 dependencies = [
  "base64 0.22.1",
  "serde",

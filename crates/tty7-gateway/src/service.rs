@@ -1,13 +1,14 @@
 //! The gateway as a service a process can start and stop: the `tty7-gateway
-//! serve` command runs one until it is killed, and the desktop's daemon runs
-//! one for as long as mobile access is switched on.
+//! serve` command runs one until it is killed, and the server runs one for as
+//! long as mobile access is switched on.
 //!
-//! Whoever runs it, its state is the files in `<config dir>/mobile/`, so the
-//! GUI can make pairing codes and list phones without talking to it — and it
-//! reports how it is doing in `status.json` there for the GUI to show.
+//! The server owns the state in `<config dir>/mobile/` and handles the GUI's
+//! control requests. The standalone command also uses these files, including
+//! `status.json` for the gateway's current state.
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
+use std::io;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc as std_mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -18,11 +19,12 @@ use iroh::{Endpoint, SecretKey, Watcher as _};
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use tokio::sync::oneshot;
 use tty7_mobile_proto::{ALPN, MDNS_SERVICE, PairCode};
+use tty7_core::daemon::control::{ControlRequest, ReplyOk};
 
 use crate::daemon::Daemon;
 use crate::identity;
 use crate::route::{self, Route};
-use crate::serve::{self, Backend as _};
+use crate::serve::{self, Backend};
 use crate::state::{Reachable, State, Status, failed, running};
 
 /// How long a relay may stay out of reach before the gateway tries other ways
@@ -41,6 +43,115 @@ const PROBE_POLL: Duration = Duration::from_millis(250);
 pub struct Running {
     stop: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
+    status: Arc<Mutex<Status>>,
+}
+
+pub struct Manager {
+    state: State,
+    /// The saved switch, kept when the running service stops for a handoff.
+    enabled: bool,
+    backend: Arc<dyn Backend>,
+    running: Option<Running>,
+    error: Option<String>,
+}
+
+impl Manager {
+    pub fn new(backend: Arc<dyn Backend>) -> Result<Self> {
+        let state = State::open_default()?;
+        Ok(Self {
+            enabled: state.enabled()?,
+            state,
+            backend,
+            running: None,
+            error: None,
+        })
+    }
+
+    fn status(&self) -> Status {
+        if let Some(error) = &self.error {
+            return Status::Failed { error: error.clone() };
+        }
+        match self.running.as_ref() {
+            Some(running) if !running.thread.as_ref().is_some_and(JoinHandle::is_finished) => {
+                running.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
+            }
+            Some(running) => match running.status.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+                status @ Status::Failed { .. } => status,
+                _ => Status::Failed { error: "mobile gateway stopped unexpectedly".into() },
+            },
+            None => Status::Stopped,
+        }
+    }
+}
+
+impl tty7_core::daemon::mobile::Gateway for Manager {
+    fn refresh(&mut self) -> std::result::Result<(), String> {
+        if !self.enabled {
+            self.stop();
+            return Ok(());
+        }
+        if self.running.as_ref().is_some_and(|r| {
+            r.thread.as_ref().is_some_and(JoinHandle::is_finished)
+        }) {
+            self.running.take();
+        }
+        if self.running.is_none() {
+            match start_with(self.state.clone(), self.backend.clone()) {
+                Ok(started) => {
+                    self.running = Some(started);
+                    self.error = None;
+                }
+                Err(e) => {
+                    self.error = Some(format!("{e:#}"));
+                    return Err(format!("{e:#}"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn stop(&mut self) {
+        self.running.take();
+        self.error = None;
+    }
+
+    fn request(&mut self, request: ControlRequest) -> io::Result<ReplyOk> {
+        match request {
+            ControlRequest::MobileStatus | ControlRequest::MobileSetEnabled { .. } => {
+                if let ControlRequest::MobileSetEnabled { enabled } = request {
+                    self.state.set_enabled(enabled).map_err(io::Error::other)?;
+                    self.enabled = enabled;
+                    self.refresh().map_err(io::Error::other)?;
+                }
+                Ok(ReplyOk::MobileStatus {
+                    enabled: self.enabled,
+                    status: self.status(),
+                    devices: self.state.devices().map_err(io::Error::other)?,
+                })
+            }
+            ControlRequest::MobilePair => {
+                if !matches!(self.status(), Status::Running { .. }) {
+                    return Err(io::Error::new(io::ErrorKind::NotConnected, "mobile access is not running"));
+                }
+                let devices = self.state.devices().map_err(io::Error::other)?;
+                let offer = pair_code(&self.state, Duration::from_secs(600)).map_err(io::Error::other)?;
+                Ok(ReplyOk::MobilePair { code: offer.code, secret: offer.secret, devices })
+            }
+            ControlRequest::MobileCancelPair { secret } => {
+                self.state.close_pairing(&secret).map_err(io::Error::other)?;
+                Ok(ReplyOk::Unit)
+            }
+            ControlRequest::MobilePairing { secret } => Ok(ReplyOk::MobilePairing {
+                open: self.state.pairing_is_open(&secret),
+                has_open: self.state.has_open_pairing(),
+            }),
+            ControlRequest::MobileRevoke { id } => {
+                self.state.revoke(&id).map_err(io::Error::other)?;
+                Ok(ReplyOk::MobileDevices(self.state.devices().map_err(io::Error::other)?))
+            }
+            _ => Err(io::Error::new(io::ErrorKind::Unsupported, "not a mobile access request")),
+        }
+    }
 }
 
 impl Running {
@@ -70,8 +181,14 @@ impl Drop for Running {
 /// — or with why it could not: another gateway holds this config dir, or no
 /// socket could be bound.
 pub fn start(state: State) -> Result<Running> {
+    start_with(state, Arc::new(Daemon::default()))
+}
+
+fn start_with(state: State, backend: Arc<dyn Backend>) -> Result<Running> {
     let (ready_tx, ready_rx) = std_mpsc::channel::<Result<()>>();
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
+    let status = Arc::new(Mutex::new(Status::Stopped));
+    let thread_status = status.clone();
     let thread = std::thread::Builder::new()
         .name("mobile-gateway".into())
         .spawn(move || {
@@ -87,13 +204,16 @@ pub fn start(state: State) -> Result<Running> {
                     return;
                 }
             };
-            runtime.block_on(run(state, ready_tx, stop_rx));
+            runtime.block_on(run(state, backend.clone(), ready_tx, stop_rx, thread_status));
+            drop(runtime);
+            backend.shutdown();
         })
         .context("starting the gateway thread")?;
     match ready_rx.recv() {
         Ok(Ok(())) => Ok(Running {
             stop: Some(stop_tx),
             thread: Some(thread),
+            status,
         }),
         Ok(Err(e)) => {
             let _ = thread.join();
@@ -106,7 +226,13 @@ pub fn start(state: State) -> Result<Running> {
     }
 }
 
-async fn run(state: State, ready: std_mpsc::Sender<Result<()>>, mut stop: oneshot::Receiver<()>) {
+async fn run(
+    state: State,
+    backend: Arc<dyn Backend>,
+    ready: std_mpsc::Sender<Result<()>>,
+    mut stop: oneshot::Receiver<()>,
+    status: Arc<Mutex<Status>>,
+) {
     // Another gateway already serving this config dir owns `status.json`; one
     // that could not take the lock must not overwrite what it says.
     let lock = match state.lock_serve() {
@@ -135,20 +261,21 @@ async fn run(state: State, ready: std_mpsc::Sender<Result<()>>, mut stop: onesho
     };
     let id = endpoint.id().to_string();
     log::info!("mobile gateway listening as {id} (relay: {route})");
-    let _ = state.set_status(&running(&id));
+    let initial_status = running(&id);
+    *status.lock().unwrap_or_else(|e| e.into_inner()) = initial_status.clone();
+    let _ = state.set_status(&initial_status);
     let _ = ready.send(Ok(()));
 
-    let daemon = Arc::new(Daemon::default());
-    // Not fatal: tty7 may well be opened after the gateway, and phones are
-    // told the same thing until it is.
-    if let Err(e) = daemon.snapshot() {
-        log::warn!("{}", serve::server_down(&daemon.hostname(), &e));
+    // Not fatal: a standalone gateway may start before its server, and phones
+    // are told the same thing until that server is available.
+    if let Err(e) = backend.snapshot() {
+        log::warn!("{}", serve::server_down(&backend.hostname(), &e));
     }
 
     loop {
         let addrs = tokio::spawn(keep_reachable(endpoint.clone(), state.clone()));
         let switch = tokio::select! {
-            () = serve::run(endpoint.clone(), state.clone(), daemon.clone()) => None,
+            () = serve::run(endpoint.clone(), state.clone(), backend.clone()) => None,
             _ = &mut stop => None,
             better = better_route(&endpoint, &route) => Some(better),
         };
@@ -177,6 +304,7 @@ async fn run(state: State, ready: std_mpsc::Sender<Result<()>>, mut stop: onesho
             }
             Err(e) => {
                 log::warn!("mobile gateway: {e:#}");
+                *status.lock().unwrap_or_else(|e| e.into_inner()) = failed(&e);
                 let _ = state.set_status(&failed(&e));
                 drop(lock);
                 return;
@@ -184,6 +312,7 @@ async fn run(state: State, ready: std_mpsc::Sender<Result<()>>, mut stop: onesho
         }
     }
     endpoint.close().await;
+    *status.lock().unwrap_or_else(|e| e.into_inner()) = Status::Stopped;
     let _ = state.set_status(&Status::Stopped);
     drop(lock);
     log::info!("mobile gateway stopped");
@@ -349,9 +478,8 @@ async fn bind(key: SecretKey, port: Option<u16>, route: &Route) -> Result<Endpoi
     anyhow::bail!("could not start: {}", failures.join("; "))
 }
 
-/// Serves until this process's stdin closes — the way a daemon runs its
-/// gateway as a child: the pipe it holds closes when it ends, however it ends,
-/// and the gateway goes with it.
+/// Serves until this process's stdin closes. A caller holding the other end of
+/// the pipe controls the standalone gateway's lifetime.
 pub fn serve_until_stdin_closes(state: State) -> Result<()> {
     let running = start(state)?;
     let mut sink = [0u8; 256];

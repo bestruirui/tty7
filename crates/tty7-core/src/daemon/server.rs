@@ -9,7 +9,7 @@ use crate::daemon::protocol::{ClientMsg, DaemonMsg, DaemonVersion, LeaseRequest,
 use crate::daemon::ssh::SshConnection;
 use crate::daemon::transport::{self, Stream};
 
-struct Registry {
+pub struct Registry {
     panes: Mutex<HashMap<u64, Arc<DaemonPane>>>,
     next_id: AtomicU64,
 }
@@ -83,13 +83,109 @@ impl Registry {
         self.panes.lock().unwrap().values().cloned().collect()
     }
 
-    fn list(&self) -> Vec<crate::daemon::protocol::PaneInfo> {
+    pub fn list(&self) -> Vec<crate::daemon::protocol::PaneInfo> {
         self.panes
             .lock()
             .unwrap()
             .values()
             .map(|p| p.info())
             .collect()
+    }
+
+    pub fn observe(&self, pane_id: u64) -> std::io::Result<PaneObservation> {
+        let pane = self.get(pane_id).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, format!("no such pane {pane_id}"))
+        })?;
+        let (tx, rx) = mpsc::channel();
+        let gate = Arc::new(crate::daemon::pane::OutputGate::new());
+        let id = pane.observe(tx, gate.clone());
+        Ok(PaneObservation {
+            pane,
+            id,
+            gate,
+            rx: Mutex::new(rx),
+        })
+    }
+
+    pub fn send_input(&self, pane_id: u64, bytes: &[u8]) -> std::io::Result<()> {
+        let pane = self.get(pane_id).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, format!("no such pane {pane_id}"))
+        })?;
+        if !pane.alive() {
+            return Err(std::io::Error::other(format!("pane {pane_id} is not running")));
+        }
+        pane.write_input(bytes);
+        Ok(())
+    }
+
+    pub fn spawn(
+        self: &Arc<Self>,
+        cwd: Option<std::path::PathBuf>,
+        size: crate::daemon::protocol::WinSize,
+        shell: Option<crate::daemon::protocol::ShellSpec>,
+        owner: Option<String>,
+        workspace: Option<String>,
+        restore: Option<crate::daemon::protocol::RestoreFrom>,
+        allow_remote_clipboard_write: bool,
+    ) -> anyhow::Result<Arc<DaemonPane>> {
+        let id = self.alloc_id();
+        let predecessor = restore.as_ref().map(|r| r.pane_id);
+        let restore = restore.and_then(restored_screen);
+        log::info!(
+            "pane {id} spawn requested; restore_from={predecessor:?} screen_restored={}",
+            restore.is_some()
+        );
+        let pane = DaemonPane::spawn(
+            id,
+            cwd,
+            size,
+            shell,
+            owner,
+            workspace,
+            restore,
+            allow_remote_clipboard_write,
+            reaper(self.clone(), id),
+        )
+        .map_err(|e| {
+            log::error!("pane {id} spawn failed: {e}");
+            e
+        })?;
+        self.insert(pane.clone());
+        log::info!("pane {id} spawned");
+        Ok(pane)
+    }
+}
+
+pub struct PaneObservation {
+    pane: Arc<DaemonPane>,
+    id: u64,
+    gate: Arc<crate::daemon::pane::OutputGate>,
+    rx: Mutex<Receiver<DaemonMsg>>,
+}
+
+impl PaneObservation {
+    pub fn recv(&self, wait: std::time::Duration) -> std::io::Result<Option<DaemonMsg>> {
+        match self.rx.lock().unwrap().recv_timeout(wait) {
+            Ok(msg) => {
+                self.gate.sub(crate::daemon::pane::gated_len(&msg));
+                Ok(Some(msg))
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "pane observation ended",
+            )),
+        }
+    }
+
+    pub fn lease(&self, request: LeaseRequest) {
+        self.pane.observer_lease(self.id, request);
+    }
+}
+
+impl Drop for PaneObservation {
+    fn drop(&mut self) {
+        self.pane.unobserve(self.id);
     }
 }
 
@@ -333,7 +429,7 @@ fn restored_screen(
 /// A stored screen exists so a pane can survive a death nobody chose. A pane
 /// the user closed is not that; keeping its output on disk afterwards would
 /// only be a way for it to turn up in some later restore.
-fn kill_pane(registry: &Registry, pane_id: u64) {
+pub fn kill_pane(registry: &Registry, pane_id: u64) {
     if let Some(pane) = registry.remove(pane_id) {
         pane.kill();
     }
@@ -385,10 +481,16 @@ macro_rules! startup_note {
     }};
 }
 
-pub fn run_daemon() -> anyhow::Result<()> {
+pub type GatewayFactory = fn(
+    Arc<Registry>,
+    crate::host::server::Services,
+) -> Result<Box<dyn crate::daemon::mobile::Gateway>, String>;
+
+pub fn run_daemon(gateway: GatewayFactory) -> anyhow::Result<()> {
     #[cfg(unix)]
     raise_open_file_limit();
-    let result = run_daemon_inner();
+    let result = run_daemon_inner(gateway);
+    crate::daemon::mobile::stop_for_handoff();
     if let Err(e) = &result {
         log::error!("daemon exited with error: {e:#}");
     }
@@ -441,7 +543,7 @@ fn raise_open_file_limit() {
     }
 }
 
-fn run_daemon_inner() -> anyhow::Result<()> {
+fn run_daemon_inner(gateway: GatewayFactory) -> anyhow::Result<()> {
     // First, before a handoff is adopted: the re-exec keeps every inherited
     // descriptor open, and adopting one marks it close-on-exec again.
     #[cfg(target_os = "macos")]
@@ -454,7 +556,7 @@ fn run_daemon_inner() -> anyhow::Result<()> {
 
     #[cfg(unix)]
     if let Some(inheritance) = crate::daemon::handoff::requested() {
-        return run_adopting(inheritance);
+        return run_adopting(inheritance, gateway);
     }
 
     // Before either endpoint, and before the machine tree is opened. Whoever
@@ -482,36 +584,17 @@ fn run_daemon_inner() -> anyhow::Result<()> {
 
     let registry = Arc::new(Registry::new());
 
+    let mut services = control_services();
+    services.panes = Some(registry.clone());
     #[cfg(any(unix, windows))]
     {
-        let mut services = control_services();
-        services.panes = Some(registry.clone());
         match crate::host::server::spawn_control_listener_with(
             crate::host::local::LocalHost::shared(),
-            services,
+            services.clone(),
         ) {
             Ok(path) => startup_note!("tty7-server: control socket at {}", path.display()),
-            // Someone else already answers there. That is the ordinary local
-            // shape: the GUI hosts the control listener and this process was
-            // started only to own the panes. Carry on.
-            //
-            // Ask rather than read the errno. `bind_control_socket` clears an
-            // ordinary leftover socket itself, but a path it cannot clear — a
-            // directory in the way, a file owned by someone else — comes back
-            // `AddrInUse` in the same words a live server does.
-            Err(e) if crate::host::server::control_endpoint_answers() => {
-                startup_note!(
-                    "tty7-server: control listener unavailable ({e}); \
-                     another server is answering there, so serving panes only"
-                );
-            }
-            // Nothing is answering, and this process cannot answer either. Do
-            // not stay alive: a running daemon holds the single-server lock, so
-            // every later `--daemon` stands down at once and every client probe
-            // of the control socket fails, forever. That pair is exactly the
-            // "started but nothing was answering after 15s" a remote install
-            // reports — with the reason, right here, thrown away. Exiting
-            // releases the lock and hands the reason to whoever launched us.
+            // Both endpoints must belong to this server. Exiting releases its
+            // seat and reports the failure to whoever launched it.
             Err(e) => {
                 startup_note!("tty7-server: control listener unavailable: {e}");
                 return Err(e.into());
@@ -521,7 +604,7 @@ fn run_daemon_inner() -> anyhow::Result<()> {
     #[cfg(not(any(unix, windows)))]
     log::info!("no control listener on this platform; serving panes only");
 
-    run_with(registry, _seat.is_some())
+    run_with(registry, _seat.is_some(), services, gateway)
 }
 
 /// Come up as the far side of a handoff: the panes are already running, and
@@ -533,7 +616,10 @@ fn run_daemon_inner() -> anyhow::Result<()> {
 /// "another server is already serving" exit, which would leave the machine with
 /// no daemon and a set of orphaned shells nobody can reach.
 #[cfg(unix)]
-fn run_adopting(inheritance: crate::daemon::handoff::Inheritance) -> anyhow::Result<()> {
+fn run_adopting(
+    inheritance: crate::daemon::handoff::Inheritance,
+    gateway: GatewayFactory,
+) -> anyhow::Result<()> {
     let _seat = inheritance
         .seat_fd
         .map(|fd| unsafe { crate::daemon::singleton::adopt(fd) });
@@ -577,19 +663,19 @@ fn run_adopting(inheritance: crate::daemon::handoff::Inheritance) -> anyhow::Res
         ),
     }
 
+    let mut services = control_services();
+    services.panes = Some(registry.clone());
     {
-        let mut services = control_services();
-        services.panes = Some(registry.clone());
         match crate::host::server::spawn_control_listener_with(
             crate::host::local::LocalHost::shared(),
-            services,
+            services.clone(),
         ) {
             Ok(path) => startup_note!("tty7-server: control socket at {}", path.display()),
             Err(e) => startup_note!("tty7-server: control listener unavailable: {e}"),
         }
     }
 
-    run_with(registry, _seat.is_some())
+    run_with(registry, _seat.is_some(), services, gateway)
 }
 
 /// Become `exe` in place, keeping every pane that can survive the crossing.
@@ -614,6 +700,7 @@ fn hand_over(registry: &Registry, exe: &std::path::Path) -> anyhow::Error {
         }
     }
 
+    crate::daemon::mobile::stop_for_handoff();
     let mut carried = Vec::new();
     for pane in registry.all() {
         match pane.carry() {
@@ -634,9 +721,6 @@ fn hand_over(registry: &Registry, exe: &std::path::Path) -> anyhow::Error {
     if let Some(store) = crate::core::machine::observed_store() {
         store.flush();
     }
-
-    // The new image cannot reap a child it did not start; it starts its own.
-    crate::daemon::mobile::stop_for_handoff();
 
     let failed = crate::daemon::handoff::take_over(
         exe,
@@ -659,12 +743,12 @@ fn hand_over(_registry: &Registry, _exe: &std::path::Path) -> anyhow::Error {
 }
 
 /// What a pane does to the registry when its shell dies.
-#[cfg(unix)]
 fn reaper(registry: Arc<Registry>, id: u64) -> impl FnOnce() + Send + 'static {
     move || {
         std::thread::Builder::new()
             .name("tty7-daemon-pane-reap".to_string())
             .spawn(move || {
+                log::info!("pane {id} ended; removing from registry");
                 registry.remove(id);
             })
             .ok();
@@ -712,7 +796,12 @@ fn report_conpty_host() {
 /// `alone` says this process holds the single-server seat. It decides how the
 /// endpoint left by whoever was here before may be dealt with — see
 /// [`transport::clear_endpoint_before_bind`].
-fn run_with(registry: Arc<Registry>, alone: bool) -> anyhow::Result<()> {
+fn run_with(
+    registry: Arc<Registry>,
+    alone: bool,
+    services: crate::host::server::Services,
+    gateway: GatewayFactory,
+) -> anyhow::Result<()> {
     crate::daemon::control::server_started();
 
     transport::clear_endpoint_before_bind(alone)?;
@@ -724,9 +813,6 @@ fn run_with(registry: Arc<Registry>, alone: bool) -> anyhow::Result<()> {
     report_conpty_host();
 
     crate::daemon::pidfile::write_current();
-
-    // Phone access, when it is switched on: see `daemon::mobile`.
-    crate::daemon::mobile::supervise();
 
     #[cfg(unix)]
     serve_sigterm(registry.clone());
@@ -742,6 +828,9 @@ fn run_with(registry: Arc<Registry>, alone: bool) -> anyhow::Result<()> {
     spawn_orphan_sweep(registry.clone());
     spawn_agent_stale_sweep(registry.clone());
     spawn_snapshot_keeper(registry.clone());
+
+    // Phone access, when it is switched on: see `daemon::mobile`.
+    crate::daemon::mobile::supervise(gateway(registry.clone(), services));
 
     for stream in listener.incoming() {
         match stream {
@@ -783,6 +872,7 @@ fn serve_sigterm(registry: Arc<Registry>) {
             let mut sig: libc::c_int = 0;
             if unsafe { libc::sigwait(&set, &mut sig) } == 0 {
                 log::info!("daemon shutting down on SIGTERM");
+                crate::daemon::mobile::stop_for_handoff();
                 // Ahead of the kill: `drain_and_kill` hangs up every pty, and a
                 // pane whose shell has already been reaped has nothing left to
                 // photograph.
@@ -859,27 +949,7 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
             restore,
             allow_remote_clipboard_write,
         } => {
-            let id = registry.alloc_id();
-            let predecessor = restore.as_ref().map(|r| r.pane_id);
-            let restore = restore.and_then(restored_screen);
-            log::info!(
-                "pane {id} spawn requested; restore_from={predecessor:?} screen_restored={}",
-                restore.is_some()
-            );
-            let on_dead = {
-                let registry = registry.clone();
-                move || {
-                    std::thread::Builder::new()
-                        .name("tty7-daemon-pane-reap".to_string())
-                        .spawn(move || {
-                            log::info!("pane {id} ended; removing from registry");
-                            registry.remove(id);
-                        })
-                        .ok();
-                }
-            };
-            let pane = match DaemonPane::spawn(
-                id,
+            let pane = match registry.spawn(
                 cwd,
                 size,
                 shell,
@@ -887,12 +957,10 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
                 workspace,
                 restore,
                 allow_remote_clipboard_write,
-                on_dead,
             ) {
-                Ok(p) => p,
+                Ok(pane) => pane,
                 Err(e) => {
                     let mut w = write_stream;
-                    log::error!("pane {id} spawn failed: {e}");
                     // The daemon's own error is already a sentence; a second
                     // "spawn failed:" in front of it only pads the one the
                     // window ends up showing.
@@ -900,8 +968,7 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
                     return Err(e);
                 }
             };
-            log::info!("pane {id} spawned");
-            registry.insert(pane.clone());
+            let id = pane.id;
 
             {
                 let mut w = &write_stream;
@@ -1012,6 +1079,7 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
 
         ClientMsg::Shutdown => {
             log::info!("daemon shutting down on client request");
+            crate::daemon::mobile::stop_for_handoff();
             // This is the path a restart takes, so it is the one that decides
             // whether panes come back showing anything. Ahead of the kill:
             // `drain_and_kill` hangs up every pty, and a pane whose shell has
@@ -1188,15 +1256,9 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
 
         ClientMsg::SendInput { pane_id, bytes } => {
             let mut w = write_stream;
-            match registry.get(pane_id) {
-                Some(pane) if pane.alive() => {
-                    pane.write_input(&bytes);
-                    DaemonMsg::InputAck { pane_id }.encode(&mut w)?;
-                }
-                Some(_) => {
-                    DaemonMsg::Error(format!("pane {pane_id} is not running")).encode(&mut w)?
-                }
-                None => DaemonMsg::Error(format!("no such pane {pane_id}")).encode(&mut w)?,
+            match registry.send_input(pane_id, &bytes) {
+                Ok(()) => DaemonMsg::InputAck { pane_id }.encode(&mut w)?,
+                Err(e) => DaemonMsg::Error(e.to_string()).encode(&mut w)?,
             }
             Ok(())
         }

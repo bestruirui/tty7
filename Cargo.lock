@@ -11169,7 +11169,6 @@ dependencies = [
  "tokio",
  "tray-icon",
  "tty7-core",
- "tty7-gateway",
  "unicode-segmentation",
  "unicode-width",
  "url",
@@ -11284,6 +11283,7 @@ dependencies = [
  "libc",
  "tempfile",
  "tty7-core",
+ "tty7-gateway",
 ]
 
 [[package]]

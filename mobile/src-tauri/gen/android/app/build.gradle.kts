@@ -14,8 +14,8 @@ val tauriProperties = Properties().apply {
     }
 }
 
-// Release signing, from keystore.properties beside this project (ignored by
-// git): `storeFile`, `storePassword`, `keyAlias`, `keyPassword`. CI writes it
+// Signing for debug and release, from keystore.properties beside this project
+// (ignored by git): `storeFile`, `storePassword`, `keyAlias`, `keyPassword`. CI writes it
 // from secrets (.github/workflows/mobile.yml). Without it a release build
 // comes out unsigned, and a debug build uses the machine's debug key.
 val keystoreProperties = Properties().apply {
@@ -48,6 +48,7 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true

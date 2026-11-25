@@ -58,7 +58,7 @@ use super::protocol::{MAX_FRAME, read_frame, write_frame};
 /// by id (`TabSetGroup` carries a `GroupId`, not a string), the groups
 /// themselves live on the workspace and move as `WorkspaceSetGroups` and
 /// `LayoutDelta::GroupsChanged`, and a v10 peer can decode none of that.
-pub const CONTROL_VERSION: u32 = 14;
+pub const CONTROL_VERSION: u32 = 15;
 
 const DIALECT_MARKER: &str = "speaks control v";
 
@@ -341,6 +341,12 @@ pub enum ControlRequest {
     },
     Routes,
     Status,
+    MobileStatus,
+    MobileSetEnabled { enabled: bool },
+    MobilePair,
+    MobileCancelPair { secret: String },
+    MobilePairing { secret: String },
+    MobileRevoke { id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -458,6 +464,9 @@ impl ControlRequest {
             | PaneMove { .. }
             | PaneReplace { .. } => Duration::from_secs(10),
             AgentStates | Routes | Status => Duration::from_secs(5),
+            MobileSetEnabled { .. } => Duration::from_secs(60),
+            MobileStatus | MobilePair | MobileCancelPair { .. } | MobilePairing { .. }
+            | MobileRevoke { .. } => Duration::from_secs(10),
         }
     }
 
@@ -515,6 +524,14 @@ pub enum ReplyOk {
     PaneProcs(crate::daemon::protocol::PaneProcs),
     Routes(Vec<RouteInfo>),
     Status(ServerStatus),
+    MobileStatus {
+        enabled: bool,
+        status: crate::daemon::mobile::Status,
+        devices: Vec<crate::daemon::mobile::Device>,
+    },
+    MobilePair { code: String, secret: String, devices: Vec<crate::daemon::mobile::Device> },
+    MobilePairing { open: bool, has_open: bool },
+    MobileDevices(Vec<crate::daemon::mobile::Device>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

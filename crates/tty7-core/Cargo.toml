@@ -67,9 +67,8 @@ portable-pty = "0.8"
 # The same workspace version the GUI's update check uses, so both fetch over one
 # rustls stack; blocking, because the installer runs off the GUI executor.
 #
-# Optional, and off by default, so the static musl `tty7-server` never links a
-# TLS stack for a code path it cannot take — it *is* the binary being
-# downloaded. The GUI package turns the feature on (see the root `Cargo.toml`).
+# Optional for protocol-only clients. The GUI and gateway enable it for
+# downloads and proxy resolution.
 reqwest = { workspace = true, optional = true }
 
 russh = "0.65.4"
@@ -169,9 +168,9 @@ tokio = { version = "1", features = ["test-util", "macros", "rt"] }
 
 # `gssapi` — GSSAPI/Kerberos `gssapi-with-mic` SSH auth (`daemon::ssh::auth`).
 #
-# Off by default, and the `tty7` GUI turns it on, so the GUI's behavior is
-# unchanged. It has to be optional because `libgssapi` binds the *system* MIT /
-# Heimdal krb5 through bindgen: a machine without krb5 headers cannot build it
+# Off by default; the desktop server enables it. It has to be optional
+# because `libgssapi` binds the *system* MIT / Heimdal krb5 through bindgen:
+# a machine without krb5 headers cannot build it
 # at all, and a static musl `tty7-server` — the binary remote workspaces push
 # onto arbitrary hosts (decision D10) — cannot link it under any
 # circumstances. Without the feature, `SshAuthMode::Gssapi` reports that the
@@ -188,10 +187,9 @@ tokio = { version = "1", features = ["test-util", "macros", "rt"] }
 default = []
 gssapi = ["dep:libgssapi"]
 # Lets this build download a `tty7-server` release asset over HTTPS and push it
-# onto a remote machine. Off by default so `tty7-server` — which is
-# the thing being downloaded, and never the thing doing the downloading — links
-# no HTTP client. Without it, `daemon::install` still installs from bytes it is
-# handed and still launches/probes a remote daemon; only the fetch fails, with a
+# onto a remote machine. Off by default for protocol-only clients. Without it,
+# `daemon::install` still installs from bytes it is handed and still
+# launches/probes a remote daemon; only the fetch fails, with a
 # message saying so.
 # The platform proxy readers ride along: they exist only to configure the
 # downloader, and each is a no-op on the targets it is not written for.

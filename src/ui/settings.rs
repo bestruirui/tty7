@@ -829,7 +829,6 @@ impl SearchEntry {
             L10nKey::SettingsCheckUpdatesOnLaunch => "check_for_updates",
             L10nKey::SettingsAutoDownload => "auto_download_updates",
             L10nKey::SettingsUpdateChannel => "update_channel",
-            L10nKey::SettingsMobileAccess => "mobile_access",
             L10nKey::DetectUrls => "link_url",
             L10nKey::ForwardSshLoopbackLinks => "ssh_loopback_forward",
             L10nKey::SettingsVerifyHostKeys => "verify_host_keys",
@@ -972,7 +971,6 @@ impl SearchEntry {
             L10nKey::SettingsTerminalBell => cfg.bell != defaults.bell,
             L10nKey::SettingsRestoreLastLayout => cfg.restore_session != defaults.restore_session,
             L10nKey::SettingsShowTrayIcon => cfg.show_tray_icon != defaults.show_tray_icon,
-            L10nKey::SettingsMobileAccess => cfg.mobile_access != defaults.mobile_access,
             L10nKey::SettingsOptionAsMeta => {
                 cfg.macos_option_as_alt != defaults.macos_option_as_alt
             }
@@ -1227,8 +1225,14 @@ pub(crate) struct SettingsState {
     /// The phone the last pairing on screen ended with, said once.
     pub(crate) mobile_paired: Option<String>,
     pub(crate) mobile_copied: bool,
-    /// Phone access was just switched on and no gateway is serving yet.
+    /// A phone-access switch request is still awaiting its server's answer.
     pub(crate) mobile_starting: bool,
+    pub(crate) mobile_host: HostId,
+    pub(crate) mobile_status: Option<(bool, tty7_core::daemon::mobile::Status)>,
+    pub(crate) mobile_devices: Vec<tty7_core::daemon::mobile::Device>,
+    pub(crate) mobile_error: Option<String>,
+    pub(crate) mobile_generation: uuid::Uuid,
+    pub(crate) mobile_pair_pending: bool,
     pub(crate) ssh_filter: Entity<InputState>,
     pub(crate) ssh_collapsed_groups: std::collections::HashSet<String>,
     pub(crate) ssh_list_scroll: gpui::ScrollHandle,

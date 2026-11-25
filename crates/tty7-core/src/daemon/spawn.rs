@@ -18,14 +18,14 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 // generous. The old two-second budget only made an unresponsive daemon's
 // stall that much longer before the bounded reap below takes over.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(1);
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(6);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long to wait for a refusal before assuming a handoff went through.
 ///
 /// The daemon either execs — in which case this socket dies and the read fails
-/// at once — or writes back why it did not. Neither takes long; the timeout is
-/// only here so a daemon that hangs mid-handoff does not hang the window with
-/// it.
-const HANDOFF_TIMEOUT: Duration = Duration::from_secs(5);
+/// at once — or writes back why it did not. Stopping its gateway first may wait
+/// for pending remote requests; the timeout lets that cleanup finish without
+/// letting a daemon stuck mid-handoff hang the window indefinitely.
+const HANDOFF_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long after the endpoint disappears the daemon process itself gets to
 /// finish exiting. Under a graceful shutdown this is milliseconds; the margin
 /// covers the Windows descendant reap that runs before `exit`.
@@ -193,6 +193,12 @@ fn is_reapable_daemon_name(name: &str) -> bool {
         || DAEMON_EXE_STEMS
             .iter()
             .any(|stem| exe_names_equal(stem, name))
+        || strip_exe_suffix(name)
+            .strip_prefix("tty7-server-c")
+            .and_then(|name| name.split_once('p'))
+            .is_some_and(|(control, protocol)| {
+                control.parse::<u32>().is_ok() && protocol.parse::<u32>().is_ok()
+            })
 }
 
 /// Whether the recorded daemon process is gone — the cheap, certain signal
@@ -974,8 +980,7 @@ pub fn hand_off() -> anyhow::Result<()> {
     if !local_daemon_supports(crate::daemon::protocol::FEATURE_HANDOFF) {
         anyhow::bail!("the running daemon cannot replace itself in place");
     }
-    let exe = std::env::current_exe()
-        .map_err(|e| anyhow::anyhow!("could not locate own executable: {e}"))?;
+    let exe = server_executable()?;
 
     let mut stream = transport::connect()?;
     // Past this point the daemon may be replaced at any moment, so every probe
@@ -1399,10 +1404,112 @@ fn wait_until_images_unlocked(dir: &Path, deadline: Instant) -> Result<(), Strin
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn reap_recorded_daemon(_recorded: Option<u32>) {}
 
-fn spawn_detached() -> anyhow::Result<()> {
-    daemon_generation_moved();
+pub fn server_executable() -> anyhow::Result<PathBuf> {
     let exe = std::env::current_exe()
         .map_err(|e| anyhow::anyhow!("could not locate own executable: {e}"))?;
+    #[cfg(target_os = "linux")]
+    let exe = {
+        use std::os::unix::ffi::OsStrExt;
+        match exe.as_os_str().as_bytes().strip_suffix(b" (deleted)") {
+            Some(path) => PathBuf::from(std::ffi::OsStr::from_bytes(path)),
+            None => exe,
+        }
+    };
+    let name = format!("tty7-server{}", std::env::consts::EXE_SUFFIX);
+    let remote = format!("{}{}", crate::daemon::install::asset::binary_name(
+        crate::daemon::control::CONTROL_VERSION, PROTOCOL_VERSION,
+    ), std::env::consts::EXE_SUFFIX);
+    let server = if exe.file_name().is_some_and(|n| n == name.as_str() || n == remote.as_str()) {
+        exe
+    } else {
+        let server = exe.with_file_name(name);
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("APPIMAGE").is_some() {
+            return appimage_server(&server);
+        }
+        server
+    };
+    Ok(server)
+}
+
+#[cfg(target_os = "linux")]
+// An AppImage mount can disappear with its GUI. Keep the server and its
+// relative library paths available for surviving sessions and their hooks.
+fn appimage_server(server: &Path) -> anyhow::Result<PathBuf> {
+    if !server.is_file() {
+        anyhow::bail!("tty7-server is missing at {}; reinstall this application", server.display());
+    }
+    let root = config::config_dir_path()
+        .ok_or_else(|| anyhow::anyhow!("configuration directory is unavailable"))?
+        .join("server-runtime");
+    std::fs::create_dir_all(&root)?;
+    let lock = std::fs::OpenOptions::new().read(true).write(true).create(true)
+        .truncate(false).open(root.join("install.lock"))?;
+    lock.lock()?;
+    let version = format!("{}-c{}p{}", env!("CARGO_PKG_VERSION"), crate::daemon::control::CONTROL_VERSION, PROTOCOL_VERSION);
+    let installed = root.join(&version);
+    let executable = installed.join("usr/bin/tty7-server");
+    if executable.is_file() {
+        return Ok(executable);
+    }
+    let stage = root.join(format!(".{version}-{}", std::process::id()));
+    std::fs::create_dir(&stage)?;
+    let result = (|| -> anyhow::Result<()> {
+        std::fs::create_dir_all(stage.join("usr/bin"))?;
+        std::fs::copy(server, stage.join("usr/bin/tty7-server"))?;
+        let libraries = server.parent().and_then(Path::parent)
+            .ok_or_else(|| anyhow::anyhow!("AppImage server has no usr directory"))?.join("lib");
+        copy_server_libraries(&libraries, &stage.join("usr/lib"))?;
+        std::fs::rename(&stage, &installed)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+    result?;
+    Ok(executable)
+}
+
+#[cfg(target_os = "linux")]
+fn copy_server_libraries(source: &Path, destination: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let target = destination.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            std::os::unix::fs::symlink(std::fs::read_link(entry.path())?, target)?;
+        } else if kind.is_dir() {
+            copy_server_libraries(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn appimage_environment(cmd: &mut Command, exe: &Path) -> anyhow::Result<()> {
+    if std::env::var_os("APPIMAGE").is_some() {
+        let bin = exe.parent().ok_or_else(|| anyhow::anyhow!("server has no directory"))?;
+        let lib = bin.parent().ok_or_else(|| anyhow::anyhow!("server has no usr directory"))?.join("lib");
+        for (name, directory) in [("PATH", bin.to_path_buf()), ("LD_LIBRARY_PATH", lib)] {
+            let mut paths = vec![directory];
+            if let Some(existing) = std::env::var_os(name) {
+                paths.extend(std::env::split_paths(&existing));
+            }
+            cmd.env(name, std::env::join_paths(paths)?);
+        }
+    }
+    Ok(())
+}
+
+fn spawn_detached() -> anyhow::Result<()> {
+    daemon_generation_moved();
+    let exe = server_executable()?;
+    if !exe.is_file() {
+        anyhow::bail!("tty7-server is missing at {}; reinstall this application", exe.display());
+    }
 
     let config_dir = config::config_dir_path();
 
@@ -1433,8 +1540,10 @@ fn spawn_detached() -> anyhow::Result<()> {
         }
     }
 
-    let mut cmd = Command::new(exe);
+    let mut cmd = Command::new(&exe);
     cmd.arg("--daemon");
+    #[cfg(target_os = "linux")]
+    appimage_environment(&mut cmd, &exe)?;
 
     if let Some(dir) = config_dir {
         cmd.arg("--config-dir").arg(dir);
@@ -1542,13 +1651,6 @@ fn strip_deleted_marker(path: String) -> String {
         Some(stripped) => stripped.to_string(),
         None => path,
     }
-}
-
-/// Starts a child of the daemon the way the daemon itself was started: in no
-/// console and with no window, which on Windows is the difference between a
-/// background helper and a console flashing up. The mobile gateway is one.
-pub(crate) fn detach_child(cmd: &mut Command) {
-    detach(cmd);
 }
 
 #[cfg(unix)]

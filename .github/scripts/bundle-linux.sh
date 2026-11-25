@@ -28,6 +28,8 @@ mkdir -p "$STAGE"
 
 cp "target/${TARGET}/release/tty7-app" "$STAGE/tty7-app"
 chmod +x "$STAGE/tty7-app"
+cp "target/${TARGET}/release/tty7-server" "$STAGE/tty7-server"
+chmod +x "$STAGE/tty7-server"
 # The CLI ships beside the GUI, which symlinks it onto PATH at launch (see
 # core::cli_install) by resolving it relative to its own executable.
 cp "target/${TARGET}/release/tty7" "$STAGE/tty7"
@@ -35,6 +37,7 @@ chmod +x "$STAGE/tty7"
 # Release builds keep symbols (thin LTO, no profile strip); drop them here so
 # the archive isn't ~100 MB of debug info.
 strip "$STAGE/tty7-app" || echo "⚠️  strip unavailable — shipping unstripped binary"
+strip "$STAGE/tty7-server" || echo "⚠️  strip unavailable — shipping unstripped server"
 strip "$STAGE/tty7" || echo "⚠️  strip unavailable — shipping unstripped CLI"
 cp LICENSE "$STAGE/LICENSE"
 cp README.md "$STAGE/README.md"

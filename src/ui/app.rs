@@ -5811,6 +5811,7 @@ impl Tty7App {
                 self.set_restore_session(defaults.restore_session, cx)
             }
             L10nKey::SettingsShowTrayIcon => self.set_show_tray_icon(defaults.show_tray_icon, cx),
+            L10nKey::SettingsMobileAccess => self.set_mobile_access(false, window, cx),
             L10nKey::SettingsOptionAsMeta => {
                 self.set_macos_option_as_alt(defaults.macos_option_as_alt, cx)
             }
@@ -6178,6 +6179,12 @@ impl Tty7App {
             mobile_paired: None,
             mobile_copied: false,
             mobile_starting: false,
+            mobile_host: crate::ui::host_ops::HostId::LOCAL,
+            mobile_status: None,
+            mobile_devices: Vec::new(),
+            mobile_error: None,
+            mobile_generation: uuid::Uuid::nil(),
+            mobile_pair_pending: false,
             ssh_filter,
             ssh_collapsed_groups: std::collections::HashSet::new(),
             ssh_list_scroll: gpui::ScrollHandle::new(),
@@ -6202,6 +6209,7 @@ impl Tty7App {
         }
         self.rebuild_theme_editor(window, cx);
         self.ensure_agent_hooks_loaded(cx);
+        self.ensure_mobile_loaded(cx);
         cx.notify();
     }
 
@@ -7020,6 +7028,7 @@ impl Tty7App {
             }
         }
         self.ensure_agent_hooks_loaded(cx);
+        self.ensure_mobile_loaded(cx);
         cx.notify();
     }
 
@@ -7032,8 +7041,7 @@ impl Tty7App {
         }
     }
 
-    pub(crate) fn agent_hooks_machines(
-        &self,
+    pub(crate) fn settings_machines(
         cx: &mut App,
     ) -> Vec<crate::ui::settings::AgentHooksMachine> {
         use crate::ui::settings::AgentHooksMachine;

@@ -51,6 +51,8 @@ mkdir -p "$APPDIR/usr/bin"
 
 cp "target/${TARGET}/release/tty7-app" "$APPDIR/usr/bin/tty7-app"
 chmod +x "$APPDIR/usr/bin/tty7-app"
+cp "target/${TARGET}/release/tty7-server" "$APPDIR/usr/bin/tty7-server"
+chmod +x "$APPDIR/usr/bin/tty7-server"
 
 # The CLI, beside the GUI as everywhere else. Unlike the tarball, an AppImage is
 # mounted at a fresh /tmp/.mount_XXXX per run, so `core::cli_install` must copy
@@ -93,6 +95,7 @@ convert assets/app-icon.png -resize 256x256 "$TOOLS/tty7.png"
 "$LINUXDEPLOY" \
   --appdir "$APPDIR" \
   --executable "$APPDIR/usr/bin/tty7-app" \
+  --executable "$APPDIR/usr/bin/tty7-server" \
   --desktop-file "$TOOLS/tty7.desktop" \
   --icon-file "$TOOLS/tty7.png"
 

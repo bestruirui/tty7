@@ -11,12 +11,17 @@ publish = false
 name = "tty7-server"
 path = "src/main.rs"
 
-# One dependency, on purpose. This binary exists to prove — and keep proving —
-# that everything a tty7 session needs runs without gpui: if it ever grows a
-# second dependency that the GUI also needs, that dependency belongs in
-# `tty7-core` instead.
+# This binary keeps the session services independent of gpui: they live in
+# tty7-core, with tty7-gateway providing the in-process mobile service.
 [dependencies]
 tty7-core = { path = "../tty7-core" }
+tty7-gateway = { path = "../tty7-gateway" }
+
+[features]
+# Desktop servers retain Kerberos; portable remote builds opt out where system
+# GSSAPI libraries cannot be shipped.
+default = ["gssapi"]
+gssapi = ["tty7-core/gssapi"]
 
 # The end-to-end proof (`tests/stdio_conformance.rs`) runs `tty7-core`'s shared
 # `Host` conformance suite against a *real* `tty7-server --stdio` child process.

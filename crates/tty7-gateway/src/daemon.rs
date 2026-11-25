@@ -1,5 +1,5 @@
-//! The real [`Backend`]: this machine's tty7 server, over its local sockets —
-//! and through it, every machine it holds an SSH link to.
+//! The real [`Backend`]: this server's services, or its local sockets for the
+//! standalone gateway — and through it, every machine it holds an SSH link to.
 
 use std::collections::HashMap;
 use std::io;
@@ -14,6 +14,8 @@ use tty7_core::daemon::control::{
 };
 use tty7_core::daemon::protocol::{DaemonMsg, FEATURE_SIZE_LEASE, LeaseRequest, WinSize};
 use tty7_core::daemon::router::RouteTarget;
+use tty7_core::daemon::server::{PaneObservation, Registry};
+use tty7_core::host::server::Services;
 use tty7_mobile_proto::{GridSize, TabCreated};
 
 use crate::poller::Poller;
@@ -49,6 +51,7 @@ const NEW_TAB_SIZE: WinSize = WinSize {
 
 pub struct Daemon {
     host: String,
+    local: Option<(Arc<Registry>, Services)>,
     control: Mutex<Option<ControlClient>>,
     /// A control connection per linked machine, routed through the local
     /// server, by link key.
@@ -60,6 +63,7 @@ impl Default for Daemon {
     fn default() -> Daemon {
         Daemon {
             host: crate::identity::name(),
+            local: None,
             control: Mutex::new(None),
             remote: Mutex::new(HashMap::new()),
             trees: Poller::default(),
@@ -68,6 +72,13 @@ impl Default for Daemon {
 }
 
 impl Daemon {
+    pub fn in_process(registry: Arc<Registry>, services: Services) -> Self {
+        Self {
+            local: Some((registry, services)),
+            ..Self::default()
+        }
+    }
+
     fn hello(&self) -> ControlHello {
         ControlHello::host_rpc(
             format!("tty7-gateway-{}", std::process::id()),
@@ -76,6 +87,9 @@ impl Daemon {
     }
 
     fn request(&self, req: ControlRequest) -> io::Result<ReplyOk> {
+        if let Some((_, services)) = &self.local {
+            return services.request(req, None);
+        }
         let mut slot = self.control.lock().unwrap_or_else(|e| e.into_inner());
         if !slot.as_ref().is_some_and(ControlClient::is_connected) {
             *slot = Some(ControlClient::connect(&self.hello())?);
@@ -127,10 +141,11 @@ impl Daemon {
     }
 
     fn panes_on(&self, machine: Option<&str>) -> io::Result<PaneClient> {
-        match machine {
-            None => Ok(PaneClient::local()),
-            Some(key) => Ok(PaneClient::routed(self.target(key)?)),
-        }
+        let client = match machine {
+            None => PaneClient::local(),
+            Some(key) => PaneClient::routed(self.target(key)?),
+        };
+        Ok(client.with_request_timeout(Duration::from_secs(15)))
     }
 }
 
@@ -144,7 +159,14 @@ fn routed_request(
 ) -> io::Result<ReplyOk> {
     let mut client = slot.lock().unwrap_or_else(|e| e.into_inner());
     if !client.as_ref().is_some_and(ControlClient::is_connected) {
-        *client = Some(ControlClient::routed(target()?, hello)?);
+        let target = target()?;
+        let stream = tty7_core::daemon::transport::connect()?;
+        stream.set_read_timeout(Some(Duration::from_secs(15)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(15)))?;
+        let socket = stream.try_clone()?;
+        let connected = ControlClient::routed_over(stream, target, hello)?;
+        socket.set_read_timeout(None)?;
+        *client = Some(connected);
     }
     let reply = client.as_ref().expect("connected just above").request(req);
     if reply.is_err() {
@@ -175,6 +197,12 @@ fn link_down(key: &str) -> io::Error {
 }
 
 impl Backend for Daemon {
+    fn shutdown(&self) {
+        self.trees.finish();
+        self.control.lock().unwrap_or_else(|e| e.into_inner()).take();
+        self.remote.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
     fn hostname(&self) -> String {
         self.host.clone()
     }
@@ -226,6 +254,14 @@ impl Backend for Daemon {
     }
 
     fn observe(&self, machine: Option<&str>, pane_id: u64) -> io::Result<Box<dyn PaneFeed>> {
+        if machine.is_none()
+            && let Some((registry, _)) = &self.local
+        {
+            return Ok(Box::new(LocalObserved {
+                observation: Arc::new(registry.observe(pane_id)?),
+                leases_taken: false,
+            }));
+        }
         let client = self.panes_on(machine)?;
         let (input, output) = client.observe(pane_id, OBSERVE_SIZE)?.split();
         Ok(Box::new(Observed {
@@ -239,6 +275,11 @@ impl Backend for Daemon {
     }
 
     fn send_input(&self, machine: Option<&str>, pane_id: u64, bytes: &[u8]) -> io::Result<()> {
+        if machine.is_none()
+            && let Some((registry, _)) = &self.local
+        {
+            return registry.send_input(pane_id, bytes);
+        }
         self.panes_on(machine)?.send_input(pane_id, bytes)
     }
 
@@ -272,11 +313,20 @@ impl Backend for Daemon {
             (None, None) => std::env::home_dir(),
             (None, Some(_)) => None,
         };
-        let session =
-            self.panes_on(machine)?
+        let pane = if machine.is_none()
+            && let Some((registry, _)) = &self.local
+        {
+            registry
+                .spawn(start, size, None, Some(owner.clone()), Some(owner), None, false)
+                .map_err(io::Error::other)?
+                .id
+        } else {
+            let session = self.panes_on(machine)?
                 .spawn(start, size, None, Some(owner.clone()), Some(owner))?;
-        let pane = session.pane_id();
-        session.detach()?;
+            let pane = session.pane_id();
+            session.detach()?;
+            pane
+        };
         // The tab is about to reach the desktop, which lays every tab out at
         // its window's size; the shell's first screen — a banner, a prompt —
         // would be drawn that wide and then squeezed onto the phone. Held
@@ -336,15 +386,23 @@ impl Backend for Daemon {
             ReplyOk::Panes(panes) => panes,
             other => return Err(unexpected("PaneClose", &other)),
         };
-        let panes = self.panes_on(machine)?;
         for pane in removed {
-            panes.kill(pane)?;
+            if machine.is_none()
+                && let Some((registry, _)) = &self.local
+            {
+                tty7_core::daemon::server::kill_pane(registry, pane);
+            } else {
+                self.panes_on(machine)?.kill(pane)?;
+            }
         }
         Ok(())
     }
 
     fn running_panes(&self) -> Option<std::collections::HashSet<u64>> {
-        let panes = PaneClient::local().list().ok()?;
+        let panes = match &self.local {
+            Some((registry, _)) => registry.list(),
+            None => PaneClient::local().list().ok()?,
+        };
         Some(
             panes
                 .into_iter()
@@ -386,6 +444,34 @@ impl Backend for Daemon {
         for pane in ended {
             panes.kill(pane)?;
         }
+        Ok(())
+    }
+}
+
+struct LocalObserved {
+    observation: Arc<PaneObservation>,
+    leases_taken: bool,
+}
+
+impl PaneFeed for LocalObserved {
+    fn recv(&mut self, wait: Duration) -> io::Result<Option<DaemonMsg>> {
+        self.observation.recv(wait)
+    }
+
+    fn leases(&mut self) -> Option<Box<dyn PaneLeases>> {
+        if self.leases_taken {
+            return None;
+        }
+        self.leases_taken = true;
+        Some(Box::new(LocalLeases(self.observation.clone())))
+    }
+}
+
+struct LocalLeases(Arc<PaneObservation>);
+
+impl PaneLeases for LocalLeases {
+    fn send(&mut self, request: LeaseRequest) -> io::Result<()> {
+        self.0.lease(request);
         Ok(())
     }
 }
@@ -438,7 +524,7 @@ fn hold_for_phone(mut feed: Box<dyn PaneFeed>, size: WinSize) {
     if leases.send(take).is_err() {
         return;
     }
-    std::thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         let until = std::time::Instant::now() + PHONE_HOLD;
         let mut held = false;
         while std::time::Instant::now() < until {

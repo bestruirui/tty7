@@ -284,35 +284,13 @@ jobs:
           key: ${{ matrix.target }}
           save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
 
-      # The crate split lands separately; until `tty7-server` exists as a
-      # workspace member this job has nothing to build. Skip cleanly rather than
-      # fail, so the workflow can land before the split and simply start working
-      # once it arrives. `--no-deps` keeps this to a manifest parse — no
-      # resolution, no network.
-      - name: Look for the tty7-server package
-        id: probe
-        run: |
-          set -euo pipefail
-          if cargo metadata --no-deps --format-version 1 \
-              | jq -e '[.packages[].name] | index("tty7-server")' >/dev/null; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::tty7-server is not a workspace member yet (crate split, M1) — nothing to build"
-          fi
-
-      # `-p tty7-server` addresses the package by name, so this survives whatever
-      # directory layout the split settles on. It also keeps feature unification
-      # scoped to the server's own dependency graph: the GUI crate is the one
-      # that turns on tty7-core's `gssapi` feature, and that feature cannot build
-      # under musl (libgssapi-sys wants a system MIT/Heimdal krb5). Building the
-      # whole workspace here would drag it in and fail.
+      # Build only tty7-server and disable its desktop GSSAPI default. Building
+      # the whole workspace would enable the server default again; libgssapi's
+      # system MIT/Heimdal krb5 dependency cannot link into a static musl binary.
       - name: Build static tty7-server
-        if: steps.probe.outputs.present == 'true'
-        run: cargo zigbuild --release --locked -p tty7-server --target ${{ matrix.target }}
+        run: cargo zigbuild --release --locked -p tty7-server --no-default-features --target ${{ matrix.target }}
 
       - name: Assert the binary is static
-        if: steps.probe.outputs.present == 'true'
         run: bash .github/scripts/assert-static.sh "target/${{ matrix.target }}/release/tty7-server"
 
   # The same headless server for remote Macs. A second job rather than more rows
@@ -355,27 +333,12 @@ jobs:
           key: ${{ matrix.target }}
           save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
 
-      - name: Look for the tty7-server package
-        id: probe
-        run: |
-          set -euo pipefail
-          if cargo metadata --no-deps --format-version 1 \
-              | jq -e '[.packages[].name] | index("tty7-server")' >/dev/null; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::tty7-server is not a workspace member yet (crate split, M1) — nothing to build"
-          fi
-
-      # `-p tty7-server` for the same two reasons as the musl job: it addresses
-      # the package by name whatever the layout, and it keeps the GUI's `gssapi`
-      # feature out of the unified feature set. That feature does resolve on
-      # macOS, unlike under musl, but linking Heimdal into a binary that gets
-      # pushed to someone else's Mac is exactly the kind of dependency
-      # assert-macho.sh is there to refuse.
+      # Build only tty7-server with its desktop GSSAPI default disabled so the
+      # workspace cannot enable it through feature unification. Heimdal from the build
+      # machine must not become a dependency of a server pushed to another Mac;
+      # assert-macho.sh checks that the binary stays self-contained.
       - name: Build tty7-server
-        if: steps.probe.outputs.present == 'true'
-        run: cargo build --release --locked -p tty7-server --target ${{ matrix.target }}
+        run: cargo build --release --locked -p tty7-server --no-default-features --target ${{ matrix.target }}
 
       # Ad-hoc, so it needs no identity and no secrets — this is not the code
       # signing the GUI bundles get, and it buys nothing with Gatekeeper. It is
@@ -384,11 +347,9 @@ jobs:
       # out bare, and that is the slice a Rosetta shell on an Apple Silicon Mac
       # asks for. `--force` makes this idempotent across both.
       - name: Ad-hoc sign the binary
-        if: steps.probe.outputs.present == 'true'
         run: codesign --force --sign - "target/${{ matrix.target }}/release/tty7-server"
 
       - name: Assert the binary is self-contained
-        if: steps.probe.outputs.present == 'true'
         run: |
           bash .github/scripts/assert-macho.sh \
             "target/${{ matrix.target }}/release/tty7-server" "${{ matrix.arch }}"

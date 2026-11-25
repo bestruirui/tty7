@@ -234,9 +234,10 @@ mod macos {
     ) -> Result<(), String> {
         let executable = replacement.join("Contents/MacOS/tty7-app");
         let updater = replacement.join("Contents/MacOS/tty7-updater");
-        if !replacement.is_dir() || !executable.is_file() || !updater.is_file() {
+        if !replacement.is_dir() || !executable.is_file() || !updater.is_file()
+            || !replacement.join("Contents/MacOS/tty7-server").is_file() {
             return Err(
-                "the staged bundle is missing tty7-app or tty7-updater under Contents/MacOS"
+                "the staged bundle is missing tty7-app, tty7-server or tty7-updater under Contents/MacOS"
                     .to_string(),
             );
         }
@@ -617,7 +618,7 @@ mod macos {
 
             let error = verify_update(&current, &replacement, "1.0.0").unwrap_err();
             assert!(
-                error.contains("missing tty7-app or tty7-updater"),
+                error.contains("missing tty7-app, tty7-server or tty7-updater"),
                 "{error}"
             );
         }
@@ -935,6 +936,7 @@ mod linux {
             ));
         }
         extract_entry(staged, stage, BUNDLED_UPDATER)?;
+        extract_entry(staged, stage, "usr/bin/tty7-server")?;
         Ok(())
     }
 
@@ -1400,8 +1402,9 @@ mod windows {
     // rejected on extraction, and everything in it is moved aside and replaced
     // during an in-place portable update. A file the package ships but this
     // list omits would survive forever at its installed version.
-    const PORTABLE_MANAGED_ROOTS: [&str; 10] = [
+    const PORTABLE_MANAGED_ROOTS: [&str; 11] = [
         "tty7-app.exe",
+        "tty7-server.exe",
         "tty7.exe",
         "tty7-updater.exe",
         PORTABLE_MARKER,
@@ -1705,7 +1708,7 @@ mod windows {
             tty7_core::core::config::set_config_dir(dir.clone());
             // The override above covers this process; the variable is
             // re-exported so the helper children this process spawns — the
-            // payload's `--stop-daemon`, the relaunched app — keep answering
+            // payload's `--stop`, the relaunched app — keep answering
             // for the same config directory. Safe here: argument parsing runs
             // before any thread exists.
             unsafe { std::env::set_var("TTY7_CONFIG_DIR", dir) };
@@ -2925,6 +2928,7 @@ mod windows {
     fn verify_portable_payload(payload: &Path, expected_version: &str) -> Result<(), String> {
         for required in [
             "tty7-app.exe",
+            "tty7-server.exe",
             "tty7.exe",
             "tty7-updater.exe",
             PORTABLE_MARKER,
@@ -2953,6 +2957,11 @@ mod windows {
             &payload.join("tty7-updater.exe"),
             expected_version,
             "staged portable tty7-updater.exe",
+        )?;
+        verify_binary_version(
+            &payload.join("tty7-server.exe"),
+            expected_version,
+            "staged portable tty7-server.exe",
         )
     }
 
@@ -2962,6 +2971,7 @@ mod windows {
         for (name, label) in [
             ("tty7-app.exe", "installed tty7-app.exe"),
             ("tty7-updater.exe", "installed tty7-updater.exe"),
+            ("tty7-server.exe", "installed tty7-server.exe"),
         ] {
             let binary = install_dir.join(name);
             if !binary.is_file() {
@@ -2995,9 +3005,9 @@ mod windows {
     }
 
     fn stop_daemon_from_payload(payload: &Path, install_dir: &Path) -> Result<(), String> {
-        let executable = payload.join("tty7-app.exe");
+        let executable = payload.join("tty7-server.exe");
         let status = Command::new(&executable)
-            .arg("--stop-daemon")
+            .arg("--stop")
             .arg("--update-install-dir")
             .arg(install_dir)
             .stdin(Stdio::null())
@@ -3375,8 +3385,23 @@ mod windows {
     }
 
     fn verify_binary_version(path: &Path, expected: &str, label: &str) -> Result<(), String> {
-        verify_file_version(path, expected, label)?;
         let expected = expected.trim().trim_start_matches('v');
+        if path.file_name() == Some(OsStr::new("tty7-server.exe")) {
+            use std::os::windows::process::CommandExt as _;
+
+            let output = Command::new(path)
+                .arg("--version")
+                .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+                .output()
+                .map_err(|error| format!("reading the {label} version: {error}"))?;
+            if !output.status.success()
+                || String::from_utf8_lossy(&output.stdout).trim() != format!("tty7-server {expected}")
+            {
+                return Err(format!("the {label} does not report the expected version {expected:?}"));
+            }
+            return Ok(());
+        }
+        verify_file_version(path, expected, label)?;
         let actual = product_version(path)?;
         if actual != expected {
             return Err(format!(
@@ -3617,7 +3642,7 @@ mod windows {
         }
 
         #[test]
-        fn installed_payload_verification_requires_matching_app_and_updater() {
+        fn installed_payload_verification_requires_matching_app_updater_and_server() {
             let root = tempfile::tempdir().unwrap();
             let executable = std::env::current_exe().unwrap();
             fs::copy(&executable, root.path().join("tty7-app.exe")).unwrap();
@@ -3627,7 +3652,9 @@ mod windows {
             assert!(error.contains("tty7-updater.exe"), "{error}");
 
             fs::copy(&executable, root.path().join("tty7-updater.exe")).unwrap();
-            verify_installed_payload(root.path(), env!("CARGO_PKG_VERSION")).unwrap();
+            fs::copy(&executable, root.path().join("tty7-server.exe")).unwrap();
+            let error = verify_installed_payload(root.path(), env!("CARGO_PKG_VERSION")).unwrap_err();
+            assert!(error.contains("tty7-server.exe"), "{error}");
         }
 
         #[test]
@@ -3834,7 +3861,7 @@ mod windows {
         }
 
         #[test]
-        fn portable_archive_verification_extracts_a_complete_release_payload() {
+        fn portable_archive_verification_rejects_an_invalid_server() {
             let root = tempfile::tempdir().unwrap();
             let asset_name = format!("tty7-{}-windows-x86_64.zip", env!("CARGO_PKG_VERSION"));
             let archive = root.path().join(&asset_name);
@@ -3845,6 +3872,7 @@ mod windows {
                 &archive,
                 &[
                     ("tty7-app.exe", executable.clone()),
+                    ("tty7-server.exe", executable.clone()),
                     ("tty7.exe", executable.clone()),
                     ("tty7-updater.exe", executable),
                     (PORTABLE_MARKER, PORTABLE_MARKER_CONTENT.to_vec()),
@@ -3857,14 +3885,15 @@ mod windows {
             );
             write_manifest(&archive, &manifest, &asset_name);
 
-            verify_portable_update(
+            let error = verify_portable_update(
                 &archive,
                 &manifest,
                 &asset_name,
                 env!("CARGO_PKG_VERSION"),
                 &payload,
             )
-            .unwrap();
+            .unwrap_err();
+            assert!(error.contains("tty7-server.exe"), "{error}");
             assert_eq!(
                 fs::read(payload.join(PORTABLE_MARKER)).unwrap(),
                 PORTABLE_MARKER_CONTENT

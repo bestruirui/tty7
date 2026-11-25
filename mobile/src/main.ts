@@ -437,64 +437,45 @@ interface ScreenParts {
   title: string;
   back?: { label: string; onclick: () => void };
   trailing?: Child[];
-  /** Under the large title: the connection line on a machine. */
+  /** Under the title: the connection line on a machine. */
   subtitle?: Child;
   body: Child[];
   footer?: Child;
-  /** Floats over the bottom of the list: search and the one "+". */
+  /** Floats over the bottom of the list: search and actions. */
   dock?: Child;
 }
 
-/** A screen with a large title that folds into the bar as it scrolls away. */
+/** A screen with a fixed header and scrolling content. */
 function screen(parts: ScreenParts) {
-  const root = !parts.back;
   onBack = parts.back?.onclick ?? null;
   const bar = h(
     "header",
     { class: "nav" },
-    h(
-      "div",
-      { class: "nav-lead" },
-      parts.back &&
+    parts.back &&
+      h(
+        "div",
+        { class: "nav-lead" },
         h(
           "button",
           { class: "nav-back", onclick: parts.back.onclick, ariaLabel: `Back to ${parts.back.label}` },
           ico("back"),
-          h("span", {}, parts.back.label),
         ),
+      ),
+    h(
+      "div",
+      { class: "nav-titles" },
+      h("h1", { class: "nav-title" }, parts.title),
+      parts.subtitle && h("span", { class: "nav-sub" }, parts.subtitle),
     ),
-    h("div", { class: "nav-title" }, parts.title),
-    h("div", { class: "nav-trail" }, ...(root ? [] : (parts.trailing ?? []))),
+    parts.trailing?.length ? h("div", { class: "nav-trail" }, ...parts.trailing) : null,
   );
-  const large = h("h1", { class: "large-title" }, parts.title);
-  // A top-level screen keeps its buttons beside the large title, not in a
-  // bar of their own above it.
-  const heading = root && parts.trailing?.length
-    ? h("div", { class: "title-row" }, large, h("div", { class: "title-trail" }, ...parts.trailing))
-    : large;
-  const scroll = h(
-    "main",
-    { class: "scroll" },
-    h("div", { class: "title-block" }, heading, parts.subtitle),
-    ...parts.body,
-  );
-  // The title folds into the bar once it has scrolled up under it. On a
-  // top-level screen the bar floats over the list, empty until then. Worked
-  // out from the scroll, not observed: Android's WebView reported a title in
-  // plain view as out of sight when it was observed.
-  scroll.addEventListener(
-    "scroll",
-    () => bar.classList.toggle("folded", scroll.scrollTop > large.offsetTop + large.offsetHeight - bar.offsetHeight),
-    { passive: true },
-  );
+  const scroll = h("main", { class: "scroll" }, ...parts.body);
   const view = h("div", { class: "screen" }, bar, scroll, parts.footer, parts.dock);
   if (parts.dock) view.classList.add("docked");
-  if (root) view.classList.add("root");
   return view;
 }
 
-/** The bar floating at the bottom of a list: a search field, and the screen's
- * one way to add something, within the thumb's reach. */
+/** A floating search field with an add button. */
 function floatingBar(placeholder: string, onSearch: (query: string) => void, add: { label: string; run: () => void }) {
   const field = h("input", {
     type: "search",
@@ -569,10 +550,15 @@ function hostsScreen(direction: "push" | "pop" = "pop") {
       query = q;
       render();
     }, { label: "Pair a machine", run: () => pairScreen() });
+    const pair = dock.querySelector<HTMLButtonElement>(".fab")!;
+    pair.className = "nav-icon";
     dock.hidden = true;
     const view = screen({
       title: "Machines",
-      trailing: [h("button", { class: "nav-icon", ariaLabel: "Settings", onclick: () => settingsScreen() }, ico("settings"))],
+      trailing: [
+        h("button", { class: "nav-icon", ariaLabel: "Settings", onclick: () => settingsScreen() }, ico("settings")),
+        pair,
+      ],
       body: [body],
       dock,
     });
@@ -587,6 +573,9 @@ function hostsScreen(direction: "push" | "pop" = "pop") {
     };
     api.hosts().then((hosts) => {
       all = hosts;
+      // A few machines are found by eye; the search comes with more.
+      dock.hidden = hosts.length < 6;
+      view.classList.toggle("docked", !dock.hidden);
       if (hosts.length === 0) {
         body.replaceChildren(
           h(
@@ -604,9 +593,6 @@ function hostsScreen(direction: "push" | "pop" = "pop") {
         );
         return;
       }
-      dock.hidden = false;
-      // A few machines are found by eye; the search comes with more.
-      dock.querySelector<HTMLElement>(".search")!.hidden = hosts.length < 6;
       render();
     });
     return view;
@@ -1200,7 +1186,7 @@ function hostScreen(host: Host, direction: "push" | "pop" = "pop") {
   remember("last.host", host.id);
   go(direction, () => {
     connectedTo = host.name;
-    const link = h("p", { class: "link" });
+    const link = h("span");
     // Shown here and remembered for the machine list.
     const showLink = (info: LinkInfo | null) => {
       renderLink(link, info);
@@ -1425,7 +1411,7 @@ function hostScreen(host: Host, direction: "push" | "pop" = "pop") {
 }
 
 function renderLink(el: HTMLElement, link: LinkInfo | null) {
-  el.className = `link ${link?.path ?? "offline"}`;
+  el.className = `nav-state ${link?.path ?? "offline"}`;
   const text =
     link === null
       ? "Offline"
@@ -2376,7 +2362,7 @@ interface MenuItem {
  * menu's, not whatever lies under it. */
 let menuDismissedAt = 0;
 
-function menuButton(items: MenuItem[] | (() => MenuItem[]), cls = "nav-icon") {
+function menuButton(items: MenuItem[] | (() => MenuItem[])) {
   const wrap = h("div", { class: "menu-wrap" });
   const list = h("div", { class: "menu", role: "menu", hidden: true });
   const outside = (e: Event) => {
@@ -2407,7 +2393,7 @@ function menuButton(items: MenuItem[] | (() => MenuItem[]), cls = "nav-icon") {
         ),
       );
   };
-  const button = h("button", { class: cls, ariaLabel: "More" }, ico("more"));
+  const button = h("button", { class: "nav-icon", ariaLabel: "More" }, ico("more"));
   button.onclick = () => {
     if (!list.hidden) return close();
     fill();
@@ -2589,13 +2575,13 @@ function terminalScreen(host: Host, place: Place, pane: PaneView, title: string,
     // What the pane is doing and whether keystrokes will land, in words: the
     // one line under the title.
     const stateWord = h("span", {}, "Connecting…");
-    const state = h("span", { class: "term-state connecting" }, h("span", { class: "link-dot" }), stateWord);
+    const state = h("span", { class: "nav-state connecting" }, h("span", { class: "link-dot" }), stateWord);
     // On a remote, the path says which machine it is on, the way a prompt does.
     const where = (path: string | null | undefined) =>
       place && path ? `${place.name}:${shortPath(path)}` : shortPath(path);
     const cwd = h("span", { class: "term-cwd" }, where(pane.cwd));
     let paneCwd = pane.cwd ?? null;
-    const sub = h("span", { class: "term-sub" }, state, cwd);
+    const sub = h("span", { class: "nav-sub" }, state, cwd);
     // Copying, the fit and the phone's size live in the ⋯ menu; the bar keeps
     // only the way back and what this is.
     const menu = menuButton(
@@ -2651,16 +2637,19 @@ function terminalScreen(host: Host, place: Place, pane: PaneView, title: string,
             ]
           : []),
       ],
-      "round",
     );
     const back = () => hostScreen(host);
     onBack = back;
     const bar = h(
       "header",
-      { class: "term-nav" },
-      h("button", { class: "round term-back", ariaLabel: `Back to ${host.name}`, onclick: back }, ico("back")),
-      h("div", { class: "term-titles" }, h("span", { class: "term-title" }, title), sub),
-      menu,
+      { class: "nav" },
+      h(
+        "div",
+        { class: "nav-lead" },
+        h("button", { class: "nav-back term-back", ariaLabel: `Back to ${host.name}`, onclick: back }, ico("back")),
+      ),
+      h("div", { class: "nav-titles" }, h("span", { class: "nav-title" }, title), sub),
+      h("div", { class: "nav-trail" }, menu),
     );
     const screenEl = h("div", { class: "term" });
     const banner = h("div", { class: "term-banner-slot" });
@@ -4030,7 +4019,7 @@ function terminalScreen(host: Host, place: Place, pane: PaneView, title: string,
     window.addEventListener("theme", retheme);
 
     const setState = (cls: string, label: string) => {
-      state.className = `term-state ${cls}`;
+      state.className = `nav-state ${cls}`;
       stateWord.textContent = label;
     };
     const clearBanner = () => banner.replaceChildren();

@@ -277,7 +277,7 @@ pub fn logs() -> Result<Outcome> {
     )
 }
 
-fn server_exe() -> Result<PathBuf> {
+pub(crate) fn server_exe() -> Result<PathBuf> {
     let name = server_exe_name();
     let own_dir = std::env::current_exe()
         .ok()
@@ -285,7 +285,7 @@ fn server_exe() -> Result<PathBuf> {
     let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
-    resolve_server_exe(
+    let resolved = resolve_server_exe(
         std::env::var_os(SERVER_EXE_ENV)
             .filter(|v| !v.is_empty())
             .as_deref(),
@@ -293,8 +293,17 @@ fn server_exe() -> Result<PathBuf> {
         &path_dirs,
         name,
         |p| p.is_file(),
-    )
-    .ok_or_else(|| {
+    );
+    #[cfg(target_os = "linux")]
+    let resolved = resolved.or_else(|| {
+        let server = config::config_dir_path()?.join("server-runtime")
+            .join(format!("{}-c{}p{}", env!("CARGO_PKG_VERSION"),
+                tty7_core::daemon::control::CONTROL_VERSION,
+                tty7_core::daemon::protocol::PROTOCOL_VERSION))
+            .join("usr/bin/tty7-server");
+        server.is_file().then_some(server)
+    });
+    resolved.ok_or_else(|| {
         anyhow::anyhow!(
             "could not find {name} next to this binary or on PATH — install it, or point \
              {SERVER_EXE_ENV} at it"

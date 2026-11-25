@@ -28,6 +28,7 @@ Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 
 Copy-Item "target/$Target/release/tty7-app.exe" "$Stage/tty7-app.exe"
+Copy-Item "target/$Target/release/tty7-server.exe" "$Stage/tty7-server.exe"
 # The CLI, staged beside the GUI so both the zip and the installer carry it.
 # `core::cli_install` resolves it relative to tty7-app.exe and puts that
 # directory on the user's PATH.
@@ -43,7 +44,7 @@ Copy-Item README.md "$Stage/README.md"
 
 # Microsoft's redistributable ConPTY, which `portable-pty` prefers over the
 # in-box conhost when it sits beside the running executable — and the daemon is
-# `tty7-app.exe --daemon`, so beside it is exactly here. The in-box host
+# `tty7-server.exe --daemon`, so beside it is exactly here. The in-box host
 # swallows a pane's OSC 11 background query (#345); this pair forwards it. The
 # two files are one unit, so a missing half is an error rather than a warning.
 # See assets/windows/conpty/README.md.
@@ -60,9 +61,7 @@ Copy-Item "assets/windows/conpty/LICENSE.txt" "$Stage/LICENSE-ConPTY.txt"
 # the binary this client shipped with (WSL downloads nothing). The
 # lookup path is a contract with `daemon::install::wsl` — it searches
 # <dir of tty7-app.exe>/server/<asset> first — so this directory name is not free to
-# change on its own. Missing is a warning, not an error, matching `server-musl`'s
-# own skip-don't-fail probe; WSL then fails at connect time with a message
-# naming the directories it searched.
+# change on its own. A missing server makes the payload incomplete.
 #
 # The *filename* is a contract too, not just the directory: `wsl.rs` looks for
 # `<dir>/<asset name>`, so these strings have to stay whatever
@@ -79,7 +78,7 @@ if (Test-Path $ServerSrc) {
     Copy-Item $ServerSrc "$Stage/server/$ServerAsset"
     Write-Host "OK bundled $ServerAsset"
 } else {
-    Write-Warning "no $ServerAsset to bundle - this build cannot serve WSL distros"
+    throw "missing $ServerAsset - the Windows payload requires its WSL server"
 }
 
 # The marker tells the in-app updater which of the two Windows layouts it is

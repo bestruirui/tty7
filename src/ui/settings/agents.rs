@@ -82,7 +82,7 @@ impl Tty7App {
         let menu_open = s.menu.clone();
 
         // The machine the hooks below belong to.
-        let machines = self.agent_hooks_machines(cx);
+        let machines = Self::settings_machines(cx);
         let offline = self.agent_hooks_offline_count(cx);
         let current = machines
             .iter()

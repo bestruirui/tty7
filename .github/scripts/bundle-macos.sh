@@ -43,6 +43,8 @@ rm -rf "$DIST"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/tty7-app" "$APP/Contents/MacOS/tty7-app"
 chmod +x "$APP/Contents/MacOS/tty7-app"
+cp "$BIN_DIR/tty7-server" "$APP/Contents/MacOS/tty7-server"
+chmod +x "$APP/Contents/MacOS/tty7-server"
 # The CLI rides inside the bundle rather than beside it: a DMG is drag-to-
 # Applications, so anything not in the .app never reaches the user's disk. The
 # GUI symlinks it onto PATH at launch (see core::cli_install), which is why it
@@ -242,6 +244,8 @@ ENT
     # them.
     codesign --force --options runtime "$TIMESTAMP" \
         --sign "$SIGN_ID" "$APP/Contents/MacOS/tty7"
+    codesign --force --options runtime "$TIMESTAMP" \
+        --sign "$SIGN_ID" "$APP/Contents/MacOS/tty7-server"
     if [[ "$PACKAGE_UPDATE_ZIP" != "0" ]]; then
         codesign --force --options runtime "$TIMESTAMP" \
             --sign "$SIGN_ID" "$APP/Contents/MacOS/tty7-updater"
@@ -297,7 +301,7 @@ fi
 # cheap next to carrying a second copy of this block inside each branch.
 BUNDLE_FAIL=0
 ASSERT_MACHO="$(dirname "$0")/assert-macho.sh"
-BUNDLED_BINS=(tty7-app tty7)
+BUNDLED_BINS=(tty7-app tty7-server tty7)
 if [[ "$PACKAGE_UPDATE_ZIP" != "0" ]]; then
     BUNDLED_BINS+=(tty7-updater)
 fi

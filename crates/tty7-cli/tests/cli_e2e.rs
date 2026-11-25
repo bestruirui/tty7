@@ -21,7 +21,9 @@ fn main() {
         return;
     }
     if std::env::var(DAEMON_ENV).as_deref() == Ok("1") {
-        if let Err(e) = tty7_core::daemon::server::run_daemon() {
+        if let Err(e) = tty7_core::daemon::server::run_daemon(|_, _| {
+            Err("mobile access is not available in this process".into())
+        }) {
             eprintln!("e2e daemon exited with error: {e}");
             std::process::exit(1);
         }

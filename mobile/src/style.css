@@ -235,26 +235,18 @@ code {
 .nav {
   flex: none;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) fit-content(50%) minmax(0, 1fr);
+  grid-template-areas: "leading title trailing";
   align-items: center;
   gap: 8px;
   height: calc(44px + var(--inset-top));
-  padding: var(--inset-top) max(16px, var(--inset-right)) 0
-    max(16px, var(--inset-left));
-  background: var(--canvas);
-  box-shadow: 0 1px 0 transparent;
-  transition:
-    background 0.2s,
-    box-shadow 0.2s;
-  position: relative;
-  z-index: 2;
-}
-
-.nav.folded {
+  padding: var(--inset-top) max(16px, var(--inset-left), var(--inset-right)) 0;
   background: var(--bar);
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   box-shadow: 0 0.5px 0 var(--hair);
+  position: relative;
+  z-index: 2;
 }
 
 .nav-lead,
@@ -264,71 +256,62 @@ code {
   min-width: 0;
 }
 
+.nav-lead {
+  grid-area: leading;
+}
+
 .nav-trail {
+  grid-area: trailing;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .nav-title {
+  margin: 0;
+  max-width: 100%;
   font-weight: 600;
   font-size: 17px;
+  line-height: 1.25;
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 50vw;
-  opacity: 0;
-  transform: translateY(4px);
-  transition:
-    opacity 0.2s,
-    transform 0.25s var(--ease);
 }
 
-.nav.folded .nav-title {
-  opacity: 1;
-  transform: none;
+.nav-titles {
+  grid-area: title;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
 }
 
-/* Until it folds in, the title takes no room, so the way back is named in
-   full; once it shows, the back pill gives way to it. */
-.nav:not(.folded) .nav-title {
-  max-width: 0;
-}
-
-/* Back is a floating pill that names where it goes. */
-.nav-back {
+.nav-sub {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 38px;
-  padding: 0 14px 0 8px;
-  border-radius: 19px;
-  background: var(--cell);
-  box-shadow: var(--lift);
-  color: var(--ink);
-  font-size: 15px;
+  max-width: 100%;
   min-width: 0;
-}
-
-.nav-back span:last-child {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ink-2);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.nav-back .icon {
-  width: 20px;
-  height: 20px;
+.nav-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
 }
 
-/* Once the title shows, the pill would be cut to "Machin…" beside it: it
-   gives way to the round chevron alone, as the system's own bar does. */
-.nav.folded .nav-back {
-  width: 38px;
-  padding: 0;
-  justify-content: center;
+.nav-state.offline {
+  color: var(--danger);
 }
 
-.nav.folded .nav-back span:last-child {
-  display: none;
+.nav-state .link-dot {
+  width: 5px;
+  height: 5px;
 }
 
 .nav-back:active,
@@ -337,23 +320,8 @@ code {
   opacity: 0.55;
 }
 
-.nav-icon {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 19px;
-  background: var(--cell);
-  box-shadow: var(--lift);
-  color: var(--ink);
-}
-
-.nav-icon .icon {
-  width: 22px;
-  height: 22px;
-}
-
-/* A round control on a surface of its own: the terminal's bar, a sheet. */
+.nav-back,
+.nav-icon,
 .round {
   display: grid;
   place-items: center;
@@ -361,10 +329,20 @@ code {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: var(--fill);
   color: var(--ink);
 }
 
+.round {
+  background: var(--fill);
+}
+
+.nav-icon .icon {
+  width: 22px;
+  height: 22px;
+}
+
+.nav-back .icon,
+.nav .nav-icon .icon,
 .round .icon {
   width: 20px;
   height: 20px;
@@ -386,62 +364,13 @@ code {
   overflow-y: auto;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 0 max(0px, var(--inset-right)) calc(32px + var(--safe-bottom))
+  padding: 14px max(0px, var(--inset-right)) calc(32px + var(--safe-bottom))
     max(0px, var(--inset-left));
-}
-
-.title-block {
-  padding: 14px 24px 22px;
-}
-
-/* A top-level screen has nothing in its bar until the title folds into it:
-   the bar floats over the list, clear until then, and the large title sits
-   just under the status bar. */
-.screen.root .nav {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  background: transparent;
-  pointer-events: none;
-}
-
-.screen.root .nav.folded {
-  background: var(--bar);
-}
-
-.screen.root .scroll {
-  padding-top: var(--inset-top);
-}
-
-.screen.root .title-block {
-  padding-top: 8px;
 }
 
 /* Clear of the floating bar at the bottom. */
 .screen.docked .scroll {
   padding-bottom: calc(104px + var(--safe-bottom));
-}
-
-.title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.title-trail {
-  display: flex;
-  flex: none;
-  gap: 8px;
-}
-
-.large-title {
-  font-size: 34px;
-  line-height: 1.12;
-  font-weight: 700;
-  letter-spacing: -0.024em;
-  overflow-wrap: anywhere;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1319,67 +1248,6 @@ html.scanning #app {
   background: var(--term);
 }
 
-/* Back, the title with its state, and ⋯: nothing else. */
-.term-nav {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: calc(56px + var(--inset-top));
-  padding: var(--inset-top) max(16px, var(--inset-right)) 0
-    max(16px, var(--inset-left));
-  background: var(--term);
-  box-shadow: 0 0.5px 0 var(--hair);
-  position: relative;
-  z-index: 2;
-}
-
-.term-titles {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  min-width: 0;
-}
-
-.term-title {
-  max-width: 100%;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.term-sub {
-  display: flex;
-  align-items: center;
-  max-width: 100%;
-  min-width: 0;
-  font-size: 12px;
-  line-height: 1.35;
-  color: var(--ink-2);
-  white-space: nowrap;
-}
-
-.term-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-}
-
-.term-state.offline {
-  color: var(--danger);
-}
-
-.term-state .link-dot {
-  width: 5px;
-  height: 5px;
-}
-
 .term-cwd {
   min-width: 0;
   overflow: hidden;
@@ -1554,6 +1422,7 @@ html.scanning #app {
 
 .key-pages {
   display: flex;
+  padding: 2px 0;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
@@ -1569,8 +1438,8 @@ html.scanning #app {
   gap: 6px;
   flex: 0 0 100%;
   scroll-snap-align: start;
-  /* A page's last key clear of the next page's first. */
-  padding-right: 1px;
+  /* Keep the outer keys' outlines clear of the scroll edges. */
+  padding: 0 1px;
 }
 
 .key {
@@ -2380,13 +2249,9 @@ html[data-nav="pop"]::view-transition-new(root) {
   opacity: 0;
 }
 
-/* A phone on its side has height to spare for nothing but the pane: the bar
-   slims, and the keys and the message box share one row. */
+/* A phone on its side has height to spare for nothing but the pane: the keys
+   and the message box share one row. */
 @media (orientation: landscape) and (max-height: 500px) {
-  .term-nav {
-    height: calc(44px + var(--inset-top));
-  }
-
   .term-dock {
     flex-direction: row;
     align-items: center;

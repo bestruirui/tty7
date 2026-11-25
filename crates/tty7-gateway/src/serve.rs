@@ -52,6 +52,7 @@ const PAIR_FAILURE_DELAY: Duration = Duration::from_secs(2);
 /// `machine` names a remote the desktop is linked to, by its link key, and is
 /// `None` for this machine itself.
 pub trait Backend: Send + Sync + 'static {
+    fn shutdown(&self) {}
     fn hostname(&self) -> String;
     fn snapshot(&self) -> io::Result<(Machine, Vec<PaneAgentState>)>;
     /// Every machine the desktop is linked to, each read through its link.
@@ -405,9 +406,7 @@ async fn control_stream(
 ) -> io::Result<()> {
     let (events_tx, mut events) = mpsc::channel::<ControlEvent>(4);
     let (refresh_tx, refresh_rx) = std_mpsc::channel::<()>();
-    std::thread::Builder::new()
-        .name("gateway-tree".into())
-        .spawn(move || watch_tree(backend, events_tx, refresh_rx))?;
+    tokio::task::spawn_blocking(move || watch_tree(backend, events_tx, refresh_rx));
 
     // A `select!` drops whichever arm loses, so the read has to survive
     // being dropped mid-frame.
@@ -548,9 +547,7 @@ async fn pane_stream(
     // Weak, so the stream still ends when the pane's feed does.
     let refused = down_tx.downgrade();
     let mut leases = feed.leases();
-    std::thread::Builder::new()
-        .name(format!("gateway-pane-{pane_id}"))
-        .spawn(move || read_pane(feed, down_tx))?;
+    tokio::task::spawn_blocking(move || read_pane(feed, down_tx));
 
     // Keystrokes go through one thread so they reach the pane in the order
     // they were typed; each `send_input` is its own daemon round trip. One
@@ -558,58 +555,59 @@ async fn pane_stream(
     // live pane while what it types goes nowhere. Take-overs share the
     // thread, so one sent after some keys lands after them.
     let (input_tx, input_rx) = std_mpsc::channel::<Up>();
-    std::thread::Builder::new()
-        .name(format!("gateway-input-{pane_id}"))
-        .spawn(move || {
-            let tell = |event: PaneEvent| {
-                if let Some(down) = refused.upgrade() {
-                    let _ = down.blocking_send(Down::Event(event));
-                }
-            };
-            let mut typing = true;
-            for up in input_rx {
-                match up {
-                    // Once typing has failed, the phone has been told; later
-                    // keys are dropped rather than ending the stream, which
-                    // would read as the pane closing.
-                    Up::Keys(_) if !typing => {}
-                    Up::Keys(bytes) => {
-                        if let Err(e) = backend.send_input(machine.as_deref(), pane_id, &bytes) {
-                            log::debug!("mobile gateway: input to pane {pane_id}: {e}");
-                            typing = false;
-                            tell(PaneEvent::Error {
-                                message: format!("typing didn't reach the pane: {e}"),
-                            });
-                        }
+    tokio::task::spawn_blocking(move || {
+        let tell = |event: PaneEvent| {
+            if let Some(down) = refused.upgrade() {
+                let _ = down.blocking_send(Down::Event(event));
+            }
+        };
+        let mut typing = true;
+        for up in input_rx {
+            if refused.upgrade().is_none() {
+                break;
+            }
+            match up {
+                // Once typing has failed, the phone has been told; later
+                // keys are dropped rather than ending the stream, which
+                // would read as the pane closing.
+                Up::Keys(_) if !typing => {}
+                Up::Keys(bytes) => {
+                    if let Err(e) = backend.send_input(machine.as_deref(), pane_id, &bytes) {
+                        log::debug!("mobile gateway: input to pane {pane_id}: {e}");
+                        typing = false;
+                        tell(PaneEvent::Error {
+                            message: format!("typing didn't reach the pane: {e}"),
+                        });
                     }
-                    Up::Lease(request) => {
-                        let request = match request {
-                            PaneRequest::TakeOver { size } => LeaseRequest::Take {
-                                size: lease_size(size),
-                                by: by.clone(),
-                            },
-                            PaneRequest::Release => LeaseRequest::Release,
-                        };
-                        let sent = match leases.as_mut() {
-                            Some(leases) => leases.send(request),
-                            None => Err(io::Error::new(
-                                io::ErrorKind::Unsupported,
-                                "this pane can't be taken over",
-                            )),
-                        };
-                        // The daemon answers a lease itself, with who holds
-                        // it; only a request that never got there is ours
-                        // to answer.
-                        if let Err(e) = sent {
-                            tell(PaneEvent::Lease {
-                                held: false,
-                                refused: Some(e.to_string()),
-                            });
-                        }
+                }
+                Up::Lease(request) => {
+                    let request = match request {
+                        PaneRequest::TakeOver { size } => LeaseRequest::Take {
+                            size: lease_size(size),
+                            by: by.clone(),
+                        },
+                        PaneRequest::Release => LeaseRequest::Release,
+                    };
+                    let sent = match leases.as_mut() {
+                        Some(leases) => leases.send(request),
+                        None => Err(io::Error::new(
+                            io::ErrorKind::Unsupported,
+                            "this pane can't be taken over",
+                        )),
+                    };
+                    // The daemon answers a lease itself, with who holds
+                    // it; only a request that never got there is ours
+                    // to answer.
+                    if let Err(e) = sent {
+                        tell(PaneEvent::Lease {
+                            held: false,
+                            refused: Some(e.to_string()),
+                        });
                     }
                 }
             }
-        })?;
+        }
+    });
 
     // A `select!` drops whichever arm loses — every time output goes down —
     // so the read has to survive being dropped mid-frame.

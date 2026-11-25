@@ -206,9 +206,9 @@ impl Backend for RealBackend {
         if self.machine.is_some() {
             return None;
         }
-        let app = crate::gui::find_executable().ok()?;
+        let server = crate::server::server_exe().ok()?;
         let host = tty7_core::host::local::LocalHost::new();
-        let target = HookTarget::local_for_exe(&*host, app)?;
+        let target = HookTarget::local_for_exe(&*host, server)?;
         Some(hooks_state(&target, agent))
     }
 

@@ -19,6 +19,7 @@ OPTIONS:
       --pane                Forward to the machine's *pane* socket instead
       --control-sock <p>    Use <p> as the control socket instead of the default
     --stop                Ask the running daemon to shut down, and wait for it
+      --update-install-dir <dir>  Release installed images before replacing them
     --config-dir <dir>    Use <dir> for the socket, config and session files
     --protocol            Print the dialects this binary speaks, as JSON
     -V, --version         Print the version and exit
@@ -63,6 +64,15 @@ fn main() -> ExitCode {
     // SIGTERM, which Windows has no equivalent of; this is the graceful
     // shutdown a local tty7 uses there, with its reap as the fallback.
     if args.iter().any(|a| a == "--stop") {
+        #[cfg(windows)]
+        if let Some(dir) = flag_value(&args, "--update-install-dir") {
+            tty7_core::daemon::update_guard::hold_for_parent();
+            if let Err(e) = tty7_core::daemon::spawn::stop_for_update(std::path::Path::new(&dir)) {
+                eprintln!("tty7-server: could not prepare installation for replacement: {e}");
+                return ExitCode::FAILURE;
+            }
+            return ExitCode::SUCCESS;
+        }
         tty7_core::daemon::spawn::stop();
         return ExitCode::SUCCESS;
     }
@@ -86,7 +96,12 @@ fn main() -> ExitCode {
 }
 
 fn run_daemon() -> ExitCode {
-    if let Err(e) = tty7_core::daemon::server::run_daemon() {
+    if let Err(e) = tty7_core::daemon::server::run_daemon(|registry, services| {
+        let backend = std::sync::Arc::new(tty7_gateway::daemon::Daemon::in_process(registry, services));
+        tty7_gateway::service::Manager::new(backend)
+            .map(|manager| Box::new(manager) as Box<dyn tty7_core::daemon::mobile::Gateway>)
+            .map_err(|e| format!("{e:#}"))
+    }) {
         eprintln!("tty7-server: daemon exited with error: {e}");
         return ExitCode::FAILURE;
     }

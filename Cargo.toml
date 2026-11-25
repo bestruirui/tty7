@@ -22,21 +22,10 @@ required-features = ["updater"]
 # The framework-free half of tty7: wire protocol, session daemon, PTY, the
 # native SSH engine, and the domain model the headless `tty7-server` shares with
 # this GUI. Everything that does *not* need gpui lives there.
-# `gssapi` is off in tty7-core's defaults (a static musl `tty7-server` cannot
-# link the system krb5 it binds); the GUI, which builds against a real desktop
-# toolchain, turns it on so managed SSH connections keep offering
-# `gssapi-with-mic` exactly as before.
+# `remote-install` provides the GUI's remote-server downloads. The server also
+# enables it through the gateway for proxy resolution and linked-machine setup.
 #
-# `remote-install` is off there for the same shape of reason: it pulls an HTTPS
-# client used only to *download* a `tty7-server` onto a remote machine
-# (decision D5). The server binary is the thing being downloaded, so it can
-# never take that path; the GUI, which is the client that pushes it, can.
-#
-tty7-core = { path = "crates/tty7-core", features = ["gssapi", "remote-install"] }
-# The mobile gateway, run by the local daemon while mobile access is on
-# (`core::mobile`). Lives in the GUI binary only: tty7-server is the lean static
-# binary pushed to remote machines, and must not grow iroh.
-tty7-gateway = { path = "crates/tty7-gateway" }
+tty7-core = { path = "crates/tty7-core", features = ["remote-install"] }
 # Draws the pairing code in Settings → Mobile.
 qrcode = { version = "0.14", default-features = false }
 
