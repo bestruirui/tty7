@@ -138,7 +138,8 @@ function why(message: string, name: string) {
 }
 
 function errorText(e: unknown) {
-  return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+  if (e !== null && typeof e === "object" && "message" in e && typeof e.message === "string") return e.message;
+  return String(e);
 }
 
 // ---------------------------------------------------------------------------
@@ -959,17 +960,27 @@ async function scanCode(): Promise<string | null> {
   if (state !== "granted" && state !== "denied") state = await scanner.requestPermissions();
   if (state !== "granted") throw new CameraDenied();
 
+  const cancel = h("button", { class: "button scanner-cancel" }, "Cancel");
+  const cancelled = new Promise<null>((resolve, reject) => {
+    cancel.onclick = () => {
+      cancel.disabled = true;
+      void scanner.cancel().then(() => resolve(null), reject);
+    };
+  });
   const overlay = h(
     "div",
     { class: "scanner" },
     h("div", { class: "scanner-frame" }),
     h("p", { class: "scanner-hint" }, "Point at the QR code in tty7 on your computer"),
-    h("button", { class: "button scanner-cancel", onclick: () => void scanner.cancel() }, "Cancel"),
+    cancel,
   );
   document.documentElement.classList.add("scanning");
   document.body.append(overlay);
   try {
-    return (await scanner.scan({ windowed: true, formats: [scanner.Format.QRCode] })).content;
+    return await Promise.race([
+      scanner.scan({ windowed: true, formats: [scanner.Format.QRCode] }).then((result) => result.content),
+      cancelled,
+    ]);
   } catch (e) {
     if (/cancel/i.test(errorText(e))) return null;
     throw e;
@@ -1023,6 +1034,7 @@ function pairScreen(linked?: string) {
 
     const scan = h("button", { class: "chip", hidden: !canScan }, ico("scan"), "Scan");
     scan.onclick = async () => {
+      scan.disabled = true;
       error.textContent = "";
       try {
         const got = (await scanCode())?.trim();
@@ -1040,6 +1052,8 @@ function pairScreen(linked?: string) {
           e instanceof CameraDenied
             ? "tty7 can't use the camera. Allow it in Settings, or paste the code instead."
             : sentence(errorText(e));
+      } finally {
+        scan.disabled = false;
       }
     };
 
