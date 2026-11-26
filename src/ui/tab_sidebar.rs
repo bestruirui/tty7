@@ -997,6 +997,15 @@ impl Tty7App {
                 .filter(|r| Some(r.group) == pinned_id)
                 .map(|r| r.input.clone());
             let header = section.name.clone().map(|name| {
+                let shared_git = {
+                    let mut known = visible_by_section[group_ix].iter().filter_map(|&i| {
+                        let leaf = self.tabs[i].pane.focused_or_first(window, cx)?;
+                        let view = leaf.read(cx);
+                        cx.try_global::<GitStatusCache>()?
+                            .status_for(view.host_id(), &view.effective_host_cwd()?)
+                    });
+                    known.next().filter(|status| known.all(|other| other == *status))
+                };
                 let ts = window.text_system();
                 let mut avail = row_metrics::header_budget(width);
                 if folded {
@@ -1011,7 +1020,35 @@ impl Tty7App {
                         + row_metrics::META_GAP;
                 }
                 let avail = avail.max(HEADER_NAME_FLOOR);
-                let label = elide_label(&ts, &header_font, header_size, &name, avail);
+                let counts: Vec<String> = shared_git
+                    .as_ref()
+                    .map(|status| {
+                        [
+                            (status.added > 0).then(|| format!("+{}", status.added)),
+                            (status.removed > 0).then(|| format!("−{}", status.removed)),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect()
+                    })
+                    .unwrap_or_default();
+                let counts_w = if counts.is_empty() {
+                    0.
+                } else {
+                    counts.iter()
+                        .map(|text| measure_text(&ts, &meta_font, header_size, text))
+                        .sum::<f32>()
+                        + measure_text(&ts, &meta_font, header_size, "·")
+                        + (counts.len() + 1) as f32 * row_metrics::META_GAP
+                };
+                let name_avail = shared_git.as_ref().map_or(avail, |status| {
+                    let want = 2. * row_metrics::META_GAP
+                        + measure_text(&ts, &meta_font, header_size, &status.branch)
+                        + counts_w;
+                    (avail - want.min(avail * 0.5)).max(HEADER_NAME_FLOOR)
+                });
+                let label = elide_label(&ts, &header_font, header_size, &name, name_avail);
+                let name_w = measure_text(&ts, &header_font, header_size, &label);
                 let hover_group = SharedString::from(format!("sidebar-group-{group_ix}"));
                 let bar = h_flex()
                     .id(("sidebar-group", group_ix))
@@ -1028,7 +1065,6 @@ impl Tty7App {
                     .text_size(px(header_size))
                     .text_color(cx.theme().muted_foreground)
                     .font_features(tabular())
-                    .hover(|s| s.text_color(cx.theme().foreground))
                     .on_click(cx.listener({
                         let key = group_key.clone();
                         move |this, _, _window, cx| this.toggle_sidebar_group(key.as_ref(), cx)
@@ -1125,6 +1161,9 @@ impl Tty7App {
                         // paints; the name no longer gives room to the branch.
                         None => div()
                             .id(("sidebar-group-name", group_ix))
+                            .group_hover(hover_group.clone(), |s| {
+                                s.text_color(cx.theme().foreground)
+                            })
                             .flex_shrink_0()
                             .min_w_0()
                             .truncate()
@@ -1143,6 +1182,34 @@ impl Tty7App {
                                 })
                             })
                             .into_any_element(),
+                    })
+                    .when_some(shared_git, |bar, status| {
+                        let branch_avail =
+                            (avail - name_w - 2. * row_metrics::META_GAP - counts_w).max(0.);
+                        let line = h_flex()
+                            .id(("sidebar-group-git", group_ix))
+                            .flex_shrink(1.)
+                            .min_w_0()
+                            .items_center()
+                            .gap_1p5()
+                            .child(
+                                div()
+                                    .max_w(px(branch_avail))
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(status.branch),
+                            )
+                            .when(!counts.is_empty(), |line| {
+                                line.child(div().flex_shrink_0().child("·"))
+                                    .children(counts.into_iter().map(|text| {
+                                        div()
+                                            .flex_shrink_0()
+                                            .whitespace_nowrap()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(text)
+                                    }))
+                            });
+                        bar.child(div().flex_1()).child(line)
                     })
                     // The count is redundant while the rows are on screen; it
                     // is what a shut group has instead of them.
@@ -2860,6 +2927,8 @@ mod fold_tests {
                 Some(RepoSnapshot {
                     root: PathBuf::from(root),
                     home: PathBuf::from(home),
+                    branch: "main".into(),
+                    counts: Some((0, 0)),
                 }),
             );
         });

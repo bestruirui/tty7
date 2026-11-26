@@ -1912,10 +1912,6 @@ impl TerminalView {
         cx.notify();
     }
 
-    pub fn host_cwd(&self) -> Option<std::path::PathBuf> {
-        self.cwd_is_on_host().then(|| self.cwd())?
-    }
-
     fn cwd_is_on_host(&self) -> bool {
         cwd_is_on_host(!self.paths_are_local(), self.host_id.is_local())
     }
@@ -2044,45 +2040,41 @@ impl TerminalView {
     /// agent moving into a git worktree does not `chdir` — the `claude`
     /// process stays where it was launched while the session works somewhere
     /// else entirely. The hook stream carries the agent's own cwd for exactly
-    /// this reason (`AgentSessionState::cwd`), and the git-status poll already
-    /// folds the two together into `git_status_cwd`; this reads that result
-    /// back out under a name that doesn't imply it's only about git.
-    ///
-    /// `git_status_cwd` is only ever set for a pane whose paths belong to its
-    /// host, so the fallback here is what decides that: this one takes any
-    /// cwd, [`Self::effective_host_cwd`] takes only one the host can resolve.
+    /// this reason (`AgentSessionState::cwd`). Read it directly so directory
+    /// consumers do not depend on when Git was last refreshed.
     pub fn effective_cwd(&self) -> Option<std::path::PathBuf> {
-        self.git_status_cwd.clone().or_else(|| self.cwd())
+        self.terminal
+            .agent_session()
+            .and_then(|s| s.cwd)
+            .or_else(|| self.cwd())
     }
 
     /// [`Self::effective_cwd`], restricted to paths the pane's host can act
     /// on — for callers that will hand the result to a `Host` call.
     pub fn effective_host_cwd(&self) -> Option<std::path::PathBuf> {
-        self.git_status_cwd.clone().or_else(|| self.host_cwd())
+        self.cwd_is_on_host().then(|| self.effective_cwd())?
     }
 
     /// The directory the composer resolves its `/` and `@` lookups in — see
     /// [`files_cwd`].
     ///
-    /// Follows a coding agent the way [`Self::effective_cwd`] does. A WSL
-    /// pane gets no `git_status_cwd` (its paths are not its host's), so the
-    /// agent's own cwd is read here directly before the shell's.
+    /// Follows a coding agent through [`Self::effective_cwd`], including WSL
+    /// panes whose paths need to be translated for the local host.
     pub fn files_cwd(&self) -> Option<std::path::PathBuf> {
         let distro = wsl_share_distro(
             self.terminal.remote_context().as_ref(),
             self.workspace.as_ref(),
             self.host_id.is_local(),
         );
-        let cwd = self
-            .terminal
-            .agent_session()
-            .and_then(|s| s.cwd)
-            .or_else(|| self.cwd());
-        files_cwd(self.effective_host_cwd(), distro.as_deref(), cwd)
+        files_cwd(
+            self.effective_host_cwd(),
+            distro.as_deref(),
+            self.effective_cwd(),
+        )
     }
 
     pub fn refresh_git_status_now(&mut self, cx: &mut Context<Self>) {
-        let cwd = self.git_status_cwd.clone();
+        let cwd = self.effective_host_cwd();
         if cwd.is_some() {
             self.refresh_git_status(cwd, GitRefresh::Opportunistic, cx);
         }
@@ -3286,15 +3278,7 @@ impl TerminalView {
                 false
             }
         };
-        let cwd_now = self
-            .cwd_is_on_host()
-            .then(|| {
-                session
-                    .as_ref()
-                    .and_then(|s| s.cwd.clone())
-                    .or_else(|| self.cwd())
-            })
-            .flatten();
+        let cwd_now = self.effective_host_cwd();
         if cwd_now.as_ref() != self.git_status_cwd.as_ref() || cmd_finished || turn_finished {
             self.refresh_git_status(cwd_now, GitRefresh::Edge, cx);
         } else if tool_activity {

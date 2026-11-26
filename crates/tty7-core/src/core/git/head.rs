@@ -17,6 +17,8 @@ pub struct RepoHead {
     pub root: PathBuf,
     /// The main working tree a linked one belongs to; `root` otherwise.
     pub home: PathBuf,
+    /// `None` when Git must name HEAD, such as a detached HEAD or reftable.
+    pub branch: Option<String>,
 }
 
 /// The repository `cwd` is in, or `None` when it is in none.
@@ -37,7 +39,15 @@ pub fn read_head(cwd: &Path) -> Option<RepoHead> {
         return None;
     }
     let home = home_of(&root, &git_dir);
-    Some(RepoHead { root, home })
+    let branch = std::fs::read_to_string(git_dir.join("HEAD"))
+        .ok()
+        .and_then(|head| {
+            let name = head
+                .trim_end_matches(['\n', '\r'])
+                .strip_prefix("ref: refs/heads/")?;
+            (!name.is_empty() && name != ".invalid").then(|| name.to_string())
+        });
+    Some(RepoHead { root, home, branch })
 }
 
 /// The main working tree `root` belongs to, given its git directory.

@@ -448,16 +448,8 @@ if (-not $env:TTY7_SHELL_INTEGRATION) {
   # Gates the D marker so the first prompt (no command yet) emits no bogus exit.
   $global:__Tty7CmdActive = $false
 
-  # Who and where, for the OSC 7 host and the OSC 0 title. Read through .NET
-  # rather than the USERNAME / COMPUTERNAME / USERPROFILE environment variables:
-  # those spellings exist only on Windows, and on macOS and Linux all three come
-  # back empty, which left every pwsh pane there titled `@:` followed by a full
-  # un-abbreviated path (issue #583). $HOME is PowerShell's own automatic
-  # variable and is right on every platform. Resolved once — none of the three
-  # changes within a session.
-  $global:__Tty7User = [Environment]::UserName
+  # OSC 7 needs the host name on every platform; COMPUTERNAME is Windows-only.
   $global:__Tty7Host = [Environment]::MachineName
-  $global:__Tty7Home = if ($HOME) { $HOME.Replace('\', '/').TrimEnd('/') } else { '' }
 
   function global:prompt {
     # $? first: an assignment sets $? to true, so read it before anything else.
@@ -472,34 +464,15 @@ if (-not $env:TTY7_SHELL_INTEGRATION) {
       Write-Host -NoNewline "$($global:__Tty7Esc)]133;D;$code$($global:__Tty7Bel)"
     }
 
-    # cwd + title, for real filesystem locations only.
+    # Report cwd for real filesystem locations only.
     if ($PWD.Provider.Name -eq 'FileSystem') {
-      $fsPath = $PWD.ProviderPath
-
       # OSC 7 cwd. Escape a literal % as %25 (the daemon percent-decodes the
       # payload) and use forward slashes. Force one leading slash so a Windows
       # drive path (`C:/…`) becomes `/C:/…` — the absolute-path shape the URI
       # expects — while a POSIX path keeps its single slash instead of doubling it.
-      $p = $fsPath.Replace('%', '%25').Replace('\', '/')
+      $p = $PWD.ProviderPath.Replace('%', '%25').Replace('\', '/')
       if (-not $p.StartsWith('/')) { $p = '/' + $p }
       Write-Host -NoNewline "$($global:__Tty7Esc)]7;file://$($global:__Tty7Host)$p$($global:__Tty7Bel)"
-
-      # OSC 0 window/tab title "user@host:dir". Neither a PowerShell profile nor
-      # pwsh itself sets a useful title — on macOS pwsh emits an *empty* OSC 0 —
-      # so without this every tty7 tab running PowerShell stays generic, on every
-      # platform. Forward slashes (so tty7's tab-label parser can take the last
-      # path segment) and home shown as `~`. Re-emitted each prompt so it tracks
-      # cwd; a full-screen app's own title still overrides it while it runs.
-      #
-      # The home match needs the separator, not just the prefix: with a home of
-      # `/Users/ann`, a bare StartsWith also swallows `/Users/annex`, retitling it
-      # `~ex`.
-      $titlePath = $fsPath.Replace('\', '/')
-      if ($global:__Tty7Home -and ($titlePath -eq $global:__Tty7Home -or
-          $titlePath.StartsWith($global:__Tty7Home + '/'))) {
-        $titlePath = '~' + $titlePath.Substring($global:__Tty7Home.Length)
-      }
-      Write-Host -NoNewline "$($global:__Tty7Esc)]0;$($global:__Tty7User)@$($global:__Tty7Host):$titlePath$($global:__Tty7Bel)"
     }
 
     # Restore the captured status so the user's own prompt sees the real result,
@@ -2041,7 +2014,7 @@ fi
             );
             assert_eq!(tail, " exit $LASTEXITCODE");
             assert_eq!(body, compact_powershell(POWERSHELL_INTEGRATION));
-            for needle in ["]133;A", "]133;B", "]133;C", "]133;D", "]7;file://", "]0;"] {
+            for needle in ["]133;A", "]133;B", "]133;C", "]133;D", "]7;file://"] {
                 assert!(body.contains(needle), "compacted away {needle}");
             }
             assert!(!body.lines().any(|l| l.starts_with('#')));
@@ -2459,20 +2432,6 @@ mod tests {
         );
     }
 
-    /// The OSC 0 title the shell settled on, as `user@host:dir`.
-    #[cfg(unix)]
-    fn reported_title(text: &str) -> String {
-        text.split("\u{1b}]")
-            .filter_map(|s| s.strip_prefix("0;"))
-            .filter_map(|s| s.split(['\u{7}', '\u{1b}']).next())
-            // pwsh emits an empty OSC 0 of its own just before ours; the one
-            // under test is whatever is left after dropping those.
-            .filter(|t| !t.is_empty())
-            .last()
-            .unwrap_or_else(|| panic!("expected a non-empty OSC 0 title; got:\n{text}"))
-            .to_string()
-    }
-
     #[cfg(unix)]
     fn pwsh_on_path() -> Option<String> {
         let path = std::env::var_os("PATH")?;
@@ -2482,10 +2441,7 @@ mod tests {
             .map(|p| p.to_string_lossy().into_owned())
     }
 
-    /// Guards the Unix half of the PowerShell integration, which had no coverage
-    /// at all until #583 — every pty round-trip here used to be `#[cfg(windows)]`,
-    /// so a script written against `$env:USERNAME` / `$env:COMPUTERNAME` /
-    /// `$env:USERPROFILE` shipped for two platforms where all three are empty.
+    /// PowerShell reports prompt marks and the working directory on Unix too.
     #[cfg(unix)]
     #[test]
     fn pwsh_reports_the_full_prompt_cycle_over_a_real_pty_on_unix() {
@@ -2494,8 +2450,6 @@ mod tests {
             return;
         };
         let injection = setup(Some(&pwsh), &[], false).expect("powershell integration");
-        // From $HOME, so the title's `~` abbreviation is exercised rather than
-        // assumed — it is the half that silently did nothing on Unix.
         let home = PathBuf::from(std::env::var("HOME").expect("HOME"));
         let text = prompt_cycle_over_pty(&pwsh, &injection, b"false\r", Some(&home));
 
@@ -2511,31 +2465,6 @@ mod tests {
             cwd,
             home.canonicalize().unwrap_or(home.clone()),
             "OSC 7 must name the pane's real cwd"
-        );
-
-        // Asserted by shape, not against $USER: a CI runner does not reliably
-        // export it, and the bug being guarded is emptiness — `@:` — not which
-        // name lands there. When the environment does name the user, pin it.
-        let title = reported_title(&text);
-        let (who, path) = title.split_once(':').expect("title is `user@host:dir`");
-        let (user, host) = who.split_once('@').expect("title is `user@host:dir`");
-        assert!(
-            !user.is_empty(),
-            "the title must name the user — `$env:USERNAME` is empty on Unix, \
-             which is what left it starting with a bare `@`; got {title:?}"
-        );
-        assert!(
-            !host.is_empty(),
-            "the title must name the host — `$env:COMPUTERNAME` is empty on Unix; \
-             got {title:?}"
-        );
-        if let Ok(expected) = std::env::var("USER") {
-            assert_eq!(user, expected, "the title named the wrong user");
-        }
-        assert_eq!(
-            path, "~",
-            "$HOME must abbreviate to `~` — the old check keyed off \
-             `$env:USERPROFILE`, which does not exist on Unix; got {title:?}"
         );
     }
 
@@ -3286,42 +3215,12 @@ mod tests {
         assert!(s.contains(".Replace('%', '%25')"));
     }
 
+    /// `$env:COMPUTERNAME` is empty on macOS and Linux; OSC 7 uses the .NET host name.
     #[test]
-    fn powershell_integration_sets_an_osc_title() {
+    fn powershell_integration_reads_hostname_platform_neutrally() {
         let s = POWERSHELL_INTEGRATION;
-        assert!(s.contains("]0;$($global:__Tty7User)@$($global:__Tty7Host):"));
-        assert!(s.contains("$titlePath = '~'"));
-        assert!(s.contains("$titlePath = $fsPath.Replace('\\', '/')"));
-    }
-
-    /// `$env:USERNAME`, `$env:COMPUTERNAME` and `$env:USERPROFILE` are Windows-only
-    /// spellings that are simply empty on macOS and Linux — reaching for any of
-    /// them is what titled every Unix pwsh pane `@:` plus a raw absolute path
-    /// (#583). The script runs unchanged on all three platforms, so the cheapest
-    /// guard is to keep those names out of it entirely.
-    #[test]
-    fn powershell_integration_reads_identity_platform_neutrally() {
-        let s = POWERSHELL_INTEGRATION;
-        for windows_only in ["$env:USERNAME", "$env:COMPUTERNAME", "$env:USERPROFILE"] {
-            assert!(
-                !s.contains(windows_only),
-                "{windows_only} is empty on macOS and Linux; use the .NET \
-                 equivalent so the one script is right on every platform"
-            );
-        }
-        assert!(s.contains("[Environment]::UserName"));
+        assert!(!s.contains("$env:COMPUTERNAME"));
         assert!(s.contains("[Environment]::MachineName"));
-        assert!(s.contains("$global:__Tty7Home = if ($HOME)"));
-    }
-
-    /// A bare `StartsWith($home)` also matches the sibling directory whose name
-    /// merely begins with the home directory's, so `/Users/annex` used to be
-    /// retitled `~ex`. The separator has to be part of the match.
-    #[test]
-    fn powershell_home_abbreviation_requires_a_path_separator() {
-        let s = POWERSHELL_INTEGRATION;
-        assert!(s.contains("$titlePath.StartsWith($global:__Tty7Home + '/')"));
-        assert!(s.contains("$titlePath -eq $global:__Tty7Home"));
     }
 
     #[test]

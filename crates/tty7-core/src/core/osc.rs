@@ -583,7 +583,7 @@ mod tests {
 
     /// A shell that re-titles itself in `precmd` writes its OSC 0/2 after the
     /// `D` and before the `A` (tty7's own zsh helper prepends the `D` emitter
-    /// for exactly that reason, and the PowerShell one titles between them).
+    /// for exactly that reason).
     /// Reading the stream in order is what keeps that title.
     #[test]
     fn a_title_the_shell_writes_at_its_next_prompt_is_the_last_word() {

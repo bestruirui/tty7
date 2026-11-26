@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-pub use crate::core::git::{RepoProbe, RepoSnapshot, probe_repo};
+pub use crate::core::git::{GitStatus, RepoProbe, RepoSnapshot, probe_repo};
 use crate::ui::host_ops::{ByHost, HostId, InFlight};
 
 fn key(host: HostId, path: &Path) -> Cow<'_, Path> {
@@ -13,6 +13,7 @@ fn key(host: HostId, path: &Path) -> Cow<'_, Path> {
 pub struct GitStatusCache {
     roots: ByHost<PathBuf, Option<PathBuf>>,
     homes: ByHost<PathBuf, PathBuf>,
+    status: ByHost<PathBuf, GitStatus>,
     probes: InFlight<(HostId, PathBuf)>,
     last_probe: ByHost<PathBuf, Instant>,
 }
@@ -20,6 +21,11 @@ pub struct GitStatusCache {
 impl gpui::Global for GitStatusCache {}
 
 impl GitStatusCache {
+    pub fn status_for(&self, host: HostId, cwd: &Path) -> Option<GitStatus> {
+        let root = self.roots.get(host, &*key(host, cwd))?.as_ref()?;
+        self.status.get(host, root.as_path()).cloned()
+    }
+
     pub fn known_repo_for(&self, host: HostId, cwd: &Path) -> Option<Option<PathBuf>> {
         let root = self.roots.get(host, &*key(host, cwd))?;
         Some(root.as_ref().map(|root| {
@@ -103,6 +109,7 @@ impl GitStatusCache {
         let snapshot = snapshot.map(|snap| RepoSnapshot {
             root: key(host, &snap.root).into_owned(),
             home: key(host, &snap.home).into_owned(),
+            ..snap
         });
         let rerun = !self.probes.finish(&(host, cwd.to_path_buf()));
         let throttle = match &snapshot {
@@ -114,6 +121,21 @@ impl GitStatusCache {
         self.last_probe.insert(host, throttle, Instant::now());
         match snapshot {
             Some(snap) => {
+                let (added, removed) = snap.counts.unwrap_or_else(|| {
+                    self.status
+                        .get(host, &snap.root)
+                        .map(|g| (g.added, g.removed))
+                        .unwrap_or((0, 0))
+                });
+                self.status.insert(
+                    host,
+                    snap.root.clone(),
+                    GitStatus {
+                        branch: snap.branch,
+                        added,
+                        removed,
+                    },
+                );
                 self.homes.insert(host, snap.root.clone(), snap.home);
                 self.roots.insert(host, cwd.to_path_buf(), Some(snap.root));
             }
@@ -151,6 +173,8 @@ mod tests {
         RepoSnapshot {
             root: PathBuf::from(root),
             home: PathBuf::from(root),
+            branch: "main".into(),
+            counts: Some((0, 0)),
         }
     }
 
@@ -158,6 +182,8 @@ mod tests {
         RepoSnapshot {
             root: PathBuf::from(root),
             home: PathBuf::from(home),
+            branch: "main".into(),
+            counts: Some((0, 0)),
         }
     }
 

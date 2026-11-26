@@ -5817,8 +5817,8 @@ mod tests {
         );
 
         // A shell that re-titles itself does it between the `D` and the `A`
-        // (tty7's zsh helper prepends the `D`; the PowerShell one titles in
-        // its prompt function), so the title is the last word in the read.
+        // (tty7's zsh helper prepends the `D`), so the title is the last word
+        // in the read.
         apply_signals(
             &mut st,
             s.feed(b"\x1b]133;D;0\x07\x1b]0;me@box:~/dev\x07\x1b]133;A\x07"),

@@ -457,7 +457,7 @@ mod tests {
         assert_eq!(
             strip_host_prefix("ann@BOX:C:/src"),
             "C:/src",
-            "tty7's own pwsh title names a drive when the cwd is off the home drive"
+            "a host prefix can precede a Windows drive path"
         );
         assert_eq!(strip_host_prefix("user@host:   "), "");
         assert_eq!(

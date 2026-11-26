@@ -7,9 +7,18 @@ use std::process::{Command, Stdio};
 use crate::host::{Host, Output};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
+pub struct GitStatus {
+    pub branch: String,
+    pub added: u32,
+    pub removed: u32,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RepoSnapshot {
     pub root: PathBuf,
     pub home: PathBuf,
+    pub branch: String,
+    pub counts: Option<(u32, u32)>,
 }
 
 /// What asking a directory "which repository are you in" came back with.
@@ -34,18 +43,59 @@ pub enum RepoProbe {
 const GIT_FATAL: i32 = 128;
 
 pub fn probe_repo(host: &dyn Host, cwd: &Path) -> RepoProbe {
-    let (root, home) = match host.repo_head(cwd) {
+    let (root, home, branch) = match host.repo_head(cwd) {
         Some(None) => return RepoProbe::NotARepo,
         Some(Some(head)) => (
             crate::core::path_spelling::spelling_on_buf(host.id(), &head.root),
             crate::core::path_spelling::spelling_on_buf(host.id(), &head.home),
+            head.branch,
         ),
         None => match locate(host, cwd) {
-            Ok(paths) => paths,
+            Ok((root, home)) => (root, home, None),
             Err(outcome) => return outcome,
         },
     };
-    RepoProbe::Repo(RepoSnapshot { root, home })
+    let Some(branch) = branch.or_else(|| {
+        if let Some(out) = git(host, cwd, &["symbolic-ref", "--quiet", "--short", "HEAD"]) {
+            let name = out.trim();
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+        let sha = git(host, cwd, &["rev-parse", "--short", "HEAD"])?;
+        let sha = sha.trim();
+        (!sha.is_empty()).then(|| sha.to_string())
+    }) else {
+        return RepoProbe::Failed;
+    };
+    let counts = git(host, cwd, &["diff", "--numstat", "HEAD"]).map(|out| {
+        let mut added = 0u32;
+        let mut removed = 0u32;
+        for line in out.lines() {
+            let mut fields = line.split('\t');
+            if let Some(n) = fields.next().and_then(|s| s.parse::<u32>().ok()) {
+                added += n;
+            }
+            if let Some(n) = fields.next().and_then(|s| s.parse::<u32>().ok()) {
+                removed += n;
+            }
+        }
+        (added, removed)
+    });
+    RepoProbe::Repo(RepoSnapshot {
+        root,
+        home,
+        branch,
+        counts,
+    })
+}
+
+fn git(host: &dyn Host, cwd: &Path, args: &[&str]) -> Option<String> {
+    let out = host.git(cwd, args).ok()?;
+    if !out.success() {
+        return None;
+    }
+    String::from_utf8(out.stdout).ok()
 }
 
 /// Root and home of `cwd`'s repository, asked of `git` — for a host that
