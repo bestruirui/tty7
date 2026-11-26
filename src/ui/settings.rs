@@ -15,8 +15,8 @@ use uuid::Uuid;
 
 use crate::core::config::{
     BellMode, Config, ConfirmClose, CursorStyle, MouseRightClick, MouseZoomModifier,
-    NewTabPosition, NotifyMode, PromptCursorStyle, TabBarPosition, UI_FONT_SIZE_DEFAULT,
-    UpdateChannel, WindowBackdrop,
+    NewTabPosition, NotifyMode, PromptCursorStyle, UI_FONT_SIZE_DEFAULT, UpdateChannel,
+    WindowBackdrop,
 };
 use crate::core::keychain::{
     CredentialRef, CredentialStore as _, OsCredentialStore, key_account_from_contents,
@@ -379,6 +379,11 @@ fn settings_search_entries() -> &'static [SearchEntry] {
         },
         SearchEntry {
             section: Appearance,
+            title: SettingsShowContentTitle,
+            keywords: SettingsSearchShowContentTitleKeywords,
+        },
+        SearchEntry {
+            section: Appearance,
             title: SettingsFontSize,
             keywords: SettingsSearchFontSizeKeywords,
         },
@@ -696,11 +701,6 @@ fn settings_search_entries() -> &'static [SearchEntry] {
         },
         SearchEntry {
             section: General,
-            title: SettingsTabBarPosition,
-            keywords: SettingsSearchTabBarPositionKeywords,
-        },
-        SearchEntry {
-            section: General,
             title: SettingsConfirmClose,
             keywords: SettingsSearchConfirmCloseKeywords,
         },
@@ -799,13 +799,13 @@ impl SearchEntry {
         match self.title {
             L10nKey::SettingsDimInactivePanes => "dim_inactive_panes",
             L10nKey::SettingsAutoHideTitlebarButtons => "auto_hide_titlebar_buttons",
+            L10nKey::SettingsShowContentTitle => "show_content_title",
             L10nKey::SettingsCursorBlink => "cursor_blink",
             L10nKey::SettingsCursorShape => "cursor_style",
             L10nKey::SettingsPromptCursorShape => "prompt_cursor_style",
             L10nKey::SettingsScrollback => "scrollback_limit",
             L10nKey::SettingsNewTabPosition => "new_tab_position",
             L10nKey::SettingsConfirmClose => "confirm_close",
-            L10nKey::SettingsTabBarPosition => "tab_bar_position",
             L10nKey::SettingsSidebarGrouping => "sidebar_auto_grouping",
             L10nKey::SettingsNotifyOnCommandFinish => "notify_on_command_finish",
             L10nKey::SettingsNotifyThreshold => "notify_threshold_secs",
@@ -877,6 +877,7 @@ impl SearchEntry {
             L10nKey::SettingsAutoHideTitlebarButtons => {
                 t(L10nKey::SettingsAutoHideTitlebarButtonsDesc)
             }
+            L10nKey::SettingsShowContentTitle => t(L10nKey::SettingsShowContentTitleDesc),
             L10nKey::SettingsFontSize => t(L10nKey::SettingsFontSizeDesc),
             L10nKey::SettingsUiFontFamily => t(L10nKey::SettingsUiFontFamilyDesc),
             L10nKey::SettingsLineHeight => t(L10nKey::SettingsLineHeightDesc),
@@ -913,7 +914,6 @@ impl SearchEntry {
             L10nKey::SettingsShowTrayIcon => t(L10nKey::SettingsShowTrayIconDesc),
             L10nKey::SettingsNewTabPosition => t(L10nKey::SettingsNewTabPositionDesc),
             L10nKey::SettingsConfirmClose => t(L10nKey::SettingsConfirmCloseDesc),
-            L10nKey::SettingsTabBarPosition => t(L10nKey::SettingsTabBarPositionDesc),
             L10nKey::SettingsSidebarGrouping => t(L10nKey::SettingsSidebarGroupingDesc),
             L10nKey::SettingsNotifyOnCommandFinish => t(L10nKey::SettingsNotifyOnCommandFinishDesc),
             L10nKey::SettingsNotifyThreshold => t(L10nKey::SettingsNotifyThresholdDesc),
@@ -950,6 +950,9 @@ impl SearchEntry {
             L10nKey::SettingsAutoHideTitlebarButtons => {
                 cfg.auto_hide_titlebar_buttons != defaults.auto_hide_titlebar_buttons
             }
+            L10nKey::SettingsShowContentTitle => {
+                cfg.show_content_title != defaults.show_content_title
+            }
             L10nKey::SettingsCursorBlink => cfg.cursor_blink != defaults.cursor_blink,
             L10nKey::SettingsCursorShape => cfg.cursor_style != defaults.cursor_style,
             L10nKey::SettingsPromptCursorShape => {
@@ -958,7 +961,6 @@ impl SearchEntry {
             L10nKey::SettingsScrollback => cfg.scrollback_limit != defaults.scrollback_limit,
             L10nKey::SettingsNewTabPosition => cfg.new_tab_position != defaults.new_tab_position,
             L10nKey::SettingsConfirmClose => cfg.confirm_close != defaults.confirm_close,
-            L10nKey::SettingsTabBarPosition => cfg.tab_bar_position != defaults.tab_bar_position,
             L10nKey::SettingsSidebarGrouping => {
                 cfg.sidebar_auto_grouping != defaults.sidebar_auto_grouping
             }

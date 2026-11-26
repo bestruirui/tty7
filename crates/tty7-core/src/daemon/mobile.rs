@@ -57,7 +57,10 @@ pub fn handoff_failed() {
 pub fn request(request: ControlRequest) -> std::io::Result<ReplyOk> {
     let mut gateway = GATEWAY.lock().unwrap_or_else(|e| e.into_inner());
     if HANDING_OFF.load(Ordering::SeqCst) {
-        return Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "server is stopping"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotConnected,
+            "server is stopping",
+        ));
     }
     match gateway.as_mut() {
         Some(Ok(gateway)) => gateway.request(request),

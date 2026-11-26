@@ -34,7 +34,7 @@ pub(super) const GRID_PAD_X: f32 = 8.;
 pub(super) const GRID_PAD_Y: f32 = 4.;
 
 /// Which panes are on screen right now, readable without touching the entity
-/// map. The chrome (tab strip, sidebar, switcher) reads every pane entity
+/// map. The chrome (sidebar, switcher) reads every pane entity
 /// while the window draws, so gpui tracks them all and `notify()` from a
 /// hidden pane still dirties the window — this flag is the out-of-band answer
 /// the output pump consults instead. `Tty7App::render` declares it each frame
@@ -1773,7 +1773,7 @@ impl TerminalView {
     /// to the app's own name — see [`stated_title`]. The label ladder reads
     /// this where the machine tree reads
     /// [`PaneRecord::osc_title`](tty7_core::core::machine::PaneRecord::osc_title),
-    /// which is what lets the tab strip and the switcher name a tab the same
+    /// which is what lets the sidebar and the switcher name a tab the same
     /// way.
     pub(crate) fn stated_title(&self) -> Option<&str> {
         stated_title(&self.title)

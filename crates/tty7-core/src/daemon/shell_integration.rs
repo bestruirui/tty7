@@ -2445,11 +2445,22 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn pwsh_reports_the_full_prompt_cycle_over_a_real_pty_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
         let Some(pwsh) = pwsh_on_path() else {
             eprintln!("skipping: pwsh not installed");
             return;
         };
-        let injection = setup(Some(&pwsh), &[], false).expect("powershell integration");
+        // Give PSReadLine an owned runtime directory for its .NET history-file mutex.
+        let runtime = tempfile::Builder::new()
+            .permissions(std::fs::Permissions::from_mode(0o700))
+            .tempdir()
+            .expect("private runtime directory");
+        let mut injection = setup(Some(&pwsh), &[], false).expect("powershell integration");
+        injection.env.insert(
+            "XDG_RUNTIME_DIR".to_string(),
+            runtime.path().to_string_lossy().into_owned(),
+        );
         let home = PathBuf::from(std::env::var("HOME").expect("HOME"));
         let text = prompt_cycle_over_pty(&pwsh, &injection, b"false\r", Some(&home));
 

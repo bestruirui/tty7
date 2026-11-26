@@ -1,4 +1,3 @@
-use gpui::component::TitleBar;
 use gpui::{
     AnyWindowHandle, App, AppContext as _, BorrowAppContext as _, Bounds, Global, TitlebarOptions,
     WeakEntity, Window, WindowBounds, WindowDecorations, WindowOptions, point, px, size,
@@ -846,9 +845,11 @@ fn window_options(cx: &mut App, workspace: Option<WorkspaceId>) -> WindowOptions
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         icon: APP_ICON.as_ref().cloned(),
         titlebar: Some(TitlebarOptions {
+            appears_transparent: true,
             traffic_light_position: Some(crate::ui::theme::traffic_light_position()),
-            ..TitleBar::title_bar_options()
+            ..Default::default()
         }),
+        app_owns_titlebar_drag: true,
         // The title bar above is tty7's own, so the compositor must not add a
         // second one: left unset, gpui asks Wayland for server-side
         // decorations (#679). Only the Linux backends read this — macOS and

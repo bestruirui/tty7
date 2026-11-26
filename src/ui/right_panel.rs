@@ -7,9 +7,7 @@ use std::path::PathBuf;
 
 use crate::core::config::Config;
 use crate::daemon::protocol::{ManagedForward, PaneProcs, PortProbe};
-use crate::ui::app::{
-    CONTENT_INSET, TILE_GLYPH_XS, TILE_SIZE_XS, TITLE_BAR_BORDER, TitleStripRow as _, Tty7App,
-};
+use crate::ui::app::{CONTENT_INSET, TILE_GLYPH_XS, TILE_SIZE_XS, TitleBarRow as _, Tty7App};
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 use crate::ui::scrollbar::with_vertical_scrollbar;
 
@@ -348,26 +346,26 @@ impl Tty7App {
     }
 
     /// What the sidebar has reserved, from this panel's point of view.
-    pub(crate) fn sidebar_floor(&self, cx: &gpui::App) -> f32 {
-        if self.sidebar_open(cx) {
+    pub(crate) fn sidebar_floor(&self) -> f32 {
+        if self.sidebar_open() {
             crate::ui::tab_sidebar::MIN_SIDEBAR_WIDTH
         } else {
             0.
         }
     }
 
-    pub(crate) fn right_panel_max_px(&self, window: &Window, cx: &gpui::App) -> f32 {
+    pub(crate) fn right_panel_max_px(&self, window: &Window) -> f32 {
         crate::ui::app::side_panel_max(
             window.viewport_size().width.as_f32(),
             MIN_WIDTH,
-            self.sidebar_floor(cx),
+            self.sidebar_floor(),
         )
     }
 
-    pub(crate) fn right_panel_px(&self, window: &Window, cx: &gpui::App) -> f32 {
+    pub(crate) fn right_panel_px(&self, window: &Window) -> f32 {
         self.right_panel_width
             .get()
-            .clamp(MIN_WIDTH, self.right_panel_max_px(window, cx))
+            .clamp(MIN_WIDTH, self.right_panel_max_px(window))
     }
 
     pub(crate) fn toggle_right_panel(&mut self, cx: &mut Context<Self>) {
@@ -386,7 +384,7 @@ impl Tty7App {
         if !panel_open {
             return None;
         }
-        let width = self.right_panel_px(window, cx);
+        let width = self.right_panel_px(window);
         let body = self.render_panel_info(window, cx);
         let (backing, handle) = self.right_panel_resize(cx);
 
@@ -408,7 +406,7 @@ impl Tty7App {
                         // Match TitleBar's content height, including its invisible
                         // bottom border. Otherwise this row centres the toggle
                         // half a point below its position in the closed panel.
-                        .title_strip_row(px(TITLE_BAR_BORDER), cx.theme().transparent);
+                        .title_bar_row();
                     crate::ui::app::window_move_gesture(
                         row,
                         "right-panel-titlebar-drag",
@@ -422,7 +420,7 @@ impl Tty7App {
                     // The toggle keeps its title-bar size and trailing inset
                     // when it moves into this row, so opening the panel does
                     // not shift the glyph or change its hover target.
-                    .child(self.window_chrome(cx))
+                    .child(self.window_chrome(crate::ui::app::tile_trailing_inset(), cx))
                 }))
                 .child(body)
                 .child(handle)
@@ -436,11 +434,8 @@ impl Tty7App {
         use std::rc::Rc;
 
         let container: Rc<StdCell<Option<Bounds<Pixels>>>> = Rc::new(StdCell::new(None));
-        // Read while there is still a `cx` to read it from: the drag handler
-        // below only ever sees a `Window`, and the cap it clamps against has to
-        // be the same one the layout applies or the panel springs back from
-        // wherever it was dropped.
-        let others_floor = self.sidebar_floor(cx);
+        // The drag handler must use the same width limits as the layout.
+        let others_floor = self.sidebar_floor();
         let own_floor = MIN_WIDTH;
         let backing = canvas(
             {
@@ -818,7 +813,7 @@ impl Tty7App {
         tooltip: &'static str,
         cx: &mut Context<Self>,
     ) -> Button {
-        crate::ui::tab_strip::chrome_tile_sized(
+        crate::ui::title_bar::chrome_tile_sized(
             Button::new(id).icon(Icon::new(icon)),
             TILE_SIZE_XS,
             TILE_GLYPH_XS,
@@ -1036,7 +1031,7 @@ impl Tty7App {
                 // comes out as a row of its own with the switch to turn it
                 // back on.
                 actions = actions.child(
-                    crate::ui::tab_strip::chrome_tile_sized(
+                    crate::ui::title_bar::chrome_tile_sized(
                         Button::new(("panel-port-switch-off", i))
                             .icon(Icon::empty().path("icons/power.svg")),
                         TILE_SIZE_XS,
@@ -1116,7 +1111,7 @@ impl Tty7App {
         }
 
         let add = ctx.route.is_some().then(|| {
-            crate::ui::tab_strip::chrome_tile_sized(
+            crate::ui::title_bar::chrome_tile_sized(
                 Button::new(("ssh-forward-add-toggle", pane_id))
                     .icon(Icon::empty().path("icons/plus.svg")),
                 HEADING_TILE,

@@ -4367,7 +4367,10 @@ mod tests {
 
     #[test]
     fn owned_file_contents_carry_marker_and_exe() {
-        let exe_raw = crate::daemon::spawn::server_executable().unwrap().display().to_string();
+        let exe_raw = crate::daemon::spawn::server_executable()
+            .unwrap()
+            .display()
+            .to_string();
         let exe_json = serde_json::to_string(&exe_raw).unwrap();
         let exe = exe_json.trim_matches('"').to_string();
         let host = local_host();

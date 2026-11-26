@@ -247,6 +247,10 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsAutoHideTitlebarButtonsDesc => {
             "Keep the new tab and sidebar buttons out of sight until the pointer is over the title bar."
         }
+        L10nKey::SettingsShowContentTitle => "Show content title",
+        L10nKey::SettingsShowContentTitleDesc => {
+            "Show the current tab's title at the top of the content area."
+        }
         L10nKey::SettingsOpenThemesFolder => "Open themes folder",
         L10nKey::SettingsChangeThemeImage => "Change…",
         L10nKey::SettingsChooseThemeImage => "Choose…",
@@ -417,7 +421,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsOptionAsMetaDesc => "⌥+key sends Meta, e.g. ⌥B moves back a word.",
         L10nKey::SettingsAgentsIntro => "Agent hooks",
         L10nKey::SettingsAgentsIntroDesc => {
-            "Hooks show each agent's status — working, waiting, done — in the tab bar."
+            "Hooks show each agent's status — working, waiting, done — in the sidebar."
         }
         L10nKey::SettingsReadingAgentConfig => "Reading this machine's agent config…",
         L10nKey::SettingsStatusInstalled => "Installed",
@@ -458,8 +462,6 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::ConfirmCloseNever => "Never",
         L10nKey::ConfirmCloseWhenBusy => "When busy",
         L10nKey::ConfirmCloseAlways => "Always",
-        L10nKey::SettingsTabBarPosition => "Tab bar position",
-        L10nKey::SettingsTabBarPositionDesc => "A strip on top or a sidebar on the left.",
         L10nKey::SettingsSidebarGrouping => "Auto grouping",
         L10nKey::SettingsSidebarGroupingDesc => {
             "Group unpinned tabs by git repository, SSH tabs by host."
@@ -483,8 +485,6 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsStartupFullscreen => "Fullscreen",
         L10nKey::SettingsAfterCurrent => "After current",
         L10nKey::SettingsAtEnd => "At end",
-        L10nKey::SettingsTop => "Top",
-        L10nKey::SettingsLeft => "Left",
         L10nKey::SettingsPrefix => "Prefix",
         L10nKey::SettingsKeybindingsIntroDesc => {
             "Click a shortcut and press new keys; chain keys for sequences like Ctrl-B X. Esc cancels, Backspace clears."
@@ -676,6 +676,9 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsSearchAutoHideTitlebarButtonsKeywords => {
             "auto hide autohide title bar titlebar buttons chrome hover pointer minimal clean new tab sidebar toggle"
         }
+        L10nKey::SettingsSearchShowContentTitleKeywords => {
+            "content title bar titlebar tab show hide header"
+        }
         L10nKey::SettingsSearchFocusFollowsMouseKeywords => "pane hover activate",
         L10nKey::SettingsSearchFontFamilyKeywords => "typeface monospace typography",
         L10nKey::SettingsSearchFontLigaturesKeywords => "typography glyph fira",
@@ -793,9 +796,6 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         }
         L10nKey::SettingsSearchLegiblePaletteKeywords => {
             "legible contrast bright palette psreadline parameter readable"
-        }
-        L10nKey::SettingsSearchTabBarPositionKeywords => {
-            "tabs vertical sidebar left top layout rail"
         }
         L10nKey::SettingsSearchTerminalBellKeywords => {
             "bell audible visual flash sound silence beep both ^g"
@@ -1090,8 +1090,8 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::CmdSwapPanePrevious => "Swap Pane Previous",
         L10nKey::CmdNextTab => "Next Tab",
         L10nKey::CmdPreviousTab => "Previous Tab",
-        L10nKey::CmdMoveTabLeft => "Move Tab Left",
-        L10nKey::CmdMoveTabRight => "Move Tab Right",
+        L10nKey::CmdMoveTabUp => "Move Tab Up",
+        L10nKey::CmdMoveTabDown => "Move Tab Down",
         L10nKey::CmdRecentTabSwitcher => "Recent Tab Switcher",
         L10nKey::CmdRecentTabSwitcherReverse => "Recent Tab Switcher (Reverse)",
         L10nKey::CmdCopyWorkingDirectory => "Copy Working Directory",
@@ -1110,7 +1110,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::CmdClosePaneTab => "Close Pane / Tab",
         L10nKey::CmdCloseWindow => "Close Window",
         L10nKey::CmdCloseOtherTabs => "Close Other Tabs",
-        L10nKey::CmdCloseTabsToTheRight => "Close Tabs to the Right",
+        L10nKey::CmdCloseTabsBelow => "Close Tabs Below",
         L10nKey::CmdReopenClosedTab => "Reopen Closed Tab",
         L10nKey::CmdNewWorkspace => "New Workspace…",
         L10nKey::CmdSwitchWorkspace => "Switch Workspace…",
@@ -1339,7 +1339,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::AppMenuSaveAgentLaunchArgs => "Set Current Launch Args as Default",
         L10nKey::AppMenuClosePaneTab => "Close",
         L10nKey::AppMenuCloseOtherTabs => "Close Other Tabs",
-        L10nKey::AppMenuCloseTabsRight => "Close Tabs to the Right",
+        L10nKey::AppMenuCloseTabsBelow => "Close Tabs Below",
         L10nKey::AppMenuReopenClosedTab => "Reopen Closed Tab",
         L10nKey::AppMenuRenameWorkspace => "Rename Workspace…",
         L10nKey::AppMenuStopWorkspace => "Stop Workspace…",
@@ -1358,7 +1358,6 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::AppMenuResetFontSize => "Reset Font Size",
         L10nKey::AppMenuLeftSidebar => "Left Sidebar",
         L10nKey::AppMenuRightPanel => "Right Panel",
-        L10nKey::AppMenuTabBarPosition => "Tab Bar Position",
         L10nKey::AppMenuFocusNextPane => "Focus Next Pane",
         L10nKey::AppMenuFocusPreviousPane => "Focus Previous Pane",
         L10nKey::AppMenuZoomPane => "Zoom Pane",
@@ -1408,7 +1407,6 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SidebarDropToPin => "Drop here to pin",
         L10nKey::TabContextCloseTab => "Close Tab",
         L10nKey::TerminalContextClear => "Clear",
-        L10nKey::TabContextCloseTabsBelow => "Close Tabs Below",
         L10nKey::Search => "Search",
         L10nKey::TabContextMarkUnread => "Mark as Unread",
         L10nKey::TabContextHibernate => "Hibernate",

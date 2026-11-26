@@ -234,8 +234,11 @@ mod macos {
     ) -> Result<(), String> {
         let executable = replacement.join("Contents/MacOS/tty7-app");
         let updater = replacement.join("Contents/MacOS/tty7-updater");
-        if !replacement.is_dir() || !executable.is_file() || !updater.is_file()
-            || !replacement.join("Contents/MacOS/tty7-server").is_file() {
+        if !replacement.is_dir()
+            || !executable.is_file()
+            || !updater.is_file()
+            || !replacement.join("Contents/MacOS/tty7-server").is_file()
+        {
             return Err(
                 "the staged bundle is missing tty7-app, tty7-server or tty7-updater under Contents/MacOS"
                     .to_string(),
@@ -3395,9 +3398,12 @@ mod windows {
                 .output()
                 .map_err(|error| format!("reading the {label} version: {error}"))?;
             if !output.status.success()
-                || String::from_utf8_lossy(&output.stdout).trim() != format!("tty7-server {expected}")
+                || String::from_utf8_lossy(&output.stdout).trim()
+                    != format!("tty7-server {expected}")
             {
-                return Err(format!("the {label} does not report the expected version {expected:?}"));
+                return Err(format!(
+                    "the {label} does not report the expected version {expected:?}"
+                ));
             }
             return Ok(());
         }
@@ -3653,7 +3659,8 @@ mod windows {
 
             fs::copy(&executable, root.path().join("tty7-updater.exe")).unwrap();
             fs::copy(&executable, root.path().join("tty7-server.exe")).unwrap();
-            let error = verify_installed_payload(root.path(), env!("CARGO_PKG_VERSION")).unwrap_err();
+            let error =
+                verify_installed_payload(root.path(), env!("CARGO_PKG_VERSION")).unwrap_err();
             assert!(error.contains("tty7-server.exe"), "{error}");
         }
 

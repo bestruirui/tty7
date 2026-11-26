@@ -6,10 +6,10 @@
 //! control requests. The standalone command also uses these files, including
 //! `status.json` for the gateway's current state.
 
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::io;
-use std::sync::{Arc, Mutex};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::mpsc as std_mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -18,8 +18,8 @@ use iroh::endpoint::{BindOpts, presets};
 use iroh::{Endpoint, SecretKey, Watcher as _};
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use tokio::sync::oneshot;
-use tty7_mobile_proto::{ALPN, MDNS_SERVICE, PairCode};
 use tty7_core::daemon::control::{ControlRequest, ReplyOk};
+use tty7_mobile_proto::{ALPN, MDNS_SERVICE, PairCode};
 
 use crate::daemon::Daemon;
 use crate::identity;
@@ -69,15 +69,28 @@ impl Manager {
 
     fn status(&self) -> Status {
         if let Some(error) = &self.error {
-            return Status::Failed { error: error.clone() };
+            return Status::Failed {
+                error: error.clone(),
+            };
         }
         match self.running.as_ref() {
             Some(running) if !running.thread.as_ref().is_some_and(JoinHandle::is_finished) => {
-                running.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
+                running
+                    .status
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
             }
-            Some(running) => match running.status.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+            Some(running) => match running
+                .status
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+            {
                 status @ Status::Failed { .. } => status,
-                _ => Status::Failed { error: "mobile gateway stopped unexpectedly".into() },
+                _ => Status::Failed {
+                    error: "mobile gateway stopped unexpectedly".into(),
+                },
             },
             None => Status::Stopped,
         }
@@ -90,9 +103,11 @@ impl tty7_core::daemon::mobile::Gateway for Manager {
             self.stop();
             return Ok(());
         }
-        if self.running.as_ref().is_some_and(|r| {
-            r.thread.as_ref().is_some_and(JoinHandle::is_finished)
-        }) {
+        if self
+            .running
+            .as_ref()
+            .is_some_and(|r| r.thread.as_ref().is_some_and(JoinHandle::is_finished))
+        {
             self.running.take();
         }
         if self.running.is_none() {
@@ -131,14 +146,24 @@ impl tty7_core::daemon::mobile::Gateway for Manager {
             }
             ControlRequest::MobilePair => {
                 if !matches!(self.status(), Status::Running { .. }) {
-                    return Err(io::Error::new(io::ErrorKind::NotConnected, "mobile access is not running"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotConnected,
+                        "mobile access is not running",
+                    ));
                 }
                 let devices = self.state.devices().map_err(io::Error::other)?;
-                let offer = pair_code(&self.state, Duration::from_secs(600)).map_err(io::Error::other)?;
-                Ok(ReplyOk::MobilePair { code: offer.code, secret: offer.secret, devices })
+                let offer =
+                    pair_code(&self.state, Duration::from_secs(600)).map_err(io::Error::other)?;
+                Ok(ReplyOk::MobilePair {
+                    code: offer.code,
+                    secret: offer.secret,
+                    devices,
+                })
             }
             ControlRequest::MobileCancelPair { secret } => {
-                self.state.close_pairing(&secret).map_err(io::Error::other)?;
+                self.state
+                    .close_pairing(&secret)
+                    .map_err(io::Error::other)?;
                 Ok(ReplyOk::Unit)
             }
             ControlRequest::MobilePairing { secret } => Ok(ReplyOk::MobilePairing {
@@ -147,9 +172,14 @@ impl tty7_core::daemon::mobile::Gateway for Manager {
             }),
             ControlRequest::MobileRevoke { id } => {
                 self.state.revoke(&id).map_err(io::Error::other)?;
-                Ok(ReplyOk::MobileDevices(self.state.devices().map_err(io::Error::other)?))
+                Ok(ReplyOk::MobileDevices(
+                    self.state.devices().map_err(io::Error::other)?,
+                ))
             }
-            _ => Err(io::Error::new(io::ErrorKind::Unsupported, "not a mobile access request")),
+            _ => Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "not a mobile access request",
+            )),
         }
     }
 }
@@ -204,7 +234,13 @@ fn start_with(state: State, backend: Arc<dyn Backend>) -> Result<Running> {
                     return;
                 }
             };
-            runtime.block_on(run(state, backend.clone(), ready_tx, stop_rx, thread_status));
+            runtime.block_on(run(
+                state,
+                backend.clone(),
+                ready_tx,
+                stop_rx,
+                thread_status,
+            ));
             drop(runtime);
             backend.shutdown();
         })

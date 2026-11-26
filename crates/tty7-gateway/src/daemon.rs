@@ -199,8 +199,14 @@ fn link_down(key: &str) -> io::Error {
 impl Backend for Daemon {
     fn shutdown(&self) {
         self.trees.finish();
-        self.control.lock().unwrap_or_else(|e| e.into_inner()).take();
-        self.remote.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.control
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        self.remote
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     fn hostname(&self) -> String {
@@ -317,12 +323,25 @@ impl Backend for Daemon {
             && let Some((registry, _)) = &self.local
         {
             registry
-                .spawn(start, size, None, Some(owner.clone()), Some(owner), None, false)
+                .spawn(
+                    start,
+                    size,
+                    None,
+                    Some(owner.clone()),
+                    Some(owner),
+                    None,
+                    false,
+                )
                 .map_err(io::Error::other)?
                 .id
         } else {
-            let session = self.panes_on(machine)?
-                .spawn(start, size, None, Some(owner.clone()), Some(owner))?;
+            let session = self.panes_on(machine)?.spawn(
+                start,
+                size,
+                None,
+                Some(owner.clone()),
+                Some(owner),
+            )?;
             let pane = session.pane_id();
             session.detach()?;
             pane

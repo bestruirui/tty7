@@ -407,16 +407,15 @@ impl Tty7App {
                     .group_hover(group, |s| s.opacity(1.))
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(
-                        crate::ui::tab_strip::chrome_tile(
+                        crate::ui::title_bar::chrome_tile(
                             Button::new(("panel-forward-del", forward_id as usize))
                                 .icon(IconName::Close)
                                 .xsmall(),
-                            false,
                             cx,
                         )
-                        .w(px(crate::ui::tab_strip::MIN_TARGET))
-                        .h(px(crate::ui::tab_strip::MIN_TARGET))
-                        .rounded(px(crate::ui::tab_strip::RAIL_TILE_RADIUS))
+                        .w(px(crate::ui::title_bar::MIN_TARGET))
+                        .h(px(crate::ui::title_bar::MIN_TARGET))
+                        .rounded(px(crate::ui::title_bar::RAIL_TILE_RADIUS))
                         .tooltip(t(L10nKey::ForwardTooltipRemove))
                         .on_click(cx.listener(
                             move |this, _, _window, cx| {

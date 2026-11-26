@@ -133,7 +133,7 @@ pub(crate) fn waiting_for(secs: u64) -> String {
 pub(crate) fn display_path(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
     let text = path.to_string_lossy();
     let text = crate::ui::path_display::readable_path(&text);
-    // Same home-abbreviation the Info panel and tab strip use: separators
+    // Same home-abbreviation the Info panel and sidebar use: separators
     // normalized, case folded (#544).
     let shortened = crate::ui::path_display::abbreviate_home(&text, home).into_owned();
     if shortened.chars().count() <= PICKER_PATH_MAX {
@@ -314,7 +314,7 @@ impl Tty7App {
             .child(list)
             .with_animation(
                 "home-fade-in",
-                Animation::new(Duration::from_millis(crate::ui::tab_strip::TRANSITION_MS))
+                Animation::new(Duration::from_millis(crate::ui::tab_sidebar::TRANSITION_MS))
                     .with_easing(gpui::ease_out_quint()),
                 |page, delta| page.opacity(delta),
             )

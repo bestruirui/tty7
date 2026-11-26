@@ -6,7 +6,7 @@
 //! window only borrows it to draw — so every setting keeps the one code path it
 //! had, and a change repaints both windows.
 
-use gpui::component::{ActiveTheme as _, TitleBar};
+use gpui::component::ActiveTheme as _;
 use gpui::{
     App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     Styled as _, Subscription, TitlebarOptions, WeakEntity, Window, WindowBounds,
@@ -33,9 +33,10 @@ pub(crate) fn window_options(cx: &mut App) -> WindowOptions {
             // Not drawn (the title bar is the window's own), but it is the
             // name the Window menu, Mission Control and VoiceOver give it.
             title: Some(crate::ui::i18n::t(crate::ui::i18n::L10nKey::SettingsWindowTitle).into()),
+            appears_transparent: true,
             traffic_light_position: Some(crate::ui::theme::traffic_light_position()),
-            ..TitleBar::title_bar_options()
         }),
+        app_owns_titlebar_drag: true,
         window_decorations: Some(WindowDecorations::Client),
         window_background: crate::ui::theme::background_appearance(cx),
         window_min_size: Some(size(px(MIN_SIZE.0), px(MIN_SIZE.1))),

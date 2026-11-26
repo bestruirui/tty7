@@ -432,7 +432,8 @@ fn attach_workspace(
             (Some(machine), Some(id)) => machine.attach(id, attachment),
             _ => None,
         };
-        let evicted = conn.services
+        let evicted = conn
+            .services
             .attachments
             .claim(workspace, conn.id, &conn.holder, dedicated);
         (displaced, evicted)
@@ -623,15 +624,12 @@ fn run_request(
         ),
 
         req @ (ControlRequest::MachineGet
-            | ControlRequest::TabCreate { .. }
-            | ControlRequest::TabClose { .. }
-            | ControlRequest::TabCloseRemembered { .. }
-            | ControlRequest::PaneClose { .. }
-            | ControlRequest::AgentStates
-            | ControlRequest::Routes) => (
-            conn.services.request(req, conn.machine_origin)?,
-            Vec::new(),
-        ),
+        | ControlRequest::TabCreate { .. }
+        | ControlRequest::TabClose { .. }
+        | ControlRequest::TabCloseRemembered { .. }
+        | ControlRequest::PaneClose { .. }
+        | ControlRequest::AgentStates
+        | ControlRequest::Routes) => (conn.services.request(req, conn.machine_origin)?, Vec::new()),
         ControlRequest::WorkspaceTree { workspace } => (
             ReplyOk::WorkspaceTree(Box::new(conn.services.machine()?.workspace(workspace)?)),
             Vec::new(),
@@ -645,7 +643,8 @@ fn run_request(
             Vec::new(),
         ),
         ControlRequest::WorkspaceRename { workspace, name } => {
-            conn.services.machine()?
+            conn.services
+                .machine()?
                 .workspace_rename(workspace, name, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
@@ -654,19 +653,25 @@ fn run_request(
             let panes = {
                 let _handover = conn.services.attachments.handover();
                 let panes = store.workspace_delete(workspace, conn.machine_origin)?;
-                conn.services.attachments.forget_workspace(&workspace.to_string());
+                conn.services
+                    .attachments
+                    .forget_workspace(&workspace.to_string());
                 panes
             };
             (ReplyOk::Panes(panes), Vec::new())
         }
         ControlRequest::WorkspaceTouch { workspace } => {
-            conn.services.machine()?
+            conn.services
+                .machine()?
                 .workspace_touch(workspace, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::WorkspaceSetActiveTab { workspace, tab } => {
-            conn.services.machine()?
-                .workspace_set_active_tab(workspace, tab, conn.machine_origin)?;
+            conn.services.machine()?.workspace_set_active_tab(
+                workspace,
+                tab,
+                conn.machine_origin,
+            )?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::TabReopen { workspace, tab } => {
@@ -688,13 +693,18 @@ fn run_request(
             tab,
             name,
         } => {
-            conn.services.machine()?
+            conn.services
+                .machine()?
                 .tab_rename(workspace, tab, name, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::TabMove { workspace, tab, to } => {
-            conn.services.machine()?
-                .tab_move(workspace, tab, clamp_usize(to), conn.machine_origin)?;
+            conn.services.machine()?.tab_move(
+                workspace,
+                tab,
+                clamp_usize(to),
+                conn.machine_origin,
+            )?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::TabSetGroup {
@@ -703,13 +713,21 @@ fn run_request(
             group,
             last_auto,
         } => {
-            conn.services.machine()?
-                .tab_set_group(workspace, tab, group, last_auto, conn.machine_origin)?;
+            conn.services.machine()?.tab_set_group(
+                workspace,
+                tab,
+                group,
+                last_auto,
+                conn.machine_origin,
+            )?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::WorkspaceSetGroups { workspace, groups } => {
-            conn.services.machine()?
-                .workspace_set_groups(workspace, groups, conn.machine_origin)?;
+            conn.services.machine()?.workspace_set_groups(
+                workspace,
+                groups,
+                conn.machine_origin,
+            )?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::TabSetHibernated {
@@ -765,8 +783,13 @@ fn run_request(
             path,
             ratio,
         } => {
-            conn.services.machine()?
-                .pane_set_ratio(workspace, tab, path, ratio, conn.machine_origin)?;
+            conn.services.machine()?.pane_set_ratio(
+                workspace,
+                tab,
+                path,
+                ratio,
+                conn.machine_origin,
+            )?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::PaneMove {
@@ -776,8 +799,14 @@ fn run_request(
             axis,
             first,
         } => {
-            conn.services.machine()?
-                .pane_move(workspace, pane, to, axis, first, conn.machine_origin)?;
+            conn.services.machine()?.pane_move(
+                workspace,
+                pane,
+                to,
+                axis,
+                first,
+                conn.machine_origin,
+            )?;
             (ReplyOk::Unit, Vec::new())
         }
         ControlRequest::PaneReplace {
@@ -785,14 +814,16 @@ fn run_request(
             old,
             new,
         } => {
-            conn.services.machine()?
+            conn.services
+                .machine()?
                 .pane_replace(workspace, old, new, conn.machine_origin)?;
             (ReplyOk::Unit, Vec::new())
         }
 
         ControlRequest::PaneProcs { pane_id } => (
             ReplyOk::PaneProcs(
-                conn.services.panes
+                conn.services
+                    .panes
                     .as_ref()
                     .map(|p| p.pane_procs(pane_id))
                     .unwrap_or_default(),
@@ -803,7 +834,12 @@ fn run_request(
             ReplyOk::Status(ServerStatus {
                 pid: std::process::id(),
                 uptime_secs: server_started().elapsed().as_secs(),
-                panes: conn.services.panes.as_ref().map(|p| p.pane_count()).unwrap_or(0),
+                panes: conn
+                    .services
+                    .panes
+                    .as_ref()
+                    .map(|p| p.pane_count())
+                    .unwrap_or(0),
                 control_version: CONTROL_VERSION,
                 protocol_version: crate::daemon::protocol::PROTOCOL_VERSION,
                 build: env!("CARGO_PKG_VERSION").to_string(),
@@ -812,14 +848,13 @@ fn run_request(
             Vec::new(),
         ),
         req @ (ControlRequest::MobileStatus
-            | ControlRequest::MobileSetEnabled { .. }
-            | ControlRequest::MobilePair
-            | ControlRequest::MobileCancelPair { .. }
-            | ControlRequest::MobilePairing { .. }
-            | ControlRequest::MobileRevoke { .. }) => (
-            crate::daemon::mobile::request(req)?,
-            Vec::new(),
-        ),
+        | ControlRequest::MobileSetEnabled { .. }
+        | ControlRequest::MobilePair
+        | ControlRequest::MobileCancelPair { .. }
+        | ControlRequest::MobilePairing { .. }
+        | ControlRequest::MobileRevoke { .. }) => {
+            (crate::daemon::mobile::request(req)?, Vec::new())
+        }
     })
 }
 
@@ -838,24 +873,22 @@ impl Services {
         Ok(match req {
             ControlRequest::MachineGet => {
                 ReplyOk::MachineTree(Box::new(machine_with_live_panes(self)?))
-            },
+            }
             ControlRequest::TabCreate {
                 workspace,
                 at,
                 pane,
                 tab,
-            } => {
-                ReplyOk::TabTree(Box::new(self.machine()?.tab_create(
-                    workspace,
-                    at.map(clamp_usize),
-                    pane,
-                    tab,
-                    origin,
-                )?))
-            },
-            ControlRequest::TabClose { workspace, tab } => ReplyOk::Panes(
-                self.machine()?.tab_close(workspace, tab, origin)?,
-            ),
+            } => ReplyOk::TabTree(Box::new(self.machine()?.tab_create(
+                workspace,
+                at.map(clamp_usize),
+                pane,
+                tab,
+                origin,
+            )?)),
+            ControlRequest::TabClose { workspace, tab } => {
+                ReplyOk::Panes(self.machine()?.tab_close(workspace, tab, origin)?)
+            }
             ControlRequest::TabCloseRemembered {
                 workspace,
                 tab,
@@ -886,9 +919,9 @@ impl Services {
                 }
                 ReplyOk::Panes(closed.stopped)
             }
-            ControlRequest::PaneClose { workspace, pane } => ReplyOk::Panes(
-                self.machine()?.pane_close(workspace, pane, origin)?,
-            ),
+            ControlRequest::PaneClose { workspace, pane } => {
+                ReplyOk::Panes(self.machine()?.pane_close(workspace, pane, origin)?)
+            }
             ControlRequest::AgentStates => ReplyOk::AgentStates(
                 self.panes
                     .as_ref()
@@ -897,11 +930,13 @@ impl Services {
             ),
             ControlRequest::Routes => {
                 ReplyOk::Routes(crate::daemon::ssh::SshManager::global().routes())
-            },
-            _ => return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "this operation requires a control connection",
-            )),
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "this operation requires a control connection",
+                ));
+            }
         })
     }
 }
@@ -1385,8 +1420,8 @@ mod sock {
 pub(crate) use sock::socket_path_in;
 #[cfg(unix)]
 pub use sock::{
-    bind_control_socket, control_socket_path, serve_listener,
-    serve_listener_with, spawn_control_listener, spawn_control_listener_with,
+    bind_control_socket, control_socket_path, serve_listener, serve_listener_with,
+    spawn_control_listener, spawn_control_listener_with,
 };
 
 #[cfg(windows)]
@@ -1483,8 +1518,8 @@ mod wsock {
 
 #[cfg(windows)]
 pub use wsock::{
-    CONTROL_PORT_FILE, connect_control, control_endpoint_path,
-    remove_control_endpoint, spawn_control_listener, spawn_control_listener_with,
+    CONTROL_PORT_FILE, connect_control, control_endpoint_path, remove_control_endpoint,
+    spawn_control_listener, spawn_control_listener_with,
 };
 
 #[cfg(test)]

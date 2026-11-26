@@ -1416,10 +1416,18 @@ pub fn server_executable() -> anyhow::Result<PathBuf> {
         }
     };
     let name = format!("tty7-server{}", std::env::consts::EXE_SUFFIX);
-    let remote = format!("{}{}", crate::daemon::install::asset::binary_name(
-        crate::daemon::control::CONTROL_VERSION, PROTOCOL_VERSION,
-    ), std::env::consts::EXE_SUFFIX);
-    let server = if exe.file_name().is_some_and(|n| n == name.as_str() || n == remote.as_str()) {
+    let remote = format!(
+        "{}{}",
+        crate::daemon::install::asset::binary_name(
+            crate::daemon::control::CONTROL_VERSION,
+            PROTOCOL_VERSION,
+        ),
+        std::env::consts::EXE_SUFFIX
+    );
+    let server = if exe
+        .file_name()
+        .is_some_and(|n| n == name.as_str() || n == remote.as_str())
+    {
         exe
     } else {
         let server = exe.with_file_name(name);
@@ -1437,16 +1445,28 @@ pub fn server_executable() -> anyhow::Result<PathBuf> {
 // relative library paths available for surviving sessions and their hooks.
 fn appimage_server(server: &Path) -> anyhow::Result<PathBuf> {
     if !server.is_file() {
-        anyhow::bail!("tty7-server is missing at {}; reinstall this application", server.display());
+        anyhow::bail!(
+            "tty7-server is missing at {}; reinstall this application",
+            server.display()
+        );
     }
     let root = config::config_dir_path()
         .ok_or_else(|| anyhow::anyhow!("configuration directory is unavailable"))?
         .join("server-runtime");
     std::fs::create_dir_all(&root)?;
-    let lock = std::fs::OpenOptions::new().read(true).write(true).create(true)
-        .truncate(false).open(root.join("install.lock"))?;
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join("install.lock"))?;
     lock.lock()?;
-    let version = format!("{}-c{}p{}", env!("CARGO_PKG_VERSION"), crate::daemon::control::CONTROL_VERSION, PROTOCOL_VERSION);
+    let version = format!(
+        "{}-c{}p{}",
+        env!("CARGO_PKG_VERSION"),
+        crate::daemon::control::CONTROL_VERSION,
+        PROTOCOL_VERSION
+    );
     let installed = root.join(&version);
     let executable = installed.join("usr/bin/tty7-server");
     if executable.is_file() {
@@ -1457,8 +1477,11 @@ fn appimage_server(server: &Path) -> anyhow::Result<PathBuf> {
     let result = (|| -> anyhow::Result<()> {
         std::fs::create_dir_all(stage.join("usr/bin"))?;
         std::fs::copy(server, stage.join("usr/bin/tty7-server"))?;
-        let libraries = server.parent().and_then(Path::parent)
-            .ok_or_else(|| anyhow::anyhow!("AppImage server has no usr directory"))?.join("lib");
+        let libraries = server
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| anyhow::anyhow!("AppImage server has no usr directory"))?
+            .join("lib");
         copy_server_libraries(&libraries, &stage.join("usr/lib"))?;
         std::fs::rename(&stage, &installed)?;
         Ok(())
@@ -1491,8 +1514,13 @@ fn copy_server_libraries(source: &Path, destination: &Path) -> io::Result<()> {
 #[cfg(target_os = "linux")]
 pub(crate) fn appimage_environment(cmd: &mut Command, exe: &Path) -> anyhow::Result<()> {
     if std::env::var_os("APPIMAGE").is_some() {
-        let bin = exe.parent().ok_or_else(|| anyhow::anyhow!("server has no directory"))?;
-        let lib = bin.parent().ok_or_else(|| anyhow::anyhow!("server has no usr directory"))?.join("lib");
+        let bin = exe
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("server has no directory"))?;
+        let lib = bin
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("server has no usr directory"))?
+            .join("lib");
         for (name, directory) in [("PATH", bin.to_path_buf()), ("LD_LIBRARY_PATH", lib)] {
             let mut paths = vec![directory];
             if let Some(existing) = std::env::var_os(name) {
@@ -1508,7 +1536,10 @@ fn spawn_detached() -> anyhow::Result<()> {
     daemon_generation_moved();
     let exe = server_executable()?;
     if !exe.is_file() {
-        anyhow::bail!("tty7-server is missing at {}; reinstall this application", exe.display());
+        anyhow::bail!(
+            "tty7-server is missing at {}; reinstall this application",
+            exe.display()
+        );
     }
 
     let config_dir = config::config_dir_path();

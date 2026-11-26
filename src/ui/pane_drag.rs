@@ -385,58 +385,33 @@ pub(crate) fn tab_zone_at(
     }
 }
 
-/// How thick the caret between two tabs is, and how far past the outermost
-/// tab it sits when the gap it marks is at one end of the row.
+/// The sidebar insertion caret's thickness and distance beyond the end rows.
 const CARET: f32 = 3.;
 const CARET_REACH: f32 = 5.;
 
-/// Which gap in a row of tabs the pointer is in — how many of them it is past
-/// — and the caret that marks it.
-///
-/// `row` is the tabs in the order they were drawn, along `axis`. The answer
-/// counts gaps, so a row of three has four of them: `0` before the first tab
-/// and `3` after the last.
+/// The gap and horizontal caret between sidebar rows in their display order.
 pub(crate) fn insertion(
     row: &[Bounds<Pixels>],
-    axis: gpui::Axis,
     pointer: Point<Pixels>,
 ) -> Option<(usize, Bounds<Pixels>)> {
-    let across = axis == gpui::Axis::Vertical;
-    let lead = |b: &Bounds<Pixels>| if across { b.origin.y } else { b.origin.x };
-    let trail = |b: &Bounds<Pixels>| {
-        if across {
-            b.origin.y + b.size.height
-        } else {
-            b.origin.x + b.size.width
-        }
-    };
-    let along = if across { pointer.y } else { pointer.x };
     // Past a tab's middle is past the tab: the gap the pointer is in is the one
     // it is nearest, and the halfway line is where "nearest" changes hands.
     let gap = row
         .iter()
-        .take_while(|b| (lead(b) + trail(b)) / 2. < along)
+        .take_while(|b| b.origin.y + b.size.height / 2. < pointer.y)
         .count();
     let before = gap.checked_sub(1).and_then(|k| row.get(k));
     let after = row.get(gap);
     let cut = match (before, after) {
-        (Some(a), Some(b)) => (trail(a) + lead(b)) / 2.,
-        (Some(a), None) => trail(a) + px(CARET_REACH),
-        (None, Some(b)) => lead(b) - px(CARET_REACH),
+        (Some(a), Some(b)) => (a.origin.y + a.size.height + b.origin.y) / 2.,
+        (Some(a), None) => a.origin.y + a.size.height + px(CARET_REACH),
+        (None, Some(b)) => b.origin.y - px(CARET_REACH),
         (None, None) => return None,
     };
-    // Drawn as tall as the tab it is beside, so the caret reads as belonging to
-    // the row rather than to the window.
     let neighbour = after.or(before)?;
-    let caret = match axis {
-        gpui::Axis::Horizontal => Bounds {
-            origin: point(cut - px(CARET / 2.), neighbour.origin.y),
-            size: size(px(CARET), neighbour.size.height),
-        },
-        gpui::Axis::Vertical => Bounds {
-            origin: point(neighbour.origin.x, cut - px(CARET / 2.)),
-            size: size(neighbour.size.width, px(CARET)),
-        },
+    let caret = Bounds {
+        origin: point(neighbour.origin.x, cut - px(CARET / 2.)),
+        size: size(neighbour.size.width, px(CARET)),
     };
     Some((gap, caret))
 }
@@ -779,61 +754,12 @@ mod tests {
         );
     }
 
-    /// Three chips of 100, 10 apart, along a strip.
-    fn chips() -> Vec<Bounds<Pixels>> {
-        (0..3)
-            .map(|i| rect(20. + i as f32 * 110., 4., 100., 30.))
-            .collect()
-    }
-
     #[test]
-    fn a_pane_carried_to_the_strip_lands_in_the_gap_it_is_nearest() {
-        let at = |x: f32| {
-            insertion(&chips(), gpui::Axis::Horizontal, point(px(x), px(18.))).map(|(gap, _)| gap)
-        };
-        assert_eq!(at(0.), Some(0), "before the first chip");
-        assert_eq!(
-            at(60.),
-            Some(0),
-            "the near half of a chip is the gap before it"
-        );
-        assert_eq!(at(80.), Some(1), "the far half is the gap after it");
-        assert_eq!(at(135.), Some(1), "the gap itself");
-        assert_eq!(
-            at(400.),
-            Some(3),
-            "past the last chip is the end of the row"
-        );
-    }
-
-    #[test]
-    fn the_caret_stands_in_the_gap_and_is_as_tall_as_the_tabs() {
-        let caret = |x: f32| {
-            insertion(&chips(), gpui::Axis::Horizontal, point(px(x), px(18.))).map(|(_, c)| c)
-        };
-        assert_eq!(
-            caret(135.),
-            Some(rect(123.5, 4., 3., 30.)),
-            "between two chips it splits the space between them"
-        );
-        assert_eq!(
-            caret(0.),
-            Some(rect(13.5, 4., 3., 30.)),
-            "at the head of the row it stands off the first chip"
-        );
-        assert_eq!(
-            caret(400.),
-            Some(rect(343.5, 4., 3., 30.)),
-            "at the end it stands off the last one"
-        );
-    }
-
-    #[test]
-    fn a_sidebar_reads_the_same_way_down_its_rows() {
+    fn a_pane_lands_between_sidebar_rows() {
         let rows: Vec<Bounds<Pixels>> = (0..3)
             .map(|i| rect(0., 50. + i as f32 * 44., 220., 40.))
             .collect();
-        let at = |y: f32| insertion(&rows, gpui::Axis::Vertical, point(px(110.), px(y)));
+        let at = |y: f32| insertion(&rows, point(px(110.), px(y)));
         assert_eq!(at(55.).map(|(gap, _)| gap), Some(0));
         assert_eq!(at(140.).map(|(gap, _)| gap), Some(2));
         assert_eq!(
@@ -842,7 +768,7 @@ mod tests {
             "below the last row the caret lies across it"
         );
         assert_eq!(
-            insertion(&[], gpui::Axis::Vertical, point(px(0.), px(0.))),
+            insertion(&[], point(px(0.), px(0.))),
             None,
             "no rows drawn, no gap to name"
         );

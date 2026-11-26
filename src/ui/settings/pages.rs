@@ -556,6 +556,7 @@ impl Tty7App {
         let overridden = window_overrides_active(config, cfg!(target_os = "windows"));
         let dim_inactive_panes = config.dim_inactive_panes;
         let auto_hide_titlebar_buttons = config.auto_hide_titlebar_buttons;
+        let show_content_title = config.show_content_title;
         let opacity = Tty7App::effective_window_opacity(cx);
 
         const MIN: f32 = 0.2;
@@ -644,6 +645,12 @@ impl Tty7App {
             cx,
             |this, on, _, cx| this.set_auto_hide_titlebar_buttons(on, cx),
         );
+        let content_title = self.settings_switch(
+            "show-content-title",
+            show_content_title,
+            cx,
+            |this, on, _, cx| this.set_show_content_title(on, cx),
+        );
         let follow_theme = overridden.then(|| {
             h_flex()
                 .pt(px(4.))
@@ -701,6 +708,15 @@ impl Tty7App {
                 t(L10nKey::SettingsAutoHideTitlebarButtons),
                 t(L10nKey::SettingsAutoHideTitlebarButtonsDesc),
                 auto_hide_chrome,
+                cx,
+            )
+            .into_any_element(),
+        );
+        rows.push(
+            self.settings_row(
+                t(L10nKey::SettingsShowContentTitle),
+                t(L10nKey::SettingsShowContentTitleDesc),
+                content_title,
                 cx,
             )
             .into_any_element(),
@@ -1281,10 +1297,6 @@ impl Tty7App {
             NewTabPosition::AfterCurrent => 0,
             NewTabPosition::End => 1,
         };
-        let tab_bar_idx = match cfg.tab_bar_position {
-            TabBarPosition::Top => 0,
-            TabBarPosition::Left => 1,
-        };
         let sidebar_auto_grouping = cfg.sidebar_auto_grouping;
         let confirm_idx = match cfg.confirm_close {
             ConfirmClose::Never => 0,
@@ -1325,22 +1337,6 @@ impl Tty7App {
                 );
             },
         );
-        let tab_bar = self.settings_choice(
-            "wt-tab-bar-pos",
-            &[t(L10nKey::SettingsTop), t(L10nKey::SettingsLeft)],
-            tab_bar_idx,
-            cx,
-            |this, ix, _w, cx| {
-                this.set_tab_bar_position(
-                    if ix == 0 {
-                        TabBarPosition::Top
-                    } else {
-                        TabBarPosition::Left
-                    },
-                    cx,
-                );
-            },
-        );
         let grouping = self.settings_switch(
             "wt-sidebar-auto-grouping",
             sidebar_auto_grouping,
@@ -1355,12 +1351,6 @@ impl Tty7App {
                     t(L10nKey::SettingsNewTabPosition),
                     t(L10nKey::SettingsNewTabPositionDesc),
                     new_tab,
-                    cx,
-                ),
-                self.settings_row(
-                    t(L10nKey::SettingsTabBarPosition),
-                    t(L10nKey::SettingsTabBarPositionDesc),
-                    tab_bar,
                     cx,
                 ),
                 self.settings_row(

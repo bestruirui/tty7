@@ -314,7 +314,7 @@ mod tests {
     /// The tray used to recolour every glyph white regardless. That is
     /// invisible for the nineteen agents whose mark *is* a white silhouette on
     /// a brand-coloured disc, and wrong for the one whose mark carries the
-    /// colour itself: TraeCode came out white here while the tab strip drew it
+    /// colour itself: TraeCode came out white here while the sidebar drew it
     /// green. Reading `icon_rgb` at both sites is what keeps one agent from
     /// having two faces, and this asserts the tray actually reads it.
     #[test]

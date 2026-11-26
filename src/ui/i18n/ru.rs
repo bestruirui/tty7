@@ -258,6 +258,10 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsAutoHideTitlebarButtonsDesc => {
             "Показывать кнопки новой вкладки и боковой панели лишь при наведении на заголовок."
         }
+        L10nKey::SettingsShowContentTitle => "Показывать заголовок области содержимого",
+        L10nKey::SettingsShowContentTitleDesc => {
+            "Показывать заголовок текущей вкладки над областью содержимого."
+        }
         L10nKey::SettingsOpenThemesFolder => "Открыть папку тем",
         L10nKey::SettingsChangeThemeImage => "Изменить…",
         L10nKey::SettingsChooseThemeImage => "Выбрать…",
@@ -488,8 +492,6 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::ConfirmCloseNever => "Никогда",
         L10nKey::ConfirmCloseWhenBusy => "Если что-то запущено",
         L10nKey::ConfirmCloseAlways => "Всегда",
-        L10nKey::SettingsTabBarPosition => "Положение вкладок",
-        L10nKey::SettingsTabBarPositionDesc => "Полоса сверху или боковая панель слева.",
         L10nKey::SettingsSidebarGrouping => "Автогруппировка",
         L10nKey::SettingsSidebarGroupingDesc => {
             "Группировать незакреплённые вкладки по репозиторию Git, SSH-вкладки по хосту."
@@ -513,8 +515,6 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsStartupFullscreen => "На весь экран",
         L10nKey::SettingsAfterCurrent => "После текущей",
         L10nKey::SettingsAtEnd => "В конце",
-        L10nKey::SettingsTop => "Сверху",
-        L10nKey::SettingsLeft => "Слева",
         L10nKey::SettingsPrefix => "Префикс",
         L10nKey::SettingsKeybindingsIntroDesc => {
             "Нажмите на сочетание и введите новые клавиши. Для последовательности вроде Ctrl-B X нажимайте клавиши подряд. Esc отменяет, Backspace очищает."
@@ -727,6 +727,9 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSearchAutoHideTitlebarButtonsKeywords => {
             "скрывать автоматически заголовок кнопки наведение указатель новая вкладка боковая панель auto hide autohide title bar titlebar buttons chrome hover pointer minimal clean new tab sidebar toggle"
         }
+        L10nKey::SettingsSearchShowContentTitleKeywords => {
+            "содержимое заголовок вкладка показывать скрывать content title bar tab show hide"
+        }
         L10nKey::SettingsSearchDroidKeywords => {
             "агент интеграция хуки установка agent integration hooks install droid factory"
         }
@@ -873,9 +876,6 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSearchSyncWithSystemKeywords => {
             "тема тёмная светлая автоматически система оформление режим theme dark light auto follow os appearance mode"
         }
-        L10nKey::SettingsSearchTabBarPositionKeywords => {
-            "вкладки вертикально боковая панель слева сверху расположение tabs vertical sidebar left top layout rail"
-        }
         L10nKey::SettingsSearchTerminalBellKeywords => {
             "сигнал звуковой визуальный вспышка звук тишина bell audible visual flash sound silence beep both ^g"
         }
@@ -1006,7 +1006,7 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppMenuSaveAgentLaunchArgs => "Сохранить аргументы запуска по умолчанию",
         L10nKey::AppMenuClosePaneTab => "Закрыть",
         L10nKey::AppMenuCloseOtherTabs => "Закрыть другие вкладки",
-        L10nKey::AppMenuCloseTabsRight => "Закрыть вкладки справа",
+        L10nKey::AppMenuCloseTabsBelow => "Закрыть вкладки ниже",
         L10nKey::AppMenuReopenClosedTab => "Снова открыть закрытую вкладку",
         L10nKey::AppMenuRenameWorkspace => "Переименовать рабочую область…",
         L10nKey::AppMenuStopWorkspace => "Остановить рабочую область…",
@@ -1025,7 +1025,6 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppMenuResetFontSize => "Сбросить размер шрифта",
         L10nKey::AppMenuLeftSidebar => "Левая панель",
         L10nKey::AppMenuRightPanel => "Правая панель",
-        L10nKey::AppMenuTabBarPosition => "Положение вкладок",
         L10nKey::AppMenuFocusNextPane => "Перейти к следующей панели",
         L10nKey::AppMenuFocusPreviousPane => "Перейти к предыдущей панели",
         L10nKey::AppMenuZoomPane => "Развернуть панель",
@@ -1075,7 +1074,6 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::SidebarDropToPin => "Перетащите сюда, чтобы закрепить",
         L10nKey::TabContextCloseTab => "Закрыть вкладку",
         L10nKey::TerminalContextClear => "Очистить",
-        L10nKey::TabContextCloseTabsBelow => "Закрыть вкладки ниже",
         L10nKey::TabContextMarkUnread => "Отметить непрочитанной",
         L10nKey::TabContextHibernate => "Перевести в спящий режим",
         L10nKey::TabContextWake => "Возобновить",
@@ -1258,8 +1256,8 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::CmdSwapPanePrevious => "Поменять местами с предыдущей панелью",
         L10nKey::CmdNextTab => "Следующая вкладка",
         L10nKey::CmdPreviousTab => "Предыдущая вкладка",
-        L10nKey::CmdMoveTabLeft => "Переместить вкладку влево",
-        L10nKey::CmdMoveTabRight => "Переместить вкладку вправо",
+        L10nKey::CmdMoveTabUp => "Переместить вкладку вверх",
+        L10nKey::CmdMoveTabDown => "Переместить вкладку вниз",
         L10nKey::CmdRecentTabSwitcher => "Недавние вкладки",
         L10nKey::CmdRecentTabSwitcherReverse => "Недавние вкладки (назад)",
         L10nKey::CmdCopyWorkingDirectory => "Копировать рабочую папку",
@@ -1278,7 +1276,7 @@ pub fn translate_ru(key: L10nKey) -> Option<&'static str> {
         L10nKey::CmdClosePaneTab => "Закрыть панель / вкладку",
         L10nKey::CmdCloseWindow => "Закрыть окно",
         L10nKey::CmdCloseOtherTabs => "Закрыть другие вкладки",
-        L10nKey::CmdCloseTabsToTheRight => "Закрыть вкладки справа",
+        L10nKey::CmdCloseTabsBelow => "Закрыть вкладки ниже",
         L10nKey::CmdReopenClosedTab => "Снова открыть закрытую вкладку",
         L10nKey::CmdNewWorkspace => "Новая рабочая область…",
         L10nKey::CmdSwitchWorkspace => "Сменить рабочую область…",

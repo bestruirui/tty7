@@ -342,11 +342,19 @@ pub enum ControlRequest {
     Routes,
     Status,
     MobileStatus,
-    MobileSetEnabled { enabled: bool },
+    MobileSetEnabled {
+        enabled: bool,
+    },
     MobilePair,
-    MobileCancelPair { secret: String },
-    MobilePairing { secret: String },
-    MobileRevoke { id: String },
+    MobileCancelPair {
+        secret: String,
+    },
+    MobilePairing {
+        secret: String,
+    },
+    MobileRevoke {
+        id: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -529,8 +537,15 @@ pub enum ReplyOk {
         status: crate::daemon::mobile::Status,
         devices: Vec<crate::daemon::mobile::Device>,
     },
-    MobilePair { code: String, secret: String, devices: Vec<crate::daemon::mobile::Device> },
-    MobilePairing { open: bool, has_open: bool },
+    MobilePair {
+        code: String,
+        secret: String,
+        devices: Vec<crate::daemon::mobile::Device>,
+    },
+    MobilePairing {
+        open: bool,
+        has_open: bool,
+    },
     MobileDevices(Vec<crate::daemon::mobile::Device>),
 }
 

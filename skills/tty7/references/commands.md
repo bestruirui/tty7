@@ -389,7 +389,7 @@ segment (`group` in the JSON is the whole value). Read-only from here: with the
 default repo grouping the GUI recomputes it from the tab's working directory,
 so anything written from outside would be overwritten on the next render.
 
-Almost no tab has a `name`: the GUI's tab strip reads OSC titles, which the
+Almost no tab has a `name`: the GUI's sidebar reads OSC titles, which the
 machine tree never sees. So the NAME column — and `label` in the JSON — falls
 back through the best evidence there is: the name if someone set one, else the
 agent running in the tab ("Claude Code"), else the last segment of its cwd,

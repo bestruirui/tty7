@@ -2282,7 +2282,7 @@ function closeFailed(name: string, message: string) {
   openSheet(`Couldn't close ${name}`, h("div", { class: "sheet-body" }, h("p", { class: "sheet-text" }, message)));
 }
 
-/** A pane's avatar, as the desktop's tab strip draws it: the agent's mark on
+/** A pane's avatar, as the desktop's sidebar draws it: the agent's mark on
  * its brand colour, or a terminal, with the status dot as a badge. Waiting is
  * hollow, so it differs from Done in shape and not only in hue. */
 function avatar(agent: AgentView | null | undefined, cls = "avatar") {

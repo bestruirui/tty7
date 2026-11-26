@@ -97,7 +97,8 @@ fn main() -> ExitCode {
 
 fn run_daemon() -> ExitCode {
     if let Err(e) = tty7_core::daemon::server::run_daemon(|registry, services| {
-        let backend = std::sync::Arc::new(tty7_gateway::daemon::Daemon::in_process(registry, services));
+        let backend =
+            std::sync::Arc::new(tty7_gateway::daemon::Daemon::in_process(registry, services));
         tty7_gateway::service::Manager::new(backend)
             .map(|manager| Box::new(manager) as Box<dyn tty7_core::daemon::mobile::Gateway>)
             .map_err(|e| format!("{e:#}"))

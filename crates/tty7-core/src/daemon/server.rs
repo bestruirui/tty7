@@ -94,7 +94,10 @@ impl Registry {
 
     pub fn observe(&self, pane_id: u64) -> std::io::Result<PaneObservation> {
         let pane = self.get(pane_id).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, format!("no such pane {pane_id}"))
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no such pane {pane_id}"),
+            )
         })?;
         let (tx, rx) = mpsc::channel();
         let gate = Arc::new(crate::daemon::pane::OutputGate::new());
@@ -109,10 +112,15 @@ impl Registry {
 
     pub fn send_input(&self, pane_id: u64, bytes: &[u8]) -> std::io::Result<()> {
         let pane = self.get(pane_id).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, format!("no such pane {pane_id}"))
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no such pane {pane_id}"),
+            )
         })?;
         if !pane.alive() {
-            return Err(std::io::Error::other(format!("pane {pane_id} is not running")));
+            return Err(std::io::Error::other(format!(
+                "pane {pane_id} is not running"
+            )));
         }
         pane.write_input(bytes);
         Ok(())

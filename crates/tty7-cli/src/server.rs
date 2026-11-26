@@ -296,10 +296,14 @@ pub(crate) fn server_exe() -> Result<PathBuf> {
     );
     #[cfg(target_os = "linux")]
     let resolved = resolved.or_else(|| {
-        let server = config::config_dir_path()?.join("server-runtime")
-            .join(format!("{}-c{}p{}", env!("CARGO_PKG_VERSION"),
+        let server = config::config_dir_path()?
+            .join("server-runtime")
+            .join(format!(
+                "{}-c{}p{}",
+                env!("CARGO_PKG_VERSION"),
                 tty7_core::daemon::control::CONTROL_VERSION,
-                tty7_core::daemon::protocol::PROTOCOL_VERSION))
+                tty7_core::daemon::protocol::PROTOCOL_VERSION
+            ))
             .join("usr/bin/tty7-server");
         server.is_file().then_some(server)
     });

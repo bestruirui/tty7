@@ -88,11 +88,16 @@ impl State {
     pub fn open(dir: PathBuf) -> Result<State> {
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         restrict(&dir, 0o700)?;
-        Ok(State { dir, mutations: Arc::new(Mutex::new(())) })
+        Ok(State {
+            dir,
+            mutations: Arc::new(Mutex::new(())),
+        })
     }
 
     pub(crate) fn enabled(&self) -> Result<bool> {
-        Ok(read_json::<Config>(&self.dir.join("config.json"))?.unwrap_or_default().enabled)
+        Ok(read_json::<Config>(&self.dir.join("config.json"))?
+            .unwrap_or_default()
+            .enabled)
     }
 
     pub(crate) fn set_enabled(&self, enabled: bool) -> Result<()> {

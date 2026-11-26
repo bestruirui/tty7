@@ -264,6 +264,10 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsAutoHideTitlebarButtonsDesc => {
             "新規タブやサイドバーのボタンを、ポインタがタイトルバーに乗ったときだけ表示します"
         }
+        L10nKey::SettingsShowContentTitle => "コンテンツ領域のタイトルを表示",
+        L10nKey::SettingsShowContentTitleDesc => {
+            "コンテンツ領域の上部に現在のタブのタイトルを表示します"
+        }
         L10nKey::SettingsOpenThemesFolder => "テーマフォルダを開く",
         L10nKey::SettingsChangeThemeImage => "変更…",
         L10nKey::SettingsChooseThemeImage => "選択…",
@@ -467,10 +471,6 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::ConfirmCloseWhenBusy => "実行中のときのみ",
         L10nKey::ConfirmCloseAlways => "常に確認",
         L10nKey::SettingsNewTabPositionDesc => "新しく開いたタブが挿入される場所",
-        L10nKey::SettingsTabBarPosition => "タブバーの位置",
-        L10nKey::SettingsTabBarPositionDesc => {
-            "タブを上部の横一列または左側の縦サイドバーとして表示"
-        }
         L10nKey::SettingsSidebarGrouping => "自動グループ化",
         L10nKey::SettingsSidebarGroupingDesc => {
             "固定していないタブを git リポジトリごと、SSH タブをホストごとにまとめます"
@@ -492,8 +492,6 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsStartupFullscreen => "全画面",
         L10nKey::SettingsAfterCurrent => "現在のタブの隣",
         L10nKey::SettingsAtEnd => "末尾",
-        L10nKey::SettingsTop => "上部",
-        L10nKey::SettingsLeft => "左側",
         L10nKey::SettingsPrefix => "プレフィックスキー",
         L10nKey::SettingsKeybindingsIntroDesc => {
             "ショートカットをクリックして新しいキーを押します。続けて押すと Ctrl-B X のようなシーケンスに。Esc で取消、Backspace で削除"
@@ -699,6 +697,9 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSearchAutoHideTitlebarButtonsKeywords => {
             "自動 隠す タイトルバー ボタン ホバー ポインタ すっきり 新規タブ サイドバー auto hide title bar buttons hover"
         }
+        L10nKey::SettingsSearchShowContentTitleKeywords => {
+            "コンテンツ タイトル タブ 表示 非表示 content title bar tab show hide"
+        }
         L10nKey::SettingsSearchFocusFollowsMouseKeywords => {
             "ペイン ホバー アクティブ focus follows mouse pane hover activate"
         }
@@ -856,9 +857,6 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSearchLegiblePaletteKeywords => {
             "可読 コントラスト 明色 パレット パラメーター 修正 legible bright contrast palette parameter"
-        }
-        L10nKey::SettingsSearchTabBarPositionKeywords => {
-            "タブ 垂直 サイドバー 左 上 レイアウト レール tab bar position tabs vertical sidebar left top rail"
         }
         L10nKey::SettingsSearchTerminalBellKeywords => {
             "ベル 可聴 視覚 フラッシュ サウンド サイレント ビープ 両方 ^g terminal bell audible visual flash sound silence beep both"
@@ -1149,8 +1147,8 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::CmdSwapPanePrevious => "前のペインと入れ替え",
         L10nKey::CmdNextTab => "次のタブ",
         L10nKey::CmdPreviousTab => "前のタブ",
-        L10nKey::CmdMoveTabLeft => "タブを左へ移動",
-        L10nKey::CmdMoveTabRight => "タブを右へ移動",
+        L10nKey::CmdMoveTabUp => "タブを上へ移動",
+        L10nKey::CmdMoveTabDown => "タブを下へ移動",
         L10nKey::CmdRecentTabSwitcher => "最近のタブを切り替える",
         L10nKey::CmdRecentTabSwitcherReverse => "最近のタブを切り替える（逆順）",
         L10nKey::CmdCopyWorkingDirectory => "作業ディレクトリをコピー",
@@ -1171,7 +1169,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::CmdClosePaneTab => "ペイン / タブを閉じる",
         L10nKey::CmdCloseWindow => "ウィンドウを閉じる",
         L10nKey::CmdCloseOtherTabs => "他のタブを閉じる",
-        L10nKey::CmdCloseTabsToTheRight => "右側のタブを閉じる",
+        L10nKey::CmdCloseTabsBelow => "下のタブを閉じる",
         L10nKey::CmdReopenClosedTab => "閉じたタブをもう一度開く",
         L10nKey::CmdNewWorkspace => "新しいワークスペース…",
         L10nKey::CmdSwitchWorkspace => "ワークスペースを切り替える…",
@@ -1406,7 +1404,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppMenuSaveAgentLaunchArgs => "現在の起動引数をデフォルトに設定",
         L10nKey::AppMenuClosePaneTab => "閉じる",
         L10nKey::AppMenuCloseOtherTabs => "他のタブを閉じる",
-        L10nKey::AppMenuCloseTabsRight => "右側のタブを閉じる",
+        L10nKey::AppMenuCloseTabsBelow => "下のタブを閉じる",
         L10nKey::AppMenuReopenClosedTab => "閉じたタブをもう一度開く",
         L10nKey::AppMenuRenameWorkspace => "ワークスペースの名前を変更…",
         L10nKey::AppMenuStopWorkspace => "ワークスペースを停止…",
@@ -1425,7 +1423,6 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppMenuResetFontSize => "フォントサイズをリセット",
         L10nKey::AppMenuLeftSidebar => "左サイドバー",
         L10nKey::AppMenuRightPanel => "右パネル",
-        L10nKey::AppMenuTabBarPosition => "タブバーの位置",
         L10nKey::AppMenuFocusNextPane => "次のペインにフォーカス",
         L10nKey::AppMenuFocusPreviousPane => "前のペインにフォーカス",
         L10nKey::AppMenuZoomPane => "ペインを拡大",
@@ -1475,7 +1472,6 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SidebarDropToPin => "ここにドロップして固定",
         L10nKey::TabContextCloseTab => "タブを閉じる",
         L10nKey::TerminalContextClear => "クリア",
-        L10nKey::TabContextCloseTabsBelow => "下のタブを閉じる",
         L10nKey::Search => "検索",
         L10nKey::TabContextMarkUnread => "未読としてマーク",
         L10nKey::TabContextHibernate => "休止",

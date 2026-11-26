@@ -41,13 +41,15 @@ impl<T> Default for Poller<T> {
 
 impl<T: Clone + Send + 'static> Poller<T> {
     pub(crate) fn finish(&self) {
-        let workers = std::mem::take(
-            &mut *self.workers.lock().unwrap_or_else(|e| e.into_inner()),
-        );
+        let workers = std::mem::take(&mut *self.workers.lock().unwrap_or_else(|e| e.into_inner()));
         for worker in workers {
             let _ = worker.join();
         }
-        self.shared.0.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.shared
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// Starts a read of every machine in `reads` that has none running, waits

@@ -13,7 +13,7 @@
 //! back is for reading only — a `~`-rooted path is spelled the way `~` paths
 //! are spelled everywhere, with `/`. Nothing feeds it back to an API: the
 //! Info panel's Copy Path and Reveal both carry the untouched `PathBuf`, and
-//! the tab strip and picker only ever draw it.
+//! the sidebar and picker only ever draw it.
 //!
 //! *Which* home a path is measured against is the caller's to say, because
 //! only the caller knows which machine the path is on. A pane, a workspace

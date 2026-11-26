@@ -361,7 +361,7 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
         ),
         ("RenameTab", ""),
         ("CloseOtherTabs", ""),
-        ("CloseTabsToTheRight", ""),
+        ("CloseTabsBelow", ""),
         ("CopyWorkingDirectory", ""),
         ("MarkTabUnread", ""),
         ("HibernateTab", ""),
@@ -424,7 +424,7 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
         ("SwapPanePrev", ""),
         // Ctrl+Tab opens the most-recently-used switcher (a quick tap lands
         // on the tab you were just in); these step to the neighbouring tab
-        // in strip order with no popup (#867). ⌘⇧] / ⌘⇧[ is iTerm2's and
+        // in sidebar order with no popup (#867). ⌘⇧] / ⌘⇧[ is iTerm2's and
         // Safari's chord. Off macOS Ctrl+Shift+] is FocusNextPane, so they
         // take Ctrl+PgDn / Ctrl+PgUp, the chord GNOME Terminal, xfce4-terminal
         // and every browser use for the same thing.
@@ -438,8 +438,8 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
             "SelectPrevTab",
             per_platform("secondary-shift-[", "ctrl-pageup"),
         ),
-        ("MoveTabLeft", ""),
-        ("MoveTabRight", ""),
+        ("MoveTabUp", ""),
+        ("MoveTabDown", ""),
         ("ActivateTab1", per_platform("secondary-1", "alt-1")),
         ("ActivateTab2", per_platform("secondary-2", "alt-2")),
         ("ActivateTab3", per_platform("secondary-3", "alt-3")),
@@ -476,7 +476,6 @@ fn shipped_bindings() -> Vec<(&'static str, &'static str)> {
         // config away from being retired. See
         // `f11_is_the_only_default_on_a_bare_function_key`.
         ("ToggleFullscreen", per_platform("secondary-enter", "f11")),
-        ("ToggleTabSidebar", ""),
         (
             "ToggleLeftPanel",
             per_platform("secondary-b", "secondary-shift-b"),
@@ -620,9 +619,9 @@ fn authored_entry(action: &str) -> Option<(CommandGroup, String)> {
             CommandGroup::TabsPanes,
             t(L10nKey::CmdCloseOtherTabs).to_string(),
         ),
-        "CloseTabsToTheRight" => (
+        "CloseTabsBelow" => (
             CommandGroup::TabsPanes,
-            t(L10nKey::CmdCloseTabsToTheRight).to_string(),
+            t(L10nKey::CmdCloseTabsBelow).to_string(),
         ),
         "CopyWorkingDirectory" => (
             CommandGroup::TabsPanes,
@@ -711,13 +710,13 @@ fn authored_entry(action: &str) -> Option<(CommandGroup, String)> {
             CommandGroup::TabsPanes,
             t(L10nKey::CmdPreviousTab).to_string(),
         ),
-        "MoveTabLeft" => (
+        "MoveTabUp" => (
             CommandGroup::TabsPanes,
-            t(L10nKey::CmdMoveTabLeft).to_string(),
+            t(L10nKey::CmdMoveTabUp).to_string(),
         ),
-        "MoveTabRight" => (
+        "MoveTabDown" => (
             CommandGroup::TabsPanes,
-            t(L10nKey::CmdMoveTabRight).to_string(),
+            t(L10nKey::CmdMoveTabDown).to_string(),
         ),
         "NewWorkspace" => (
             CommandGroup::Workspaces,
@@ -751,10 +750,6 @@ fn authored_entry(action: &str) -> Option<(CommandGroup, String)> {
         "ToggleFullscreen" => (
             CommandGroup::View,
             t(L10nKey::CmdEnterFullScreen).to_string(),
-        ),
-        "ToggleTabSidebar" => (
-            CommandGroup::View,
-            t(L10nKey::AppMenuTabBarPosition).to_string(),
         ),
         "ToggleLeftPanel" => (
             CommandGroup::View,
@@ -1367,7 +1362,7 @@ fn make_binding(action: &str, keystroke: &str, cx: &App) -> Option<KeyBinding> {
                 "CloseActiveTab" => Box::new(CloseActiveTab),
                 "RenameTab" => Box::new(RenameTab),
                 "CloseOtherTabs" => Box::new(CloseOtherTabs),
-                "CloseTabsToTheRight" => Box::new(CloseTabsToTheRight),
+                "CloseTabsBelow" => Box::new(CloseTabsBelow),
                 "CopyWorkingDirectory" => Box::new(CopyWorkingDirectory),
                 "MarkTabUnread" => Box::new(MarkTabUnread),
                 "HibernateTab" => Box::new(HibernateTab),
@@ -1397,8 +1392,8 @@ fn make_binding(action: &str, keystroke: &str, cx: &App) -> Option<KeyBinding> {
                 "PrevTab" => Box::new(PrevTab),
                 "SelectNextTab" => Box::new(SelectNextTab),
                 "SelectPrevTab" => Box::new(SelectPrevTab),
-                "MoveTabLeft" => Box::new(MoveTabLeft),
-                "MoveTabRight" => Box::new(MoveTabRight),
+                "MoveTabUp" => Box::new(MoveTabUp),
+                "MoveTabDown" => Box::new(MoveTabDown),
                 "ActivateTab1" => Box::new(ActivateTab1),
                 "ActivateTab2" => Box::new(ActivateTab2),
                 "ActivateTab3" => Box::new(ActivateTab3),
@@ -1423,7 +1418,6 @@ fn make_binding(action: &str, keystroke: &str, cx: &App) -> Option<KeyBinding> {
                 "ReopenClosedTab" => Box::new(ReopenClosedTab),
                 "ToggleMaximizePane" => Box::new(ToggleMaximizePane),
                 "ToggleFullscreen" => Box::new(ToggleFullscreen),
-                "ToggleTabSidebar" => Box::new(ToggleTabSidebar),
                 "ToggleLeftPanel" => Box::new(ToggleLeftPanel),
                 "ToggleRightPanel" => Box::new(ToggleRightPanel),
                 "FindInTerminal" => Box::new(FindInTerminal),

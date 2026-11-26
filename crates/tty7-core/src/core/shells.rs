@@ -85,7 +85,7 @@ fn append_custom(inventory: &mut ShellInventory, custom: &[crate::core::config::
             label = basename(program);
         }
         // The menu marks its default row by matching the label
-        // (`tab_strip::shell_menu`), so a custom entry that borrows a name
+        // (`tab_sidebar::new_tab_menu_rows`), so a custom entry that borrows a name
         // already in the list would wear a mark meant for another row. Same
         // answer the configured shell already gets when it collides — and it
         // has to keep answering until the name is actually free, since the

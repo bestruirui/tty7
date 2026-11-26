@@ -341,7 +341,7 @@ pub(crate) struct Switcher {
     left_sel: usize,
     right_sel: usize,
     /// Order the tab column most-recently-used first. Set when Ctrl+Tab opened
-    /// the panel; the plain Cmd+Shift+O panel keeps strip order.
+    /// the panel; the plain Cmd+Shift+O panel keeps tab order.
     mru: bool,
     /// The modifiers held down when Ctrl+Tab opened the panel. Releasing them
     /// commits the highlighted tab, IDEA-style.
@@ -995,7 +995,7 @@ impl Tty7App {
     }
 
     /// Whether the open switcher lists this window's tabs most recently used
-    /// first — the Ctrl-Tab gesture — rather than in strip order.
+    /// first — the Ctrl-Tab gesture — rather than in tab order.
     fn switcher_mru(&self) -> bool {
         self.switcher.as_ref().is_some_and(|sw| sw.mru)
     }
@@ -1006,7 +1006,7 @@ impl Tty7App {
     /// process has of windows it does not own.
     ///
     /// `mru` orders this window's own tabs most recently used first instead of
-    /// in strip order; other workspaces' tabs come in the order they have.
+    /// in tab order; other workspaces' tabs come in the order they have.
     pub(crate) fn tab_rows_for(&self, id: WorkspaceId, mru: bool, cx: &App) -> Vec<TabRow> {
         if id == self.workspace {
             let now_ms = crate::core::config::unix_now().saturating_mul(1000);
@@ -2642,7 +2642,7 @@ impl Tty7App {
                     .group_hover("switcher-row", |x| x.visible())
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(
-                        crate::ui::tab_strip::hit_target(
+                        crate::ui::title_bar::hit_target(
                             Button::new(("switcher-row-more", key))
                                 .icon(IconName::Ellipsis)
                                 .ghost()
@@ -2715,8 +2715,8 @@ impl Tty7App {
         let chosen_local = form.chosen.is_none();
         let chosen_dot: Option<gpui::Hsla> = form.chosen.as_ref().map(|h| {
             match remote_connect::HostLinks::get(cx, h.target.host_id()).is_some() {
-                true => gpui::rgb(crate::ui::tab_strip::LIVE_DOT).into(),
-                false => gpui::rgb(crate::ui::tab_strip::UNKNOWN_DOT).into(),
+                true => gpui::rgb(crate::ui::tab_sidebar::LIVE_DOT).into(),
+                false => gpui::rgb(crate::ui::tab_sidebar::UNKNOWN_DOT).into(),
             }
         });
 
@@ -2728,7 +2728,7 @@ impl Tty7App {
             .border_b_1()
             .border_color(border)
             .child(
-                crate::ui::tab_strip::hit_target(
+                crate::ui::title_bar::hit_target(
                     Button::new("switcher-form-back")
                         .icon(IconName::ChevronLeft)
                         .ghost()
@@ -2872,8 +2872,8 @@ impl Tty7App {
                         base.child(host_glyph(
                             false,
                             Some(match lit {
-                                true => gpui::rgb(crate::ui::tab_strip::LIVE_DOT).into(),
-                                false => gpui::rgb(crate::ui::tab_strip::UNKNOWN_DOT).into(),
+                                true => gpui::rgb(crate::ui::tab_sidebar::LIVE_DOT).into(),
+                                false => gpui::rgb(crate::ui::tab_sidebar::UNKNOWN_DOT).into(),
                             }),
                         ))
                         .child(
@@ -3040,7 +3040,7 @@ impl Tty7App {
         let holding = self.switcher.as_ref().is_some_and(|sw| sw.hold.is_some());
         let ws = row.id;
 
-        let live: gpui::Hsla = gpui::rgb(crate::ui::tab_strip::LIVE_DOT).into();
+        let live: gpui::Hsla = gpui::rgb(crate::ui::tab_sidebar::LIVE_DOT).into();
         let mut list = v_flex().gap(px(1.)).child(
             h_flex()
                 .items_center()
@@ -3224,7 +3224,7 @@ impl TabRow {
 /// The two surfaces used to read different sources and had to be talked into
 /// agreeing: a local tab was named by its live terminal's title, this one by
 /// the tree's copy of it (`PaneRecord::osc_title`). They now go through the one
-/// renderer, [`crate::ui::tab_strip::label_of`] — a local tab is turned into
+/// renderer, [`crate::ui::tab_sidebar::label_of`] — a local tab is turned into
 /// the same [`TabView`](crate::ui::machine_mirror::TabView) this one already
 /// is, so neither column can rank the evidence its own way.
 fn tab_view_label(
@@ -3232,7 +3232,7 @@ fn tab_view_label(
     index: usize,
     home: Option<&std::path::Path>,
 ) -> String {
-    crate::ui::tab_strip::label_of(view, index, home)
+    crate::ui::tab_sidebar::label_of(view, index, home)
 }
 
 impl Group {
@@ -4020,7 +4020,7 @@ mod tests {
     fn a_tab_of_another_window_is_named_the_way_a_local_one_would_be() {
         // `title` here is the foreground process name the machine tree carries,
         // not a terminal title — it must not outrank the working directory the
-        // local tab strip would be showing.
+        // local sidebar would be showing.
         let mut view = crate::ui::machine_mirror::TabView {
             id: TabId::new(),
             name: Some("  build  ".to_string()),
@@ -4038,14 +4038,14 @@ mod tests {
         assert_eq!(
             tab_view_label(&view, 0, None),
             "修复 workspace switcher",
-            "then the title the local strip would be showing — mark and all,              which is to say without the mark"
+            "then the title the sidebar would show, without the status mark"
         );
 
         view.osc_title = Some("user@host:~/repo/025/tty7".to_string());
         assert_eq!(
             tab_view_label(&view, 0, None),
-            crate::ui::tab_strip::short_title("user@host:~/repo/025/tty7", None),
-            "a shell's title goes through the shortener the strip uses"
+            crate::ui::tab_sidebar::short_title("user@host:~/repo/025/tty7", None),
+            "a shell's title goes through the shared tab-label shortener"
         );
 
         view.osc_title = Some("user@host:".to_string());
@@ -4065,8 +4065,8 @@ mod tests {
         view.agent = None;
         assert_eq!(
             tab_view_label(&view, 0, None),
-            crate::ui::tab_strip::short_title("/Users/x/repo/tty7", None),
-            "otherwise the directory, put through the same shortener as the strip"
+            crate::ui::tab_sidebar::short_title("/Users/x/repo/tty7", None),
+            "otherwise the directory, put through the shared tab-label shortener"
         );
 
         view.cwd = None;

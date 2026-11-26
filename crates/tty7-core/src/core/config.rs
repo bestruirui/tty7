@@ -186,6 +186,7 @@ pub struct Config {
     /// written before the key existed as off, which is how every window drew
     /// then.
     pub auto_hide_titlebar_buttons: bool,
+    pub show_content_title: bool,
     /// Lenient one entry at a time, for the same reason the nested keys below
     /// are: this is hand-edited, and it used to be all-or-nothing. A single
     /// value serde could not read — `"ActivateTab1": null`, a number, an object
@@ -215,8 +216,6 @@ pub struct Config {
     pub scrollback_limit: usize,
     #[serde(default, deserialize_with = "de_lenient")]
     pub new_tab_position: NewTabPosition,
-    #[serde(default, deserialize_with = "de_lenient")]
-    pub tab_bar_position: TabBarPosition,
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: f32,
     #[serde(default)]
@@ -503,14 +502,6 @@ pub enum NewTabPosition {
     End,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TabBarPosition {
-    Top,
-    #[default]
-    Left,
-}
-
 /// Native window backdrop material for the Windows GUI. Other platforms retain
 /// the value for config synchronization but do not use it for rendering.
 /// `Auto` keeps the legacy behavior where theme blur decides between blurred
@@ -707,6 +698,7 @@ impl Default for Config {
             window_backdrop: WindowBackdrop::default(),
             dim_inactive_panes: true,
             auto_hide_titlebar_buttons: false,
+            show_content_title: false,
             keybindings: HashMap::new(),
             keybinding_preset: default_preset(),
             prefix: default_prefix(),
@@ -717,7 +709,6 @@ impl Default for Config {
             cursor_blink: true,
             scrollback_limit: 10_000,
             new_tab_position: NewTabPosition::AfterCurrent,
-            tab_bar_position: TabBarPosition::Left,
             sidebar_width: default_sidebar_width(),
             sidebar_collapsed: false,
             right_panel_visible: false,
@@ -1985,21 +1976,19 @@ mod tests {
     #[test]
     fn behavior_enums_fall_back_leniently_on_bad_values() {
         let cfg: Config = serde_json::from_str(
-            r#"{"font_size": 20.0, "new_tab_position": "middle", "notify_on_command_finish": "sometimes", "tab_bar_position": "diagonal"}"#,
+            r#"{"font_size": 20.0, "new_tab_position": "middle", "notify_on_command_finish": "sometimes"}"#,
         )
         .expect("a bad enum value must not fail the whole parse");
         assert_eq!(cfg.font_size, 20.0);
         assert_eq!(cfg.new_tab_position, NewTabPosition::AfterCurrent);
         assert_eq!(cfg.notify_on_command_finish, NotifyMode::Unfocused);
-        assert_eq!(cfg.tab_bar_position, TabBarPosition::Left);
 
         let cfg: Config = serde_json::from_str(
-            r#"{"new_tab_position": "end", "notify_on_command_finish": "always", "tab_bar_position": "top"}"#,
+            r#"{"new_tab_position": "end", "notify_on_command_finish": "always"}"#,
         )
         .unwrap();
         assert_eq!(cfg.new_tab_position, NewTabPosition::End);
         assert_eq!(cfg.notify_on_command_finish, NotifyMode::Always);
-        assert_eq!(cfg.tab_bar_position, TabBarPosition::Top);
     }
 
     #[test]

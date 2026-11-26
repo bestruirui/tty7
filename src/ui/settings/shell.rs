@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use super::kit::{self, BtnKind, Tk, fs};
 use super::*;
-use crate::ui::app::{TITLE_BAR_BORDER, TitleStripRow as _};
+use crate::ui::app::{TITLE_BAR_CENTRE, TitleBarRow as _};
 
 /// What a menu row does when picked.
 pub(crate) type PickFn = Rc<dyn Fn(&mut Tty7App, &mut Window, &mut Context<Tty7App>)>;
@@ -56,7 +56,9 @@ pub(crate) struct SearchOption {
 impl Tty7App {
     fn settings_entry_modified(&self, entry: &SearchEntry, cx: &App) -> bool {
         if entry.title == L10nKey::SettingsMobileAccess
-            && let Some((enabled, _)) = self.active_settings().and_then(|s| s.mobile_status.as_ref())
+            && let Some((enabled, _)) = self
+                .active_settings()
+                .and_then(|s| s.mobile_status.as_ref())
         {
             return *enabled;
         }
@@ -79,7 +81,10 @@ impl Tty7App {
             .collect();
         matches.sort_by_key(|entry| {
             (
-                SettingsSection::ALL.iter().position(|&s| s == entry.section).unwrap_or(0),
+                SettingsSection::ALL
+                    .iter()
+                    .position(|&s| s == entry.section)
+                    .unwrap_or(0),
                 entry.rank(query),
             )
         });
@@ -932,12 +937,8 @@ impl Tty7App {
             .h_full()
             .child(
                 h_flex()
-                    // The band carries no visible rule, but the traffic lights
-                    // hang over it and this row's contents stand on the same line
-                    // as the rest of the chrome.
-                    .title_strip_row(px(TITLE_BAR_BORDER), gpui::transparent_black())
+                    .title_bar_row()
                     .flex_shrink_0()
-                    .items_center()
                     .px(px(56.))
                     .children(back),
             )
@@ -1017,10 +1018,7 @@ impl Tty7App {
                 div()
                     .id("settings-close")
                     .absolute()
-                    // On the chrome line rather than in the middle of the band:
-                    // the band spends a point of its height below its contents,
-                    // so `TITLE_BAR_HEIGHT / 2` is not where the rest sits.
-                    .top(crate::ui::app::title_strip_centre() - px(CLOSE_TILE / 2.))
+                    .top(px(TITLE_BAR_CENTRE - CLOSE_TILE / 2.))
                     .right(px(12.))
                     .size(px(CLOSE_TILE))
                     .rounded(px(6.))

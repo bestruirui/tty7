@@ -1280,7 +1280,7 @@ impl RemoteTerminal {
                 // #889: an OSC 0/2 the emulator above has already adopted, read
                 // a second time only to learn whether the program that wrote it
                 // has since exited. `TitleLifetime` is the daemon's rule too,
-                // so a window's tab strip and the switcher reading the tree can
+                // so a window's sidebar and the switcher reading the tree can
                 // never disagree about whether a title is still current.
                 let mut title_tok = OscTokenizer::new(&[b"0", b"2", b"133"]);
                 let mut title_life = TitleLifetime::default();

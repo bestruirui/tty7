@@ -1,9 +1,9 @@
 use gpui::component::color_picker::{ColorPickerEvent, ColorPickerState};
 use gpui::component::input::{InputEvent, InputState};
-use gpui::component::{ActiveTheme as _, InteractiveElementExt as _, TitleBar, WindowExt as _};
+use gpui::component::{ActiveTheme as _, InteractiveElementExt as _, WindowExt as _};
 use gpui::{
-    App, Axis, Bounds, Context, Edges, Entity, Focusable, Pixels, PromptLevel, Size, Subscription,
-    Window, div, img, point, prelude::*, px, size,
+    App, Axis, Bounds, Context, Entity, Focusable, Pixels, PromptLevel, Subscription, Window, div,
+    img, point, prelude::*, px, size,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use crate::core::actions::*;
 use crate::core::config::{
     Config, CursorStyle as ConfigCursorStyle, MouseZoomModifier, NewTabPosition, ShellConfig,
-    TabBarPosition, WindowBackdrop,
+    WindowBackdrop,
 };
 use crate::core::session::{
     Session, SessionAxis, SessionPane, SessionTab, WorkspaceId, WorkspaceStore,
@@ -218,84 +218,31 @@ const SIDE_PANEL_MAX_RATIO: f32 = 0.5;
 
 pub(crate) const TITLE_BAR_HEIGHT: f32 = 48.;
 
-/// The rule every title-bar row carries along its bottom edge.
-///
-/// `TitleBar` itself draws one (`gpui-component`'s own `.border_b_1()`), and
-/// taffy sizes a node by its border box, so the bar's content box is this one
-/// point short of its height and `items_center` puts a tile's centre half a
-/// point above the bar's middle. Every row that stands in for the title bar
-/// has to carry the same point — in a transparent ink where the row shows no
-/// rule of its own — or its tiles land half a point below the traffic lights
-/// and below the strip they are meant to read as one line with: one device
-/// pixel on a Retina panel, and visible precisely because the two are side by
-/// side in the same band.
+/// Every title-bar row reserves the same bottom edge to keep its controls aligned.
 pub(crate) const TITLE_BAR_BORDER: f32 = 1.;
+pub(crate) const TITLE_BAR_CENTRE: f32 = (TITLE_BAR_HEIGHT - TITLE_BAR_BORDER) / 2.;
 
-/// The line the traffic lights and every [`title_strip_row`]'s contents sit
-/// on, from the top of the window's content.
-///
-/// The lights hang from a point, not a centre, so macOS gives this back through
-/// `theme::traffic_light_position` less half the system button's height.
-pub(crate) const TITLE_STRIP_CENTRE: f32 = (TITLE_BAR_HEIGHT - TITLE_BAR_BORDER) / 2.;
-
-pub(crate) fn title_strip_centre() -> gpui::Pixels {
-    gpui::px(TITLE_STRIP_CENTRE)
+/// Keep the title-bar rows at the same height and align their controls.
+pub(crate) trait TitleBarRow: Sized {
+    fn title_bar_row(self) -> Self;
 }
 
-/// Split the title bar's bottom edge between the rule a row draws and the
-/// padding that stands in for the part of it the rule does not reach.
-fn title_strip_rule_and_pad(rule: gpui::Pixels) -> (gpui::Pixels, gpui::Pixels) {
-    let border = rule.min(gpui::px(TITLE_BAR_BORDER));
-    (border, gpui::px(TITLE_BAR_BORDER - border.as_f32()))
-}
-
-/// The centre of the box a row built by [`title_strip_row`] gives its contents:
-/// the bar's height, less whatever its bottom edge spends on rule and padding.
-#[cfg(test)]
-fn title_strip_content_centre(rule: gpui::Pixels) -> gpui::Pixels {
-    let (border, pad) = title_strip_rule_and_pad(rule);
-    gpui::px((TITLE_BAR_HEIGHT - border.as_f32() - pad.as_f32()) / 2.)
-}
-
-/// Give a row the title bar's geometry: its height, its vertical centring, and
-/// a bottom edge that leaves the content box the height
-/// [`title_strip_centre`] assumes.
-///
-/// A method rather than a function, because a row's own chain — its insets, its
-/// tiles, its drag band — is what the file is about, and this is one more link in
-/// it. Calling it mid-chain keeps the row readable instead of burying it in an
-/// argument.
-///
-/// `rule` is the border the row wants. A row standing in for the title bar with
-/// no visible rule passes [`TITLE_BAR_BORDER`] in a transparent ink, so the point
-/// is spent on the box and not on the paint. A row that draws its own thinner
-/// hairline keeps that hairline — it stays flush with the box's bottom edge
-/// either way — and makes up the difference as padding, which is what keeps its
-/// tiles on the same line as the lights over them.
-pub(crate) trait TitleStripRow: Sized {
-    fn title_strip_row(self, rule: gpui::Pixels, ink: gpui::Hsla) -> Self;
-}
-
-impl<R: gpui::Styled> TitleStripRow for R {
-    fn title_strip_row(self, rule: gpui::Pixels, ink: gpui::Hsla) -> Self {
-        let (border, pad) = title_strip_rule_and_pad(rule);
-        self.h(gpui::px(TITLE_BAR_HEIGHT))
+impl<R: gpui::Styled> TitleBarRow for R {
+    fn title_bar_row(self) -> Self {
+        self.h(px(TITLE_BAR_HEIGHT))
             .items_center()
-            .border_b(border)
-            .border_color(ink)
-            .pb(pad)
+            .border_b(px(TITLE_BAR_BORDER))
+            .border_color(gpui::transparent_black())
     }
 }
 
 /// Work to run against the settings window once it has been built.
 type SettingsFollowUp = Box<dyn FnOnce(&mut Tty7App, &mut Window, &mut Context<Tty7App>)>;
 
-pub(crate) const TILE_SIZE: f32 = 32.;
+pub(crate) const TILE_SIZE: f32 = 28.;
 pub(crate) const TILE_GLYPH: f32 = 16.;
 pub(crate) const TILE_SIZE_XS: f32 = 18.;
 pub(crate) const TILE_GLYPH_XS: f32 = 11.;
-
-pub(crate) const TILE_PAD: f32 = (TILE_SIZE - TILE_GLYPH) / 2.;
 
 const DOCS_URL: &str = "https://github.com/bestruirui/tty7#readme";
 const DISCORD_URL: &str = "https://discord.gg/s3dethqz2V";
@@ -303,27 +250,15 @@ const ISSUES_URL: &str = "https://github.com/bestruirui/tty7/issues/new";
 
 pub(crate) const CONTENT_INSET: f32 = 12.;
 
-const TILE_EDGE_GAP: f32 = 5.;
-
-pub(crate) fn tile_trailing_inset() -> f32 {
-    (CONTENT_INSET - TILE_PAD).max(TILE_EDGE_GAP)
+pub(crate) const fn tile_trailing_inset() -> f32 {
+    TITLE_BAR_CENTRE - TILE_SIZE / 2.
 }
 
 pub(crate) const TITLE_BAR_LEAD: f32 = if cfg!(target_os = "macos") {
     crate::ui::theme::TRAFFIC_LIGHTS_LEAD
 } else {
-    12.
+    tile_trailing_inset()
 };
-
-pub(crate) const WINDOW_CONTROLS_W: f32 = if cfg!(target_os = "macos") { 0. } else { 102. };
-
-pub(crate) fn title_bar_hug_offset() -> f32 {
-    if cfg!(target_os = "macos") {
-        0.
-    } else {
-        tile_trailing_inset() - TITLE_BAR_LEAD
-    }
-}
 
 /// The bounds to remember for reopening this window at the same place.
 ///
@@ -349,26 +284,6 @@ fn window_bounds_to_remember(window: &Window) -> Bounds<Pixels> {
     window.inner_window_bounds().get_bounds()
 }
 
-/// The band the tab strip claims for a drop, in the window's outer coordinates.
-///
-/// The strip is the top of the *content*, and under client-side decorations the
-/// content sits inside the frame padding while `viewport` still measures the
-/// whole surface, shadow included — so the band starts at the padding and stops
-/// at the far edge of the frame, one padding in from each side. Anything else
-/// leaves the outermost chips outside the zone that is supposed to contain
-/// them. `window_paddings` answers `Edges::all(0)` under server-side
-/// decorations, which is every platform but Linux CSD, so off Linux this stays
-/// the full-width rectangle from the window's corner it has always been.
-fn strip_band(viewport: Size<Pixels>, pad: Edges<Pixels>) -> Bounds<Pixels> {
-    Bounds {
-        origin: point(pad.left, pad.top),
-        size: size(
-            (viewport.width - pad.left - pad.right).max(px(0.)),
-            px(TITLE_BAR_HEIGHT),
-        ),
-    }
-}
-
 pub(crate) const WINDOW_MARK_SIZE: f32 = 20.;
 
 /// A transparent sheet that answers one question: is the pointer inside the
@@ -378,12 +293,12 @@ pub(crate) const WINDOW_MARK_SIZE: f32 = 20.;
 /// The obvious way to write this is `group_hover` on the region itself, and it
 /// does not work. Group hover asks whether the group's *hitbox* is the one
 /// under the pointer, and gpui's hit test stops at the first `occlude()`d
-/// element it meets on the way down. Tab chips and the chrome tiles are all
+/// element it meets on the way down. Tab rows and the chrome tiles are all
 /// occluding, so the region stopped counting as hovered the instant the
 /// pointer reached the very button it was revealing, and the button vanished
 /// from under the cursor. Painted last, this sheet's own hitbox sits in front
-/// of all of them, and it blocks nothing — it is not opaque, so the rows,
-/// chips and tiles underneath keep their clicks, cursors and tooltips.
+/// of all of them, and it blocks nothing — it is not opaque, so the rows
+/// and tiles underneath keep their clicks, cursors and tooltips.
 pub(crate) fn hover_sheet(id: &'static str, flag: &Rc<Cell<bool>>) -> gpui::Stateful<gpui::Div> {
     use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
     let flag = flag.clone();
@@ -431,14 +346,10 @@ pub(crate) fn title_bar_drag(
     window_move_gesture(row, key, window, cx).on_double_click(|_, window, _| {
         if cfg!(target_os = "linux") {
             window.zoom_window();
-        } else {
+        } else if cfg!(target_os = "macos") {
             window.titlebar_double_click();
         }
     })
-}
-
-pub(crate) struct WindowMoveArm {
-    should_move: bool,
 }
 
 pub(crate) fn window_move_gesture(
@@ -447,39 +358,45 @@ pub(crate) fn window_move_gesture(
     window: &mut gpui::Window,
     cx: &mut gpui::App,
 ) -> gpui::Stateful<gpui::Div> {
-    let arm = window.use_keyed_state(key, cx, |_, _| WindowMoveArm { should_move: false });
+    let arm = window.use_keyed_state(key, cx, |_, _| false);
     row.window_control_area(gpui::WindowControlArea::Drag)
         .on_mouse_down(
             gpui::MouseButton::Left,
-            window.listener_for(&arm, |arm, _: &gpui::MouseDownEvent, _, _| {
-                arm.should_move = true;
+            window.listener_for(&arm, |arm, _: &gpui::MouseDownEvent, window, cx| {
+                *arm = !window.default_prevented();
+                gpui::component::GlobalState::suppress_text_selection(cx);
             }),
         )
         .on_mouse_down_out(
             window.listener_for(&arm, |arm, _: &gpui::MouseDownEvent, _, _| {
-                arm.should_move = false;
+                *arm = false;
             }),
         )
         .on_mouse_up(
             gpui::MouseButton::Left,
             window.listener_for(&arm, |arm, _: &gpui::MouseUpEvent, _, _| {
-                arm.should_move = false;
+                *arm = false;
             }),
         )
         .on_mouse_up_out(
             gpui::MouseButton::Left,
             window.listener_for(&arm, |arm, _: &gpui::MouseUpEvent, _, _| {
-                arm.should_move = false;
+                *arm = false;
             }),
         )
-        .on_mouse_move(
-            window.listener_for(&arm, |arm, _: &gpui::MouseMoveEvent, window, _| {
-                if arm.should_move {
-                    arm.should_move = false;
+        .on_mouse_move(window.listener_for(
+            &arm,
+            |arm, event: &gpui::MouseMoveEvent, window, cx| {
+                if event.pressed_button != Some(gpui::MouseButton::Left) {
+                    *arm = false;
+                } else if *arm {
+                    *arm = false;
+                    gpui::base::TextSelection::end(window, cx);
+                    cx.stop_active_drag(window);
                     window.start_window_move();
                 }
-            }),
-        )
+            },
+        ))
 }
 
 pub(crate) fn window_mark() -> Option<impl IntoElement> {
@@ -690,7 +607,7 @@ impl Tab {
     /// second opinion: both sides then rank a given name, a title, an agent and
     /// a directory through
     /// [`TabView::label`](tty7_core::core::tab_view::TabView::label), so the
-    /// strip's answer to "which repo is this?" is the switcher's answer too.
+    /// sidebar's answer to "which repo is this?" is the switcher's answer too.
     ///
     /// Everything comes off the one leaf the tab names itself after, so the
     /// title and the directory standing in for it can never describe different
@@ -864,7 +781,7 @@ fn rename_outcome(value: &str, prefill: &str) -> Rename {
 
 pub(crate) struct Renaming {
     /// The tab being renamed, by tree id rather than index: an index drifts
-    /// the moment any other tab closes or the strip reorders, which used to
+    /// the moment any other tab closes or the sidebar reorders, which used to
     /// force every unrelated tab event to throw the half-typed name away —
     /// and left a window where the commit landed on the wrong tab (#598).
     pub(crate) tab: tty7_core::core::machine::TabId,
@@ -967,7 +884,7 @@ pub struct Tty7App {
     pub(crate) right_panel: crate::ui::right_panel::RightPanelState,
     pub(crate) sidebar_width: Rc<Cell<f32>>,
     pub(crate) sidebar_dragging: Rc<Cell<bool>>,
-    /// Whether the pointer is over the sidebar and over the tab strip. With
+    /// Whether the pointer is over the sidebar and over the title bar. With
     /// `auto_hide_titlebar_buttons` on, the chrome tiles in each — new tab and
     /// the panel toggles — are painted only while its own flag is set, so a
     /// window nobody is pointing at carries no buttons at all. The right
@@ -975,7 +892,7 @@ pub struct Tty7App {
     /// while the panel is open. Written by [`hover_sheet`]; nobody reads them
     /// while the setting is off.
     pub(crate) sidebar_chrome_hover: Rc<Cell<bool>>,
-    pub(crate) strip_chrome_hover: Rc<Cell<bool>>,
+    pub(crate) titlebar_chrome_hover: Rc<Cell<bool>>,
     /// How much width a settings row will actually get, measured once per
     /// render. `settings_row` is called from page builders that never see the
     /// window, and the answer differs per page — the SSH page spends a host
@@ -1019,16 +936,8 @@ pub struct Tty7App {
     /// tabs it would go. Read back a frame later by the drop, like the two
     /// landings above.
     pub(crate) pane_detach: Cell<Option<(gpui::EntityId, usize)>>,
-    /// Where the strip drew each tab's chip and where the sidebar drew each
-    /// tab's row, by tab — the geometry a pane dropped on either of them reads
-    /// its new place out of.
-    ///
-    /// Written from paint, so what a frame reads is where things were on the
-    /// frame before. That is exactly as good as it needs to be: neither the
-    /// strip nor the sidebar moves while a drag is in flight. A tab with no
-    /// rectangle was not drawn — scrolled out of a full strip, filtered out of
-    /// the sidebar — and takes no part in the reading.
-    pub(crate) strip_slots: Rc<RefCell<Vec<Bounds<Pixels>>>>,
+    /// Sidebar row bounds from the last frame, indexed by tab. Filtered and
+    /// folded tabs have no bounds and do not participate in pane drops.
     pub(crate) sidebar_slots: Rc<RefCell<Vec<Bounds<Pixels>>>>,
     /// Where each pinned group's block was drawn last frame, so a tab held
     /// over one can be told which group it is over. Only pinned groups are
@@ -1102,8 +1011,8 @@ pub(crate) enum CloseTarget {
     Pane,
     /// Close Other Tabs, keeping this one.
     OtherTabs(tty7_core::core::machine::TabId),
-    /// Close Tabs to the Right of this one.
-    TabsRightOf(tty7_core::core::machine::TabId),
+    /// Close tabs below this one in sidebar order.
+    TabsBelow(tty7_core::core::machine::TabId),
 }
 
 /// Why closing needs a question first. Closing a tab is the highest-frequency
@@ -1264,25 +1173,22 @@ fn clear_window_override_values(config: &mut Config, backdrop_is_local: bool) {
 /// it and leaving takes it away.
 struct FullscreenHint;
 
-/// Whether the title bar carries minimize, maximize and close right now.
-///
-/// Not in fullscreen. A fullscreen window has no caption: Windows clears
-/// `WS_CAPTION` and answers `HTCLIENT` along the whole top edge, so the three
-/// buttons would draw, light up under the pointer and do nothing when clicked.
-/// The row they sit at the end of stays, because it is also the tab strip.
-///
-/// Never on macOS, which draws no buttons of its own: those are the system's
-/// traffic lights, and the system hides them itself.
-pub(crate) fn window_controls_drawn(fullscreen: bool) -> bool {
-    !cfg!(target_os = "macos") && !fullscreen
-}
-
-/// How much of the title bar's trailing end the window buttons take.
-pub(crate) fn window_controls_w(fullscreen: bool) -> f32 {
-    match window_controls_drawn(fullscreen) {
-        true => WINDOW_CONTROLS_W,
-        false => 0.,
+/// Reserve only the window buttons this platform can display.
+pub(crate) fn window_controls_w(window: &Window) -> f32 {
+    if cfg!(target_os = "macos")
+        || window.is_fullscreen()
+        || cfg!(target_family = "wasm")
+        || (cfg!(target_os = "linux")
+            && !matches!(
+                window.window_decorations(),
+                gpui::Decorations::Client { .. }
+            ))
+    {
+        return 0.;
     }
+    let supported = window.window_controls();
+    let buttons = (1 + u8::from(supported.minimize) + u8::from(supported.maximize)) as f32;
+    buttons * TILE_SIZE + (buttons - 1.) * 4. + tile_trailing_inset()
 }
 
 impl Tty7App {
@@ -1645,7 +1551,7 @@ impl Tty7App {
             sidebar_width: Rc::new(Cell::new(sidebar_width)),
             sidebar_dragging: Rc::new(Cell::new(false)),
             sidebar_chrome_hover: Rc::new(Cell::new(false)),
-            strip_chrome_hover: Rc::new(Cell::new(false)),
+            titlebar_chrome_hover: Rc::new(Cell::new(false)),
             settings_row_width: Cell::new(f32::MAX),
             settings_viewport_w: Cell::new(f32::MAX),
             settings_hit_anchored: Cell::new(false),
@@ -1661,7 +1567,6 @@ impl Tty7App {
             pane_drag: Rc::new(RefCell::new(None)),
             tab_merge: Cell::new(None),
             pane_detach: Cell::new(None),
-            strip_slots: Rc::new(RefCell::new(Vec::new())),
             sidebar_slots: Rc::new(RefCell::new(Vec::new())),
             sidebar_group_slots: Rc::new(RefCell::new(Vec::new())),
             sidebar_divider: Rc::new(Cell::new(None)),
@@ -3598,6 +3503,10 @@ impl Tty7App {
         self.update_config(cx, |cfg| cfg.auto_hide_titlebar_buttons = on);
     }
 
+    pub(crate) fn set_show_content_title(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| cfg.show_content_title = on);
+    }
+
     pub(crate) fn set_cursor_blink(&mut self, on: bool, cx: &mut Context<Self>) {
         self.update_config(cx, |cfg| cfg.cursor_blink = on);
         if !on {
@@ -3634,39 +3543,15 @@ impl Tty7App {
         self.update_config(cx, |cfg| cfg.confirm_close = mode);
     }
 
-    pub(crate) fn set_tab_bar_position(&mut self, pos: TabBarPosition, cx: &mut Context<Self>) {
-        self.update_config(cx, |cfg| cfg.tab_bar_position = pos);
-    }
-
     pub(crate) fn set_sidebar_auto_grouping(&mut self, on: bool, cx: &mut Context<Self>) {
         self.update_config(cx, |cfg| cfg.sidebar_auto_grouping = on);
     }
 
-    pub(crate) fn toggle_tab_sidebar(&mut self, cx: &mut Context<Self>) {
-        let next = match cx.global::<Config>().tab_bar_position {
-            TabBarPosition::Top => TabBarPosition::Left,
-            TabBarPosition::Left => TabBarPosition::Top,
-        };
-        self.set_tab_bar_position(next, cx);
-    }
-
     pub(crate) fn toggle_left_panel(&mut self, cx: &mut Context<Self>) {
-        let (pos, collapsed) = match cx.global::<Config>().tab_bar_position {
-            TabBarPosition::Top => (TabBarPosition::Left, false),
-            TabBarPosition::Left => (TabBarPosition::Left, !self.sidebar_collapsed),
-        };
-        self.sidebar_collapsed = collapsed;
-        self.update_config(cx, |cfg| {
-            cfg.tab_bar_position = pos;
-            cfg.sidebar_collapsed = collapsed;
-        });
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        let collapsed = self.sidebar_collapsed;
+        self.update_config(cx, |cfg| cfg.sidebar_collapsed = collapsed);
         cx.notify();
-    }
-
-    pub(crate) fn left_panel_open(&self, cx: &gpui::App) -> bool {
-        matches!(cx.global::<Config>().tab_bar_position, TabBarPosition::Left)
-            && !self.sidebar_collapsed
-            && !self.tabs.is_empty()
     }
 
     pub(crate) fn set_notify_mode(
@@ -3828,7 +3713,7 @@ impl Tty7App {
     ///
     /// Sampling at switch time asks which leaf holds focus *at that instant*,
     /// and by then focus is routinely somewhere else: the switcher's own
-    /// search input, the tab strip, a pane
+    /// search input, the sidebar, a pane
     /// restored and never clicked. The sample then wrote nothing and the tab
     /// kept a stale pane — or the `None` it was born with — and came back to
     /// its first leaf instead of the one the reader was working in (#843).
@@ -3861,11 +3746,12 @@ impl Tty7App {
     /// frame for.
     fn toggle_fullscreen(&self, window: &mut Window, cx: &mut App) {
         let entering = !window.is_fullscreen();
+        let had_controls = window_controls_w(window) > 0.;
         window.toggle_fullscreen();
         window.remove_notification::<FullscreenHint>(cx);
         // Nothing disappeared where there were no buttons to begin with, so
         // there is nothing to explain.
-        if !entering || !window_controls_drawn(false) {
+        if !entering || !had_controls {
             return;
         }
         let hint = match crate::ui::home::key_hint("ToggleFullscreen", cx) {
@@ -4572,10 +4458,10 @@ impl Tty7App {
     }
 
     /// The patch of the layout a tab held over it would be grafted into, lit
-    /// up — and, while that is on offer, the strip held still underneath it.
+    /// up — and, while that is on offer, the sidebar held still underneath it.
     ///
     /// A tab is dragged with the same grip that reorders it, so the two
-    /// readings share one gesture: over the strip or the sidebar it is a
+    /// readings share one gesture: over the sidebar it is a
     /// reorder, out over the panes it is a merge. Suspending the reorder is
     /// what keeps the drop from being both.
     fn tab_landing(&self, window: &Window, cx: &App) -> Option<gpui::AnyElement> {
@@ -4702,8 +4588,7 @@ impl Tty7App {
         cx.notify();
     }
 
-    /// The caret between two tabs where a pane carried up to the strip — or
-    /// out to the sidebar — would become a tab of its own.
+    /// The caret where a pane dropped in the sidebar becomes a tab of its own.
     ///
     /// The reverse of grafting a tab in, and read the same way: offered only
     /// when the drop would change something, which for a detach means the pane
@@ -4722,7 +4607,7 @@ impl Tty7App {
         // The pane's own landing is read later in the frame and answers nothing
         // while the pointer is up here, so the two are never both on offer;
         // the drop takes this one first regardless.
-        let (at, caret) = self.detach_slot(window, cx)?;
+        let (at, caret) = self.detach_slot(window)?;
         self.pane_detach.set(Some((pane, at)));
 
         let accent = cx.theme().drag_border;
@@ -4739,82 +4624,43 @@ impl Tty7App {
         )
     }
 
-    /// Which gap between tabs the pointer is in, as the tab a newcomer would
-    /// be inserted before and the caret marking it — on the strip, or on the
-    /// sidebar, whichever the pointer is over.
-    ///
-    /// `viewport` and the pointer are both in the window's outer coordinates.
-    fn detach_slot(&self, window: &Window, cx: &App) -> Option<(usize, Bounds<Pixels>)> {
-        /// How far above its first row the sidebar's band starts, so the gap
-        /// over that row is inside it.
-        const BAND_REACH: f32 = 6.;
-
+    /// The sidebar insertion gap and caret under the pointer.
+    fn detach_slot(&self, window: &Window) -> Option<(usize, Bounds<Pixels>)> {
+        if !self.sidebar_open() {
+            return None;
+        }
         let pointer = window.mouse_position();
-        // The two surfaces never share a window: the sidebar *is* the tab bar
-        // when it is up, and the strip is what stands in for it when it is not.
-        let vertical = matches!(cx.global::<Config>().tab_bar_position, TabBarPosition::Left)
-            && !self.tabs.is_empty();
-        let viewport = window.viewport_size();
-        let pad = gpui::component::window_paddings(window);
-        // The band each surface claims, read off the tabs it drew rather than
-        // measured as an element of its own: the chips and the rows are the
-        // only part of either surface a drop has anything to say about, and a
-        // band derived from them cannot disagree with the gaps measured inside
-        // it. Stretched past the outermost tab so the empty space beyond —
-        // where the strip keeps its New Tab button, where the sidebar keeps
-        // nothing at all — still reads as "after everything".
-        let band = |axis: Axis, drawn: &[(usize, Bounds<Pixels>)]| {
-            let top = drawn.iter().map(|(_, b)| b.origin.y).reduce(Pixels::min)?;
-            let left = drawn.iter().map(|(_, b)| b.origin.x).reduce(Pixels::min)?;
-            let right = drawn
-                .iter()
-                .map(|(_, b)| b.origin.x + b.size.width)
-                .reduce(Pixels::max)?;
-            Some(match axis {
-                Axis::Horizontal => strip_band(viewport, pad),
-                Axis::Vertical => Bounds {
-                    origin: point(left, top - px(BAND_REACH)),
-                    size: size(
-                        right - left,
-                        (viewport.height - top + px(BAND_REACH)).max(px(0.)),
-                    ),
-                },
-            })
+        let mut drawn: Vec<_> = self
+            .sidebar_slots
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, bounds)| bounds.size.width > px(0.) && bounds.size.height > px(0.))
+            .map(|(index, bounds)| (index, *bounds))
+            .collect();
+        drawn.sort_by(|(_, a), (_, b)| a.origin.y.as_f32().total_cmp(&b.origin.y.as_f32()));
+        let top = drawn.first()?.1.origin.y - px(6.);
+        let left = drawn.iter().map(|(_, b)| b.origin.x).reduce(Pixels::min)?;
+        let right = drawn
+            .iter()
+            .map(|(_, b)| b.origin.x + b.size.width)
+            .reduce(Pixels::max)?;
+        let band = Bounds {
+            origin: point(left, top),
+            size: size(
+                right - left,
+                (window.viewport_size().height - top).max(px(0.)),
+            ),
         };
-
-        // Sorted by where they were drawn rather than by tab: the sidebar
-        // groups its rows, and a strip that has scrolled shows a window of
-        // chips. What the pointer is between is a matter of the screen.
-        let measured = |slots: &[Bounds<Pixels>]| -> Vec<(usize, Bounds<Pixels>)> {
-            slots
-                .iter()
-                .enumerate()
-                .filter(|(_, b)| b.size.width > px(0.) && b.size.height > px(0.))
-                .map(|(i, b)| (i, *b))
-                .collect()
-        };
-        let surfaces = [
-            (!vertical).then(|| (Axis::Horizontal, measured(&self.strip_slots.borrow()))),
-            self.sidebar_open(cx)
-                .then(|| (Axis::Vertical, measured(&self.sidebar_slots.borrow()))),
-        ];
-        let (axis, mut drawn) = surfaces
-            .into_iter()
-            .flatten()
-            .find(|(axis, drawn)| band(*axis, drawn).is_some_and(|b| b.contains(&pointer)))?;
-        let lead = |b: &Bounds<Pixels>| match axis {
-            Axis::Horizontal => b.origin.x,
-            Axis::Vertical => b.origin.y,
-        };
-        drawn.sort_by(|(_, a), (_, b)| lead(a).as_f32().total_cmp(&lead(b).as_f32()));
-
-        let row: Vec<Bounds<Pixels>> = drawn.iter().map(|(_, b)| *b).collect();
-        let (gap, caret) = crate::ui::pane_drag::insertion(&row, axis, pointer)?;
-        // The gap counts tabs on screen; what an insert needs is a place in the
-        // list. Past the last tab drawn is the end of the list, which is not
-        // the same thing as the last tab drawn plus one: a strip too narrow to
-        // show every chip has tabs on either side of the ones it drew.
-        let at = drawn.get(gap).map(|(i, _)| *i).unwrap_or(self.tabs.len());
+        if !band.contains(&pointer) {
+            return None;
+        }
+        let rows: Vec<_> = drawn.iter().map(|(_, bounds)| *bounds).collect();
+        let (gap, caret) = crate::ui::pane_drag::insertion(&rows, pointer)?;
+        let at = drawn
+            .get(gap)
+            .map(|(index, _)| *index)
+            .unwrap_or(self.tabs.len());
         Some((at, caret))
     }
 
@@ -4957,13 +4803,13 @@ impl Tty7App {
     }
 
     /// Tab indices most-recently-used first. The active tab always leads, even
-    /// before its own stamp lands; tabs never activated trail in strip order.
+    /// before its own stamp lands; tabs never activated trail in tab order.
     pub(crate) fn tabs_by_mru(&self) -> Vec<usize> {
         let stamps: Vec<u64> = self.tabs.iter().map(|t| t.last_used.get()).collect();
         mru_order(&stamps, self.active)
     }
 
-    /// The neighbouring tab in the order the strip shows them, wrapping at
+    /// The neighbouring tab in sidebar order, wrapping at
     /// the ends — no switcher, no MRU (#867). "Shows" matters with the
     /// sidebar grouping tabs: the next row is not always the next index.
     fn cycle_tab(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -4973,16 +4819,11 @@ impl Tty7App {
         }
     }
 
-    /// Reorders the active tab one slot — the keyboard form of the drag that
-    /// the strip and the sidebar both do. Left is back along the order and
-    /// right is forward (on a left tab bar that reads as up and down), and
-    /// both wrap: past the last tab the first one follows, so a tab can walk
-    /// the whole list without letting go of the key. On a left tab bar the
-    /// list is the tab's own sidebar group: the grouping keys off the tab,
-    /// not its position, so a step out of the group would move nothing.
-    fn move_tab(&mut self, right: bool, cx: &mut Context<Self>) {
+    /// Move the active tab up or down within its sidebar group, wrapping at
+    /// either end. Group membership is independent of the tab's position.
+    fn move_tab(&mut self, down: bool, cx: &mut Context<Self>) {
         let run = self.tab_run(self.active, cx);
-        if let Some(permutation) = one_slot_move(&run, self.tabs.len(), self.active, right) {
+        if let Some(permutation) = one_slot_move(&run, self.tabs.len(), self.active, down) {
             self.apply_tab_order(&permutation, cx);
         }
     }
@@ -5193,7 +5034,7 @@ impl Tty7App {
     /// hands the tab the pane that was zoomed as its answer before focusing it:
     /// that pane was the only one on screen to work in, and the tab's memory is
     /// written by focus-in alone, which nothing promises has caught up. Zooming
-    /// with focus off the panes — the switcher just closed, the tab strip — takes
+    /// with focus off the panes — the switcher just closed, the sidebar — takes
     /// the pane the tab remembers, the one switching back to it would focus,
     /// and not whichever leaf the layout happens to list first.
     fn toggle_maximize(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -5394,31 +5235,38 @@ impl Tty7App {
         }
     }
 
-    pub(crate) fn close_tabs_right_of(
+    pub(crate) fn close_tabs_below(
         &mut self,
         index: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_tabs_right_of_inner(index, false, window, cx);
+        self.close_tabs_below_inner(index, false, window, cx);
     }
 
-    fn close_tabs_right_of_inner(
+    fn close_tabs_below_inner(
         &mut self,
         index: usize,
         confirmed: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let mut below: Vec<_> = self
+            .visual_tab_order(cx)
+            .into_iter()
+            .skip_while(|&i| i != index)
+            .skip(1)
+            .collect();
         if !confirmed && let Some(tab) = self.tabs.get(index) {
-            let count = self.bulk_closable((index + 1)..self.tabs.len(), cx).len();
-            let from = CloseTarget::TabsRightOf(tab.tree_id.get());
+            let count = self.bulk_closable(below.iter().copied(), cx).len();
+            let from = CloseTarget::TabsBelow(tab.tree_id.get());
             if self.ask_before_bulk_close(from, count, window, cx) {
                 return;
             }
         }
         // Same bargain as `close_other_tabs`.
-        for i in ((index + 1)..self.tabs.len()).rev() {
+        below.sort_unstable();
+        for i in below.into_iter().rev() {
             if self.tab_has_warn_ssh(i, cx) {
                 continue;
             }
@@ -5784,6 +5632,9 @@ impl Tty7App {
             L10nKey::SettingsAutoHideTitlebarButtons => {
                 self.set_auto_hide_titlebar_buttons(defaults.auto_hide_titlebar_buttons, cx)
             }
+            L10nKey::SettingsShowContentTitle => {
+                self.set_show_content_title(defaults.show_content_title, cx)
+            }
             L10nKey::SettingsCursorBlink => self.set_cursor_blink(defaults.cursor_blink, cx),
             L10nKey::SettingsCursorShape => self.set_cursor_style(defaults.cursor_style, cx),
             L10nKey::SettingsPromptCursorShape => {
@@ -5794,9 +5645,6 @@ impl Tty7App {
                 self.set_new_tab_position(defaults.new_tab_position, cx)
             }
             L10nKey::SettingsConfirmClose => self.set_confirm_close(defaults.confirm_close, cx),
-            L10nKey::SettingsTabBarPosition => {
-                self.set_tab_bar_position(defaults.tab_bar_position, cx)
-            }
             L10nKey::SettingsSidebarGrouping => {
                 self.set_sidebar_auto_grouping(defaults.sidebar_auto_grouping, cx)
             }
@@ -6943,9 +6791,9 @@ impl Tty7App {
                             this.close_other_tabs_inner(i, true, window, cx);
                         }
                     }
-                    CloseTarget::TabsRightOf(id) => {
+                    CloseTarget::TabsBelow(id) => {
                         if let Some(i) = this.tabs.iter().position(|t| t.tree_id.get() == id) {
-                            this.close_tabs_right_of_inner(i, true, window, cx);
+                            this.close_tabs_below_inner(i, true, window, cx);
                         }
                     }
                 }
@@ -7041,9 +6889,7 @@ impl Tty7App {
         }
     }
 
-    pub(crate) fn settings_machines(
-        cx: &mut App,
-    ) -> Vec<crate::ui::settings::AgentHooksMachine> {
+    pub(crate) fn settings_machines(cx: &mut App) -> Vec<crate::ui::settings::AgentHooksMachine> {
         use crate::ui::settings::AgentHooksMachine;
         let mut out = vec![AgentHooksMachine {
             host: crate::ui::host_ops::HostId::LOCAL,
@@ -7963,12 +7809,10 @@ impl Render for Tty7App {
         {
             cx.set_active_drag_cursor_style(held, window);
         }
-        let vertical = matches!(cx.global::<Config>().tab_bar_position, TabBarPosition::Left)
-            && !self.tabs.is_empty();
         // Asked through the predicate the right panel sizes itself against —
         // two spellings of "is the rail up" is one more than the layout can
         // afford to have disagree.
-        let rail = self.sidebar_open(cx);
+        let rail = self.sidebar_open();
         // A hover flag is only written by its sheet, and only on a change of
         // state it saw. A sheet that is not in the tree sees none: the rail
         // hidden by its own tile with the pointer on it, or the switch turned
@@ -7980,16 +7824,13 @@ impl Render for Tty7App {
             self.sidebar_chrome_hover.set(false);
         }
         if !auto_hide_chrome {
-            self.strip_chrome_hover.set(false);
+            self.titlebar_chrome_hover.set(false);
         }
-        // Both read before the strip and the sidebar are built: a tab held out
-        // over the layout suspends the reorder, which is what those two ask
-        // what to draw, and a pane held over *them* is measured against where
-        // they put their tabs last frame — which is what they are about to
-        // blank and write again.
+        // Read before rebuilding the sidebar: drops use the previous frame's
+        // row bounds, and dragging over the content suspends reordering.
         let tab_landing = self.tab_landing(window, cx);
         let detach_caret = self.detach_caret(window, cx);
-        let strip = self.tab_strip(!vertical, window, cx);
+        let title_bar = self.render_title_bar(window, cx).into_any_element();
         let sidebar = rail.then(|| self.tab_sidebar(window, cx));
         let ssh_status = self
             .tabs
@@ -8027,41 +7868,6 @@ impl Render for Tty7App {
             }
         };
 
-        // No window buttons in fullscreen, where they cannot work: the window
-        // has no caption for the platform to hit-test, so they would draw,
-        // light up under the pointer and do nothing when clicked. `TitleBar`
-        // always draws them, so the strip goes into a plain row of the same
-        // geometry instead — the row itself stays, since it holds the tabs,
-        // the chrome tiles.
-        let title_bar =
-            if window_controls_drawn(window.is_fullscreen()) || cfg!(target_os = "macos") {
-                // `TitleBar` pads its own fixed 80pt; the lead is ours, since
-                // it follows where the traffic lights are put.
-                TitleBar::new()
-                    .h(px(TITLE_BAR_HEIGHT))
-                    .pl(px(TITLE_BAR_LEAD))
-                    .bg(cx.theme().transparent)
-                    .border_color(cx.theme().transparent)
-                    .child(strip)
-                    .into_any_element()
-            } else {
-                div()
-                    .flex_shrink_0()
-                    .flex()
-                    .flex_row()
-                    .pl(px(TITLE_BAR_LEAD))
-                    .title_strip_row(px(TITLE_BAR_BORDER), cx.theme().transparent)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .h_full()
-                            .flex_1()
-                            .child(strip),
-                    )
-                    .into_any_element()
-            };
         let body_area = div()
             .flex_1()
             .relative()
@@ -8107,7 +7913,7 @@ impl Render for Tty7App {
             (Some(title_bar), None)
         };
         let panel_px = if right_panel.is_some() {
-            self.right_panel_px(window, cx)
+            self.right_panel_px(window)
         } else {
             0.
         };
@@ -8301,11 +8107,9 @@ impl Render for Tty7App {
                 .on_action(cx.listener(|this, _: &SelectPrevTab, window, cx| {
                     this.cycle_tab(false, window, cx)
                 }))
+                .on_action(cx.listener(|this, _: &MoveTabUp, _window, cx| this.move_tab(false, cx)))
                 .on_action(
-                    cx.listener(|this, _: &MoveTabLeft, _window, cx| this.move_tab(false, cx)),
-                )
-                .on_action(
-                    cx.listener(|this, _: &MoveTabRight, _window, cx| this.move_tab(true, cx)),
+                    cx.listener(|this, _: &MoveTabDown, _window, cx| this.move_tab(true, cx)),
                 )
                 .on_action(cx.listener(|this, _: &ActivateTab1, window, cx| {
                     this.activate_visual(0, window, cx)
@@ -8352,9 +8156,6 @@ impl Render for Tty7App {
                 .on_action(cx.listener(|this, _: &ToggleFullscreen, window, cx| {
                     this.toggle_fullscreen(window, cx)
                 }))
-                .on_action(cx.listener(|this, _: &ToggleTabSidebar, _window, cx| {
-                    this.toggle_tab_sidebar(cx)
-                }))
                 .on_action(
                     cx.listener(|this, _: &ToggleLeftPanel, _window, cx| {
                         this.toggle_left_panel(cx)
@@ -8387,8 +8188,8 @@ impl Render for Tty7App {
                 .on_action(cx.listener(|this, _: &CloseOtherTabs, window, cx| {
                     this.close_other_tabs(this.active, window, cx)
                 }))
-                .on_action(cx.listener(|this, _: &CloseTabsToTheRight, window, cx| {
-                    this.close_tabs_right_of(this.active, window, cx)
+                .on_action(cx.listener(|this, _: &CloseTabsBelow, window, cx| {
+                    this.close_tabs_below(this.active, window, cx)
                 }))
                 .on_action(cx.listener(|this, _: &CopyWorkingDirectory, window, cx| {
                     this.copy_active_cwd(window, cx)
@@ -8454,10 +8255,6 @@ impl Render for Tty7App {
                 .on_action(cx.listener(|_, _: &ReportIssue, _window, cx| cx.open_url(ISSUES_URL)))
                 .children(bg_image)
                 .child(main_layout)
-                // Window-level because the strip lives in the title bar and the
-                // sidebar down the side: the caret between two tabs is in
-                // neither of the boxes the rest of the drag feedback is drawn
-                // in.
                 .when_some(detach_caret, |this, caret| this.child(caret))
                 .when_some(settings_overlay, |this, overlay| this.child(overlay))
                 .when_some(self.render_ssh_prompt_overlay(window, cx), |this, el| {
@@ -8473,7 +8270,7 @@ impl Render for Tty7App {
 }
 
 /// Orders tab indices most-recently-used first from their `last_used` stamps.
-/// A zero stamp means the tab was never activated, and those keep strip order
+/// A zero stamp means the tab was never activated, and those keep tab order
 /// at the back. `active` leads regardless — its own stamp only lands on the
 /// next frame.
 /// The tab after (or before) `active` in `order`, wrapping round. `None`
@@ -9516,6 +9313,7 @@ mod window_drag_tests {
     #[gpui::test]
     #[should_panic(expected = "not implemented")]
     fn the_arm_survives_a_repaint_between_press_and_move(cx: &mut TestAppContext) {
+        cx.update(gpui::component::init);
         let window = cx.add_window(|_, _| Host);
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         press_repaint_move(&mut vcx, ON_ROW);
@@ -9530,6 +9328,7 @@ mod window_drag_tests {
 
     #[gpui::test]
     fn a_press_alone_does_not_move_the_window(cx: &mut TestAppContext) {
+        cx.update(gpui::component::init);
         let window = cx.add_window(|_, _| Host);
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         vcx.update(|window, cx| {
@@ -9542,6 +9341,7 @@ mod window_drag_tests {
 
     #[gpui::test]
     fn a_release_disarms_so_a_later_hover_does_not_drag(cx: &mut TestAppContext) {
+        cx.update(gpui::component::init);
         let window = cx.add_window(|_, _| Host);
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         vcx.update(|window, cx| {
@@ -9567,6 +9367,7 @@ mod window_drag_tests {
     #[gpui::test]
     #[should_panic(expected = "not implemented")]
     fn a_handle_without_a_blocking_hitbox_hands_the_press_to_the_row(cx: &mut TestAppContext) {
+        cx.update(gpui::component::init);
         let window = cx.add_window(|_, _| HandleOverRow { occluded: false });
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         press_repaint_move(&mut vcx, ON_ROW);
@@ -9594,6 +9395,7 @@ mod window_drag_tests {
             }
         }
 
+        cx.update(gpui::component::init);
         let window = cx.add_window(|_, _| TwoRows);
         let mut vcx = VisualTestContext::from_window(window.into(), cx);
         vcx.update(|window, cx| {
@@ -9613,14 +9415,12 @@ mod window_drag_tests {
 mod tests {
     use super::close_reason;
     use super::{
-        CloseReason, Dir, OpenedFrom, Pane, Rename, TERMINAL_MIN_W, TITLE_BAR_BORDER,
-        TITLE_BAR_HEIGHT, Tab, TabAgentSession, clear_window_override_values, close_prompt,
-        inherited_start_dir, join_shell_args, leaf_shares_the_window_daemon, mru_order,
-        native_ssh_pane_alive, one_slot_move, pane_free_for, rename_outcome, side_panel_max,
-        split_machine_held, split_shell_args, step_in_order, strip_band, title_strip_centre,
-        title_strip_content_centre, title_strip_rule_and_pad, wd_path_saveable,
+        CloseReason, Dir, OpenedFrom, Pane, Rename, TERMINAL_MIN_W, Tab, TabAgentSession,
+        clear_window_override_values, close_prompt, inherited_start_dir, join_shell_args,
+        leaf_shares_the_window_daemon, mru_order, native_ssh_pane_alive, one_slot_move,
+        pane_free_for, rename_outcome, side_panel_max, split_machine_held, split_shell_args,
+        step_in_order, wd_path_saveable,
     };
-    use gpui::{Edges, point, px, size};
 
     #[test]
     fn title_bar_buttons_rest_out_of_sight_only_when_asked_to_and_nobody_points() {
@@ -9630,30 +9430,6 @@ mod tests {
         // On: painted exactly while the pointer is over the bar.
         assert!(!super::titlebar_chrome_shown(true, false));
         assert!(super::titlebar_chrome_shown(true, true));
-    }
-
-    #[test]
-    fn a_rows_own_hairline_and_the_bars_invisible_rule_reach_the_same_centre() {
-        for rule in [px(0.), px(0.5), px(TITLE_BAR_BORDER), px(2.)] {
-            let (border, pad) = title_strip_rule_and_pad(rule);
-            assert!(
-                border.as_f32() <= TITLE_BAR_BORDER,
-                "a thicker rule than the bar's own point would push the contents \
-                 onto a line nothing else is on"
-            );
-            assert!(
-                pad.as_f32() >= 0.,
-                "negative padding is not padding, and taffy would swallow it"
-            );
-            assert_eq!(
-                title_strip_content_centre(rule),
-                title_strip_centre(),
-                "a rule of {} leaves the box short by {} of border and {} of padding",
-                rule.as_f32(),
-                border.as_f32(),
-                pad.as_f32()
-            );
-        }
     }
 
     #[test]
@@ -9730,59 +9506,6 @@ mod tests {
         tab.remember_focus_origin(id(1), id(2), Dir::Right, &[id(1), id(2)]);
         assert_eq!(tab.focus_origin(id(2), Dir::Right), None);
         assert_eq!(tab.focus_origin(id(2), Dir::Left), Some(id(1)));
-    }
-
-    /// #679: the band now starts at the frame padding rather than at the
-    /// window's corner, and off Linux CSD there is no padding to start at —
-    /// `window_paddings` answers `Edges::all(0)` under server-side decorations,
-    /// which is what macOS, Windows and a bare X session all report.
-    #[test]
-    fn an_undecorated_frame_leaves_the_strips_drop_band_where_it_was() {
-        let band = strip_band(size(px(1200.), px(800.)), Edges::all(px(0.)));
-        assert_eq!(band.origin, point(px(0.), px(0.)));
-        assert_eq!(band.size, size(px(1200.), px(TITLE_BAR_HEIGHT)));
-    }
-
-    /// The viewport measures the whole surface, shadow included, so the band
-    /// has to lose one padding at each end — not one twice over, and not none.
-    /// Getting it wrong puts the outermost chips outside the band drawn to hold
-    /// them, and a drop on them reads as a drop on nothing.
-    #[test]
-    fn a_client_side_frame_pulls_the_drop_band_in_by_the_shadow_on_both_sides() {
-        let viewport = size(px(1200.), px(800.));
-        let pad = Edges::all(px(12.));
-        let band = strip_band(viewport, pad);
-
-        assert_eq!(band.origin, point(pad.left, pad.top));
-        assert_eq!(
-            band.origin.x + band.size.width,
-            viewport.width - pad.right,
-            "the band must reach the far edge of the frame, not of the surface"
-        );
-        assert_eq!(band.size.height, px(TITLE_BAR_HEIGHT));
-    }
-
-    /// Fullscreen takes the window buttons and nothing else: the strip keeps
-    /// its row, and the room reserved for the buttons at its end comes back.
-    /// macOS never had any to take.
-    #[test]
-    fn fullscreen_drops_the_window_buttons_but_not_their_row() {
-        assert!(!super::window_controls_drawn(true));
-        assert_eq!(super::window_controls_w(true), 0.);
-        assert_eq!(
-            super::window_controls_drawn(false),
-            !cfg!(target_os = "macos")
-        );
-        assert_eq!(super::window_controls_w(false), super::WINDOW_CONTROLS_W);
-    }
-
-    /// A surface narrower than its own shadow is only reachable mid-resize, but
-    /// a negative width would make `Bounds::contains` answer for a rectangle
-    /// that is inside out.
-    #[test]
-    fn a_drop_band_narrower_than_its_frame_collapses_instead_of_inverting() {
-        let band = strip_band(size(px(10.), px(800.)), Edges::all(px(12.)));
-        assert_eq!(band.size.width, px(0.));
     }
 
     /// Two panels that each cap themselves at half the window leave the
@@ -10009,7 +9732,7 @@ mod tests {
     }
 
     #[test]
-    fn mru_trails_never_activated_tabs_in_strip_order() {
+    fn mru_trails_never_activated_tabs_in_tab_order() {
         assert_eq!(mru_order(&[0, 6, 0, 0], 1), vec![1, 0, 2, 3]);
     }
 
@@ -10019,7 +9742,7 @@ mod tests {
     }
 
     #[test]
-    fn stepping_through_tabs_follows_the_strip_and_wraps() {
+    fn stepping_through_tabs_follows_display_order_and_wraps() {
         let order = [0, 1, 2];
         assert_eq!(step_in_order(&order, 0, true), Some(1));
         assert_eq!(step_in_order(&order, 2, true), Some(0));
@@ -11190,7 +10913,7 @@ mod rename_gpui_tests {
         });
     }
     #[gpui::test]
-    fn a_rename_rides_out_other_tabs_closing_and_the_strip_reordering(cx: &mut TestAppContext) {
+    fn a_rename_rides_out_other_tabs_closing_and_reordering(cx: &mut TestAppContext) {
         let (app, mut vcx, _streams) = harness_with_tabs(cx, 3);
 
         app.update_in(&mut vcx, |app, window, cx| {
@@ -11986,7 +11709,7 @@ mod tab_focus_memory_tests {
     /// The mechanism behind the report: `remember_active_pane`'s sample asks
     /// which leaf holds focus *at that instant*, and a switch begun with focus
     /// one handle away — the switcher's own search input, the switcher closing,
-    /// the tab strip — finds no leaf and has nothing to write. This is why the
+    /// the sidebar — finds no leaf and has nothing to write. This is why the
     /// sample cannot be the only writer, and it is pinned here so that a change
     /// making `focused_leaf` tolerant would have to argue with a test rather
     /// than silently make this fix look unnecessary.
@@ -12182,7 +11905,7 @@ mod tab_focus_memory_tests {
         vcx.background_executor.run_until_parked();
 
         // Focus then leaves the panes altogether — the switcher closing, the tab
-        // strip, the switcher's own search input — before the tab is left.
+        // sidebar, the switcher's own search input — before the tab is left.
         app.update_in(&mut vcx, |_, window, cx| elsewhere.focus(window, cx));
         vcx.background_executor.run_until_parked();
 
@@ -12285,7 +12008,7 @@ mod tab_focus_memory_tests {
         });
     }
 
-    /// Zooming with focus off the panes — the switcher just closed, the tab strip
+    /// Zooming with focus off the panes — the switcher just closed, the sidebar
     /// clicked — zooms the pane the tab remembers, not whichever leaf happens
     /// to be first: the same pane switching back to the tab would focus.
     #[gpui::test]

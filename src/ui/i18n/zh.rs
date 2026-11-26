@@ -234,6 +234,8 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsAutoHideTitlebarButtonsDesc => {
             "新标签页、侧栏开关等按钮平时隐藏，鼠标移到标题栏上才出现。"
         }
+        L10nKey::SettingsShowContentTitle => "显示内容区标题",
+        L10nKey::SettingsShowContentTitleDesc => "在内容区顶部显示当前标签页的标题。",
         L10nKey::SettingsOpenThemesFolder => "打开主题文件夹",
         L10nKey::SettingsChangeThemeImage => "更改…",
         L10nKey::SettingsChooseThemeImage => "选择…",
@@ -405,8 +407,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::ConfirmCloseNever => "从不",
         L10nKey::ConfirmCloseWhenBusy => "有程序在运行时",
         L10nKey::ConfirmCloseAlways => "总是",
-        L10nKey::SettingsTabBarPosition => "标签栏位置",
-        L10nKey::SettingsTabBarPositionDesc => "将标签页显示为顶部横向条或左侧垂直侧栏。",
         L10nKey::SettingsSidebarGrouping => "自动分组",
         L10nKey::SettingsSidebarGroupingDesc => {
             "未固定的标签页按 git 仓库分组，SSH 标签页按主机分组。"
@@ -426,8 +426,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsStartupFullscreen => "全屏",
         L10nKey::SettingsAfterCurrent => "当前之后",
         L10nKey::SettingsAtEnd => "末尾",
-        L10nKey::SettingsTop => "顶部",
-        L10nKey::SettingsLeft => "左侧",
         L10nKey::SettingsPrefix => "前缀",
         L10nKey::SettingsKeybindingsIntroDesc => {
             "点击快捷键后按新按键，连按可组成序列（如 Ctrl-B X）。Esc 取消，Backspace 清除。"
@@ -617,6 +615,9 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSearchAutoHideTitlebarButtonsKeywords => {
             "自动隐藏 标题栏 按钮 悬停 鼠标 简洁 新标签页 侧栏 auto hide title bar buttons hover"
         }
+        L10nKey::SettingsSearchShowContentTitleKeywords => {
+            "内容区 标题 顶栏 标签页 显示 隐藏 content title bar tab show hide"
+        }
         L10nKey::SettingsSearchFocusFollowsMouseKeywords => {
             "焦点跟随鼠标 悬停 激活 窗格 focus follows mouse hover activate pane"
         }
@@ -764,9 +765,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSearchLegiblePaletteKeywords => {
             "颜色 低对比度 可读 纠偏 调色板 修正 contrast legible palette parameter"
-        }
-        L10nKey::SettingsSearchTabBarPositionKeywords => {
-            "标签栏位置 标签栏 侧边栏 左侧 顶部 布局 tab bar position tabs sidebar left top"
         }
         L10nKey::SettingsSearchTerminalBellKeywords => {
             "终端铃声 铃声 提示音 闪烁 静音 两者 同时 beep bell terminal audible visual both"
@@ -1036,8 +1034,8 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::CmdSwapPanePrevious => "与上一窗格交换",
         L10nKey::CmdNextTab => "下一标签页",
         L10nKey::CmdPreviousTab => "上一标签页",
-        L10nKey::CmdMoveTabLeft => "标签页左移",
-        L10nKey::CmdMoveTabRight => "标签页右移",
+        L10nKey::CmdMoveTabUp => "标签页上移",
+        L10nKey::CmdMoveTabDown => "标签页下移",
         L10nKey::CmdRecentTabSwitcher => "最近标签页切换器",
         L10nKey::CmdRecentTabSwitcherReverse => "最近标签页切换器（反向）",
         L10nKey::CmdCopyWorkingDirectory => "复制工作目录",
@@ -1056,7 +1054,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::CmdClosePaneTab => "关闭窗格/标签页",
         L10nKey::CmdCloseWindow => "关闭窗口",
         L10nKey::CmdCloseOtherTabs => "关闭其他标签页",
-        L10nKey::CmdCloseTabsToTheRight => "关闭右侧标签页",
+        L10nKey::CmdCloseTabsBelow => "关闭下方标签页",
         L10nKey::CmdReopenClosedTab => "重新打开已关闭标签页",
         L10nKey::CmdNewWorkspace => "新建工作区…",
         L10nKey::CmdSwitchWorkspace => "切换工作区…",
@@ -1277,7 +1275,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppMenuSaveAgentLaunchArgs => "将当前启动参数设为默认",
         L10nKey::AppMenuClosePaneTab => "关闭",
         L10nKey::AppMenuCloseOtherTabs => "关闭其他标签页",
-        L10nKey::AppMenuCloseTabsRight => "关闭右侧标签页",
+        L10nKey::AppMenuCloseTabsBelow => "关闭下方标签页",
         L10nKey::AppMenuReopenClosedTab => "重新打开已关闭的标签页",
         L10nKey::AppMenuRenameWorkspace => "重命名工作区…",
         L10nKey::AppMenuStopWorkspace => "停止工作区…",
@@ -1296,7 +1294,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppMenuResetFontSize => "重置字号",
         L10nKey::AppMenuLeftSidebar => "左侧边栏",
         L10nKey::AppMenuRightPanel => "右侧面板",
-        L10nKey::AppMenuTabBarPosition => "标签栏位置",
         L10nKey::AppMenuFocusNextPane => "聚焦下一个窗格",
         L10nKey::AppMenuFocusPreviousPane => "聚焦上一个窗格",
         L10nKey::AppMenuZoomPane => "缩放窗格",
@@ -1346,7 +1343,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SidebarDropToPin => "拖到此处固定",
         L10nKey::TabContextCloseTab => "关闭标签页",
         L10nKey::TerminalContextClear => "清屏",
-        L10nKey::TabContextCloseTabsBelow => "关闭下方标签页",
         L10nKey::Search => "搜索",
         L10nKey::TabContextMarkUnread => "标记为未读",
         L10nKey::TabContextHibernate => "休眠",
